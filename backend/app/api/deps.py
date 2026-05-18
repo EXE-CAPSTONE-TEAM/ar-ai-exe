@@ -1,10 +1,12 @@
 from typing import Annotated
 
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.security import decode_access_token
 from app.db.database import get_db
 from app.models import User
 from app.services.users import UserService
@@ -21,13 +23,28 @@ def get_current_user(
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing bearer token. Use /api/auth/demo-login for local demo access.",
+            detail="Missing bearer token.",
         )
 
-    if credentials.credentials != settings.demo_access_token:
+    if settings.enable_demo_auth and credentials.credentials == settings.demo_access_token:
+        return UserService(db).get_or_create_demo_user()
+
+    try:
+        payload = decode_access_token(credentials.credentials)
+    except jwt.PyJWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid or expired access token.",
+        ) from exc
+
+    user_id = payload.get("sub")
+    if not isinstance(user_id, str):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid access token subject.",
         )
 
-    return UserService(db).get_or_create_demo_user()
+    user = UserService(db).get_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found.")
+    return user

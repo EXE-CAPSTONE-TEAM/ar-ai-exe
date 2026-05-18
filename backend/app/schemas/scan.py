@@ -51,6 +51,7 @@ class ScanSessionResponse(CamelModel):
     status: str
     error_message: str | None = Field(default=None, alias="errorMessage")
     model_asset_id: str | None = Field(default=None, alias="modelAssetId")
+    web_design_url: str | None = Field(default=None, alias="webDesignUrl")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
 
@@ -58,3 +59,4 @@ class ScanSessionResponse(CamelModel):
 class ScanUploadResponse(CamelModel):
     scan_session: ScanSessionResponse = Field(alias="scanSession")
     processing_started: bool = Field(alias="processingStarted")
+    web_design_url: str = Field(alias="webDesignUrl")

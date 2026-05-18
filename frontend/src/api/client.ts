@@ -43,15 +43,49 @@ function authHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+function storeToken(accessToken: string): void {
+  localStorage.setItem(TOKEN_STORAGE_KEY, accessToken);
+}
+
 export const api = {
   baseUrl: API_BASE_URL,
+
+  hasToken(): boolean {
+    return Boolean(localStorage.getItem(TOKEN_STORAGE_KEY));
+  },
+
+  logout(): void {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+  },
+
+  async register(name: string, email: string, password: string): Promise<User> {
+    const payload = await request<{ accessToken: string; user: User }>("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ name, email, password }),
+    });
+    storeToken(payload.accessToken);
+    return payload.user;
+  },
+
+  async login(email: string, password: string): Promise<User> {
+    const payload = await request<{ accessToken: string; user: User }>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+    storeToken(payload.accessToken);
+    return payload.user;
+  },
 
   async demoLogin(): Promise<User> {
     const payload = await request<{ accessToken: string; user: User }>("/api/auth/demo-login", {
       method: "POST",
     });
-    localStorage.setItem(TOKEN_STORAGE_KEY, payload.accessToken);
+    storeToken(payload.accessToken);
     return payload.user;
+  },
+
+  async me(): Promise<User> {
+    return request<User>("/api/auth/me");
   },
 
   async getScanSession(scanSessionId: string): Promise<ScanSession> {

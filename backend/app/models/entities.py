@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -41,7 +41,9 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(32), default="demo_user")
     name: Mapped[str] = mapped_column(String(120))
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow)
 
     scan_sessions: Mapped[list["ScanSession"]] = relationship(back_populates="user")
     designs: Mapped[list["Design"]] = relationship(back_populates="user")
@@ -55,6 +57,13 @@ class ScanSession(Base):
     status: Mapped[str] = mapped_column(String(32), default=ScanStatus.CREATED, index=True)
     raw_video_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    web_design_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_video_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    raw_video_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    raw_video_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    metadata_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metadata_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    metadata_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -81,6 +90,21 @@ class ModelAsset(Base):
     mtl_path: Mapped[str] = mapped_column(Text)
     texture_path: Mapped[str] = mapped_column(Text)
     quality_report_path: Mapped[str] = mapped_column(Text)
+    glb_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    glb_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    glb_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    obj_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    obj_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    obj_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    mtl_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mtl_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    mtl_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    texture_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    texture_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    texture_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    quality_report_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    quality_report_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    quality_report_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     scan_session: Mapped[ScanSession] = relationship(back_populates="model_asset")
@@ -117,6 +141,9 @@ class ExportPackage(Base):
     preview_images_path: Mapped[str] = mapped_column(Text)
     production_notes_path: Mapped[str] = mapped_column(Text)
     zip_path: Mapped[str] = mapped_column(Text)
+    zip_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    zip_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    zip_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     design: Mapped[Design] = relationship(back_populates="export_packages")

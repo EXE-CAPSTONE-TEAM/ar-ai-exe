@@ -1,19 +1,19 @@
+import json
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
 from app.models import Design, DesignStatus, ModelAsset, User
 from app.schemas.design import DesignConfig, DesignResponse
-from app.services.file_helpers import read_json, write_json
+from app.services.storage import get_storage_service
 
 
 class DesignService:
     def __init__(self, db: Session):
         self.db = db
-        self.settings = get_settings()
+        self.storage = get_storage_service()
 
     def create(
         self,
@@ -41,9 +41,12 @@ class DesignService:
         self.db.add(design)
         self.db.flush()
 
-        config_path = self._design_folder(design.id) / "design_config.json"
-        write_json(config_path, config_payload)
-        design.design_config_path = str(config_path)
+        config_object = self.storage.put_bytes(
+            self._design_config_key(design.id),
+            json.dumps(config_payload, indent=2).encode("utf-8"),
+            "application/json",
+        )
+        design.design_config_path = config_object.key
 
         self.db.commit()
         self.db.refresh(design)
@@ -64,7 +67,11 @@ class DesignService:
         if name is not None:
             design.name = name
         if config is not None:
-            write_json(Path(design.design_config_path), config.model_dump(by_alias=True))
+            self.storage.put_bytes(
+                design.design_config_path,
+                json.dumps(config.model_dump(by_alias=True), indent=2).encode("utf-8"),
+                "application/json",
+            )
         self.db.commit()
         self.db.refresh(design)
         return design
@@ -82,7 +89,10 @@ class DesignService:
         )
 
     def read_config(self, design: Design) -> dict[str, Any]:
-        return read_json(Path(design.design_config_path))
+        if self.storage.exists(design.design_config_path):
+            return json.loads(self.storage.get_bytes(design.design_config_path).decode("utf-8"))
+        path = Path(design.design_config_path)
+        return json.loads(path.read_text(encoding="utf-8"))
 
-    def _design_folder(self, design_id: str) -> Path:
-        return self.settings.resolved_storage_root / "designs" / design_id
+    def _design_config_key(self, design_id: str) -> str:
+        return f"designs/{design_id}/design_config.json"

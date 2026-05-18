@@ -33,7 +33,6 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
 
   Future<void> _upload() async {
     try {
-      await _api.demoLogin();
       final scanSessionId = await _api.createScanSession();
       final result = await _api.uploadScan(
         scanSessionId: scanSessionId,
@@ -57,6 +56,7 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
             scanSessionId: result.scanSessionId,
             status: result.status,
             processingStarted: result.processingStarted,
+            webDesignUrl: result.webDesignUrl,
           ),
         ),
       );

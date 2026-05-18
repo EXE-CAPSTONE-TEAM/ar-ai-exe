@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from fastapi import HTTPException, status
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models import ModelAsset, ScanSession, ScanStatus, User
 from app.schemas.scan import ScanMetadata
-from app.services.file_helpers import write_json
+from app.services.storage import get_storage_service
 
 
 class ScanSessionService:
@@ -17,16 +18,25 @@ class ScanSessionService:
     def __init__(self, db: Session):
         self.db = db
         self.settings = get_settings()
+        self.storage = get_storage_service()
 
     def create(self, user: User, metadata: ScanMetadata | None = None) -> ScanSession:
         scan_session = ScanSession(user_id=user.id)
+        scan_session.web_design_url = self.web_design_url(scan_session.id)
         self.db.add(scan_session)
         self.db.flush()
+        scan_session.web_design_url = self.web_design_url(scan_session.id)
 
         if metadata:
-            metadata_path = self._scan_folder(scan_session.id) / "metadata.json"
-            write_json(metadata_path, metadata.model_dump(by_alias=True))
-            scan_session.metadata_path = str(metadata_path)
+            metadata_object = self.storage.put_bytes(
+                self._metadata_key(scan_session.id),
+                json.dumps(metadata.model_dump(by_alias=True), indent=2).encode("utf-8"),
+                "application/json",
+            )
+            scan_session.metadata_path = metadata_object.key
+            scan_session.metadata_size_bytes = metadata_object.size_bytes
+            scan_session.metadata_content_type = metadata_object.content_type
+            scan_session.metadata_checksum = metadata_object.checksum
 
         self.db.commit()
         self.db.refresh(scan_session)
@@ -52,16 +62,26 @@ class ScanSessionService:
     ) -> ScanSession:
         self._validate_video(file_name, content_type, video_bytes)
 
-        scan_folder = self._scan_folder(scan_session.id)
-        video_path = scan_folder / "raw_video.mp4"
-        metadata_path = scan_folder / "metadata.json"
+        video_object = self.storage.put_bytes(
+            self._raw_video_key(scan_session.id),
+            video_bytes,
+            content_type or "video/mp4",
+        )
+        metadata_object = self.storage.put_bytes(
+            self._metadata_key(scan_session.id),
+            json.dumps(metadata.model_dump(by_alias=True), indent=2).encode("utf-8"),
+            "application/json",
+        )
 
-        scan_folder.mkdir(parents=True, exist_ok=True)
-        video_path.write_bytes(video_bytes)
-        write_json(metadata_path, metadata.model_dump(by_alias=True))
-
-        scan_session.raw_video_path = str(video_path)
-        scan_session.metadata_path = str(metadata_path)
+        scan_session.raw_video_path = video_object.key
+        scan_session.raw_video_size_bytes = video_object.size_bytes
+        scan_session.raw_video_content_type = video_object.content_type
+        scan_session.raw_video_checksum = video_object.checksum
+        scan_session.metadata_path = metadata_object.key
+        scan_session.metadata_size_bytes = metadata_object.size_bytes
+        scan_session.metadata_content_type = metadata_object.content_type
+        scan_session.metadata_checksum = metadata_object.checksum
+        scan_session.web_design_url = self.web_design_url(scan_session.id)
         scan_session.status = ScanStatus.UPLOADED
         scan_session.error_message = None
         self.db.commit()
@@ -83,8 +103,14 @@ class ScanSessionService:
         self.db.refresh(scan_session)
         return scan_session
 
-    def _scan_folder(self, scan_session_id: str) -> Path:
-        return self.settings.resolved_storage_root / "raw-scans" / scan_session_id
+    def web_design_url(self, scan_session_id: str) -> str:
+        return f"{self.settings.web_app_base_url.rstrip('/')}/design?scanId={scan_session_id}"
+
+    def _raw_video_key(self, scan_session_id: str) -> str:
+        return f"raw-scans/{scan_session_id}/raw_video.mp4"
+
+    def _metadata_key(self, scan_session_id: str) -> str:
+        return f"raw-scans/{scan_session_id}/metadata.json"
 
     def _validate_video(
         self,

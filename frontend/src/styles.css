@@ -293,3 +293,31 @@ dd {
     min-height: 430px;
   }
 }
+
+.auth-panel {
+  display: grid;
+  min-height: calc(100vh - 136px);
+  place-items: center;
+}
+
+.auth-form {
+  display: grid;
+  gap: 14px;
+  width: min(100%, 420px);
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  padding: 20px;
+  background: #ffffff;
+}
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.auth-tabs button.active {
+  color: #ffffff;
+  border-color: #1f6f8b;
+  background: #1f6f8b;
+}

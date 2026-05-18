@@ -4,6 +4,7 @@ export type User = {
   name: string;
   email: string;
   createdAt: string;
+  updatedAt?: string | null;
 };
 
 export type ScanSession = {
@@ -12,6 +13,7 @@ export type ScanSession = {
   status: string;
   errorMessage: string | null;
   modelAssetId: string | null;
+  webDesignUrl: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -34,6 +36,7 @@ export type ModelAsset = {
   qualityReportUrl: string;
   qualityReport: Record<string, unknown>;
   createdAt: string;
+  updatedAt?: string | null;
 };
 
 export type MaterialConfig = {
@@ -86,4 +89,5 @@ export type ExportPackage = {
   downloadUrl: string;
   files: string[];
   createdAt: string;
+  updatedAt?: string | null;
 };

@@ -23,8 +23,20 @@ class Settings(BaseSettings):
     ]
 
     storage_root: Path = Path("storage")
+    storage_backend: str = "local"
+    storage_public_base_url: str = ""
+    s3_endpoint_url: str = ""
+    s3_region_name: str = "auto"
+    s3_bucket_name: str = ""
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
     database_url: str = "sqlite:///./storage/app.db"
     database_auto_create_tables: bool = True
+    web_app_base_url: str = "http://localhost:5173"
+    jwt_secret_key: str = "local-dev-jwt-secret-change-me-32bytes-min"
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_minutes: int = 1440
+    enable_demo_auth: bool = True
     demo_access_token: str = "local-demo-token-change-me"
     demo_user_email: str = "demo@shoe-customizer.local"
     max_upload_size_mb: int = 250

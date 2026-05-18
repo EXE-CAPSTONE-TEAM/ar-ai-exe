@@ -1,18 +1,25 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import APIRouter, Depends, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.db.database import get_db
 from app.models import User
 from app.schemas.model_asset import ModelAssetResponse
-from app.services.file_helpers import read_json
 from app.services.model_assets import ModelAssetService
 
 
 router = APIRouter(prefix="/models", tags=["models"])
+
+
+CONTENT_TYPE_BY_FILE_TYPE = {
+    "glb": "model/gltf-binary",
+    "obj": "text/plain",
+    "mtl": "text/plain",
+    "texture": "image/png",
+}
 
 
 @router.get("/{model_asset_id}", response_model=ModelAssetResponse)
@@ -31,11 +38,17 @@ def download_model_file(
     file_type: str,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
-) -> FileResponse:
+) -> Response:
     service = ModelAssetService(db)
     asset = service.get_for_user(model_asset_id, current_user)
-    path = service.file_path(asset, file_type)
-    return FileResponse(path=path, filename=path.name)
+    payload = service.file_bytes(asset, file_type)
+    media_type = CONTENT_TYPE_BY_FILE_TYPE.get(file_type, "application/octet-stream")
+    filename = f"shoe_base.{file_type if file_type != 'texture' else 'png'}"
+    return Response(
+        content=payload,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{model_asset_id}/quality-report")
@@ -46,5 +59,4 @@ def get_quality_report(
 ) -> JSONResponse:
     service = ModelAssetService(db)
     asset = service.get_for_user(model_asset_id, current_user)
-    path = service.file_path(asset, "quality-report")
-    return JSONResponse(content=read_json(path))
+    return JSONResponse(content=service.response(asset).quality_report)

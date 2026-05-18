@@ -1,3 +1,4 @@
+import json
 import shutil
 import zipfile
 from pathlib import Path
@@ -8,14 +9,17 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models import Design, DesignStatus, ExportPackage, ModelAsset, User
 from app.schemas.export import ExportPackageResponse
-from app.services.file_helpers import read_json, write_json
+from app.services.designs import DesignService
+from app.services.model_assets import ModelAssetService
 from app.services.reconstruction import PLACEHOLDER_PNG
+from app.services.storage import get_storage_service
 
 
 class ExportPackageService:
     def __init__(self, db: Session):
         self.db = db
         self.settings = get_settings()
+        self.storage = get_storage_service()
 
     def create(self, design: Design) -> ExportPackage:
         asset = self.db.get(ModelAsset, design.model_asset_id)
@@ -36,6 +40,8 @@ class ExportPackageService:
         self.db.flush()
 
         export_dir = self._export_folder(export_package.id)
+        if export_dir.exists():
+            shutil.rmtree(export_dir)
         export_dir.mkdir(parents=True, exist_ok=True)
 
         glb_path = export_dir / "final_shoe.glb"
@@ -47,11 +53,16 @@ class ExportPackageService:
         production_notes_path = export_dir / "production_notes.json"
         preview_dir = export_dir
 
-        shutil.copyfile(asset.glb_path, glb_path)
-        shutil.copyfile(asset.obj_path, obj_path)
-        shutil.copyfile(asset.mtl_path, mtl_path)
-        shutil.copyfile(asset.texture_path, texture_path)
-        shutil.copyfile(design.design_config_path, design_config_path)
+        model_service = ModelAssetService(self.db)
+        design_service = DesignService(self.db)
+        glb_path.write_bytes(model_service.file_bytes(asset, "glb"))
+        obj_path.write_bytes(model_service.file_bytes(asset, "obj"))
+        mtl_path.write_bytes(model_service.file_bytes(asset, "mtl"))
+        texture_path.write_bytes(model_service.file_bytes(asset, "texture"))
+        design_config_path.write_text(
+            json.dumps(design_service.read_config(design), indent=2),
+            encoding="utf-8",
+        )
         self._write_measurements(asset, measurement_info_path)
         self._write_previews(preview_dir)
         self._write_production_notes(design, production_notes_path)
@@ -59,13 +70,47 @@ class ExportPackageService:
         zip_path = export_dir / f"{export_package.id}.zip"
         self._zip_export(export_dir, zip_path)
 
-        export_package.glb_path = str(glb_path)
-        export_package.obj_path = str(obj_path)
-        export_package.mtl_path = str(mtl_path)
-        export_package.texture_path = str(texture_path)
-        export_package.preview_images_path = str(preview_dir)
-        export_package.production_notes_path = str(production_notes_path)
-        export_package.zip_path = str(zip_path)
+        glb_object = self.storage.put_bytes(
+            f"exports/{export_package.id}/final_shoe.glb",
+            glb_path.read_bytes(),
+            "model/gltf-binary",
+        )
+        obj_object = self.storage.put_bytes(
+            f"exports/{export_package.id}/final_shoe.obj",
+            obj_path.read_bytes(),
+            "text/plain",
+        )
+        mtl_object = self.storage.put_bytes(
+            f"exports/{export_package.id}/final_shoe.mtl",
+            mtl_path.read_bytes(),
+            "text/plain",
+        )
+        texture_object = self.storage.put_bytes(
+            f"exports/{export_package.id}/final_texture.png",
+            texture_path.read_bytes(),
+            "image/png",
+        )
+        notes_object = self.storage.put_bytes(
+            f"exports/{export_package.id}/production_notes.json",
+            production_notes_path.read_bytes(),
+            "application/json",
+        )
+        zip_object = self.storage.put_bytes(
+            f"exports/{export_package.id}/{export_package.id}.zip",
+            zip_path.read_bytes(),
+            "application/zip",
+        )
+
+        export_package.glb_path = glb_object.key
+        export_package.obj_path = obj_object.key
+        export_package.mtl_path = mtl_object.key
+        export_package.texture_path = texture_object.key
+        export_package.preview_images_path = f"exports/{export_package.id}/"
+        export_package.production_notes_path = notes_object.key
+        export_package.zip_path = zip_object.key
+        export_package.zip_size_bytes = zip_object.size_bytes
+        export_package.zip_content_type = zip_object.content_type
+        export_package.zip_checksum = zip_object.checksum
         design.status = DesignStatus.EXPORTED
 
         self.db.commit()
@@ -112,13 +157,26 @@ class ExportPackageService:
             createdAt=export_package.created_at,
         )
 
+    def zip_bytes(self, export_package: ExportPackage) -> bytes:
+        if self.storage.exists(export_package.zip_path):
+            return self.storage.get_bytes(export_package.zip_path)
+        return Path(export_package.zip_path).read_bytes()
+
     def _export_folder(self, export_id: str) -> Path:
         return self.settings.resolved_storage_root / "exports" / export_id
 
+    def _read_scan_metadata(self, asset: ModelAsset) -> dict:
+        metadata_key = asset.scan_session.metadata_path or ""
+        if metadata_key and self.storage.exists(metadata_key):
+            return json.loads(self.storage.get_bytes(metadata_key).decode("utf-8"))
+        metadata_path = Path(metadata_key)
+        if metadata_path.exists():
+            return json.loads(metadata_path.read_text(encoding="utf-8"))
+        return {}
+
     def _write_measurements(self, asset: ModelAsset, path: Path) -> None:
-        metadata_path = Path(asset.scan_session.metadata_path or "")
-        metadata = read_json(metadata_path) if metadata_path.exists() else {}
-        write_json(
+        metadata = self._read_scan_metadata(asset)
+        self._write_json(
             path,
             {
                 "shoe": metadata.get("shoe", {}),
@@ -130,15 +188,20 @@ class ExportPackageService:
     def _write_previews(self, preview_dir: Path) -> None:
         preview_dir.mkdir(parents=True, exist_ok=True)
         for name in ["front", "side", "top", "back"]:
-            (preview_dir / f"preview_{name}.png").write_bytes(PLACEHOLDER_PNG)
+            preview_path = preview_dir / f"preview_{name}.png"
+            preview_path.write_bytes(PLACEHOLDER_PNG)
+            self.storage.put_bytes(
+                f"exports/{preview_dir.name}/preview_{name}.png",
+                PLACEHOLDER_PNG,
+                "image/png",
+            )
 
     def _write_production_notes(self, design: Design, path: Path) -> None:
-        metadata_path = Path(design.model_asset.scan_session.metadata_path or "")
-        metadata = read_json(metadata_path) if metadata_path.exists() else {}
-        design_config = read_json(Path(design.design_config_path))
+        metadata = self._read_scan_metadata(design.model_asset)
+        design_config = DesignService(self.db).read_config(design)
         shoe = metadata.get("shoe", {})
         measurements = metadata.get("measurements", {})
-        write_json(
+        self._write_json(
             path,
             {
                 "orderType": "visual_design_package",
@@ -174,6 +237,10 @@ class ExportPackageService:
             f"Shoe design with base color {design_config.get('baseColor', '#ffffff')}, "
             f"{sticker_count} sticker decal(s), and {text_count} text decal(s)."
         )
+
+    def _write_json(self, path: Path, payload: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def _zip_export(self, export_dir: Path, zip_path: Path) -> None:
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:

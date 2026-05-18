@@ -10,3 +10,7 @@ The system is intentionally split into three apps:
 - `docs/`: Architecture, API contract, scan guidelines, and demo notes.
 
 Phase 0 currently establishes the backend foundation and repository structure.
+
+## Deployment
+
+See `docs/vps-android-deployment.md` for Android device usage, Docker Compose VPS deployment, and firewall/networking rules.

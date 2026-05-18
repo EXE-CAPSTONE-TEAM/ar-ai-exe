@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.core.config import get_settings
 from app.db.database import get_db
 from app.models import ScanSession, User
 from app.schemas.scan import (
@@ -25,6 +26,8 @@ router = APIRouter(prefix="/scan-sessions", tags=["scan-sessions"])
 def scan_response(scan_session: ScanSession, model_asset_id: str | None) -> ScanSessionResponse:
     payload = ScanSessionResponse.model_validate(scan_session).model_dump()
     payload["model_asset_id"] = model_asset_id
+    if not payload.get("web_design_url"):
+        payload["web_design_url"] = f"{get_settings().web_app_base_url.rstrip('/')}/design?scanId={scan_session.id}"
     return ScanSessionResponse.model_validate(payload)
 
 
@@ -61,6 +64,7 @@ async def upload_video(
     return ScanUploadResponse(
         scanSession=scan_response(saved_session, service.get_model_asset_id(saved_session.id)),
         processingStarted=True,
+        webDesignUrl=saved_session.web_design_url or service.web_design_url(saved_session.id),
     )
 
 

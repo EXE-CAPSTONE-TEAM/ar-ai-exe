@@ -119,3 +119,7 @@ mobile/android/app/release/
 *.tar
 *.tar.gz
 *.7z
+
+# Deployment secrets
+deploy/.env
+deploy/backend.env

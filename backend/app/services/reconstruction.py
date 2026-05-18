@@ -2,6 +2,7 @@ import base64
 import json
 import shutil
 import struct
+import tempfile
 from pathlib import Path
 
 from sqlalchemy import select
@@ -12,6 +13,7 @@ from app.models import ModelAsset, ScanSession, ScanStatus
 from app.services.command_runner import CommandRunner
 from app.services.file_helpers import write_json
 from app.services.scan_sessions import ScanSessionService
+from app.services.storage import get_storage_service
 
 
 PLACEHOLDER_PNG = base64.b64decode(
@@ -26,6 +28,7 @@ class ReconstructionService:
         self.settings = get_settings()
         self.runner = CommandRunner()
         self.scan_service = ScanSessionService(db)
+        self.storage = get_storage_service()
 
     def process(self, scan_session_id: str) -> ModelAsset:
         scan_session = self.db.get(ScanSession, scan_session_id)
@@ -47,7 +50,8 @@ class ReconstructionService:
         model_dir.mkdir(parents=True, exist_ok=True)
 
         self.scan_service.set_status(scan_session_id, ScanStatus.EXTRACTING_FRAMES)
-        frame_count = self._extract_frames(Path(scan_session.raw_video_path), frame_dir, model_dir)
+        source_video = self._local_source(scan_session.raw_video_path, suffix=".mp4")
+        frame_count = self._extract_frames(source_video, frame_dir, model_dir)
 
         self.scan_service.set_status(scan_session_id, ScanStatus.RECONSTRUCTING)
         self._write_pipeline_log(model_dir, "Using mock reconstruction output for MVP.")
@@ -69,13 +73,54 @@ class ReconstructionService:
         quality_report_path = model_dir / "quality_report.json"
         self._write_quality_report(quality_report_path, frame_count)
 
+        glb_object = self.storage.put_bytes(
+            f"models/{scan_session_id}/shoe_base.glb",
+            glb_path.read_bytes(),
+            "model/gltf-binary",
+        )
+        obj_object = self.storage.put_bytes(
+            f"models/{scan_session_id}/shoe_base.obj",
+            obj_path.read_bytes(),
+            "text/plain",
+        )
+        mtl_object = self.storage.put_bytes(
+            f"models/{scan_session_id}/shoe_base.mtl",
+            mtl_path.read_bytes(),
+            "text/plain",
+        )
+        texture_object = self.storage.put_bytes(
+            f"models/{scan_session_id}/base_texture.png",
+            texture_path.read_bytes(),
+            "image/png",
+        )
+        quality_object = self.storage.put_bytes(
+            f"models/{scan_session_id}/quality_report.json",
+            quality_report_path.read_bytes(),
+            "application/json",
+        )
+
         asset = ModelAsset(
             scan_session_id=scan_session_id,
-            glb_path=str(glb_path),
-            obj_path=str(obj_path),
-            mtl_path=str(mtl_path),
-            texture_path=str(texture_path),
-            quality_report_path=str(quality_report_path),
+            glb_path=glb_object.key,
+            glb_size_bytes=glb_object.size_bytes,
+            glb_content_type=glb_object.content_type,
+            glb_checksum=glb_object.checksum,
+            obj_path=obj_object.key,
+            obj_size_bytes=obj_object.size_bytes,
+            obj_content_type=obj_object.content_type,
+            obj_checksum=obj_object.checksum,
+            mtl_path=mtl_object.key,
+            mtl_size_bytes=mtl_object.size_bytes,
+            mtl_content_type=mtl_object.content_type,
+            mtl_checksum=mtl_object.checksum,
+            texture_path=texture_object.key,
+            texture_size_bytes=texture_object.size_bytes,
+            texture_content_type=texture_object.content_type,
+            texture_checksum=texture_object.checksum,
+            quality_report_path=quality_object.key,
+            quality_report_size_bytes=quality_object.size_bytes,
+            quality_report_content_type=quality_object.content_type,
+            quality_report_checksum=quality_object.checksum,
         )
         self.db.add(asset)
         self.db.commit()
@@ -83,6 +128,15 @@ class ReconstructionService:
 
         self.scan_service.set_status(scan_session_id, ScanStatus.COMPLETED)
         return asset
+
+    def _local_source(self, key: str, suffix: str) -> Path:
+        local_path = self.storage.local_path(key)
+        if local_path and local_path.exists():
+            return local_path
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        temp_file.write(self.storage.get_bytes(key))
+        temp_file.close()
+        return Path(temp_file.name)
 
     def _extract_frames(self, video_path: Path, frame_dir: Path, model_dir: Path) -> int:
         ffmpeg = shutil.which("ffmpeg")
