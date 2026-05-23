@@ -37,6 +37,7 @@ export function App() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [isAuthBusy, setIsAuthBusy] = useState(false);
+  const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
 
   useEffect(() => {
     void loadReadiness();
@@ -129,6 +130,7 @@ export function App() {
     setDesign(null);
     setConfig(null);
     setExportPackage(null);
+    setActiveLayerId(null);
     setStatusMessage("Signed out");
   }
 
@@ -171,6 +173,7 @@ export function App() {
     setDesign(null);
     setConfig(null);
     setExportPackage(null);
+    setActiveLayerId(null);
 
     try {
       const imported = await api.importModel(payload);
@@ -323,15 +326,23 @@ export function App() {
 
             <section className="main-grid">
               <MetadataPanel scanSession={scanSession} modelAsset={modelAsset} />
-              <ModelViewer modelUrl={modelUrl} config={config} />
+              <ModelViewer
+                modelUrl={modelUrl}
+                config={config}
+                activeLayerId={activeLayerId}
+                onConfigChange={setConfig}
+                onActiveLayerChange={setActiveLayerId}
+              />
               <EditorPanels
                 config={config}
                 modelAsset={modelAsset}
                 designName={designName}
                 isSaving={isSaving}
                 exportPackage={exportPackage}
+                activeLayerId={activeLayerId}
                 onNameChange={setDesignName}
                 onConfigChange={setConfig}
+                onActiveLayerChange={setActiveLayerId}
                 onSave={saveDesign}
                 onExport={exportDesign}
                 onDownload={downloadExport}

@@ -1,6 +1,6 @@
-import { Center, Grid, OrbitControls, Text, useGLTF } from "@react-three/drei";
-import { Canvas } from "@react-three/fiber";
-import { Suspense, useEffect, useMemo } from "react";
+import { Center, Grid, OrbitControls, useGLTF, Decal, useTexture } from "@react-three/drei";
+import { Canvas, ThreeEvent } from "@react-three/fiber";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
 import type { DesignConfig, StickerLayer, TextLayer } from "../../types";
@@ -9,9 +9,12 @@ import { ErrorBoundary } from "../Layout/ErrorBoundary";
 type ModelViewerProps = {
   modelUrl: string | null;
   config: DesignConfig | null;
+  activeLayerId: string | null;
+  onConfigChange: (config: DesignConfig) => void;
+  onActiveLayerChange: (id: string | null) => void;
 };
 
-export function ModelViewer({ modelUrl, config }: ModelViewerProps) {
+export function ModelViewer({ modelUrl, config, activeLayerId, onConfigChange, onActiveLayerChange }: ModelViewerProps) {
   return (
     <div className="viewer-surface">
       {modelUrl ? (
@@ -22,9 +25,13 @@ export function ModelViewer({ modelUrl, config }: ModelViewerProps) {
           <ErrorBoundary fallbackMessage="Failed to load 3D model. The file might be invalid or corrupted.">
             <Suspense fallback={null}>
               <Center>
-                <ShoeModel url={modelUrl} config={config} />
-                {config?.stickers.map((sticker) => <Sticker key={sticker.id} sticker={sticker} />)}
-                {config?.texts.map((textLayer) => <TextDecal key={textLayer.id} layer={textLayer} />)}
+                <ShoeModel
+                  url={modelUrl}
+                  config={config}
+                  activeLayerId={activeLayerId}
+                  onConfigChange={onConfigChange}
+                  onActiveLayerChange={onActiveLayerChange}
+                />
               </Center>
             </Suspense>
           </ErrorBoundary>
@@ -48,23 +55,37 @@ export function ModelViewer({ modelUrl, config }: ModelViewerProps) {
   );
 }
 
-function ShoeModel({ url, config }: { url: string; config: DesignConfig | null }) {
+type ShoeModelProps = {
+  url: string;
+  config: DesignConfig | null;
+  activeLayerId: string | null;
+  onConfigChange: (config: DesignConfig) => void;
+  onActiveLayerChange: (id: string | null) => void;
+};
+
+function ShoeModel({ url, config, activeLayerId, onConfigChange, onActiveLayerChange }: ShoeModelProps) {
   const gltf = useGLTF(url);
+  const groupRef = useRef<THREE.Group>(null);
+  const meshRef = useRef<THREE.Mesh | null>(null);
 
   const scale = useMemo(() => {
     if (!gltf.scene) return 1;
     const box = new THREE.Box3().setFromObject(gltf.scene);
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
-    // Target size is roughly 2.5 units to fit nicely in the 5x5 grid
     return maxDim > 0 ? 2.5 / maxDim : 1;
   }, [gltf.scene]);
 
   useEffect(() => {
+    let maxVerts = 0;
     gltf.scene.traverse((node) => {
       if (node instanceof THREE.Mesh) {
+        if (!meshRef.current || node.geometry.attributes.position.count > maxVerts) {
+          maxVerts = node.geometry.attributes.position.count;
+          meshRef.current = node;
+        }
+
         if (!node.userData.originalMaterial) {
-          // Clone the original material to preserve maps (diffuse, normal, etc.)
           if (Array.isArray(node.material)) {
             node.userData.originalMaterial = node.material.map((m: THREE.Material) => m.clone());
           } else if (node.material) {
@@ -96,31 +117,140 @@ function ShoeModel({ url, config }: { url: string; config: DesignConfig | null }
     });
   }, [config?.baseColor, config?.material.metallic, config?.material.roughness, gltf.scene]);
 
-  return <primitive object={gltf.scene} scale={scale} />;
-}
+  const [isDragging, setIsDragging] = useState(false);
 
-function Sticker({ sticker }: { sticker: StickerLayer }) {
+  const updateActiveLayer = (point: THREE.Vector3, normal: THREE.Vector3) => {
+    if (!config || !meshRef.current || !activeLayerId) return;
+
+    // The intersection point is in world space. We need it in the mesh's local space.
+    const localPoint = meshRef.current.worldToLocal(point.clone());
+    
+    // The normal is already in local space of the mesh geometry from the Raycaster.
+    const n = normal.clone();
+
+    const activeSticker = config.stickers.find((s) => s.id === activeLayerId);
+    const activeText = config.texts.find((t) => t.id === activeLayerId);
+    const activeLayer = activeSticker || activeText;
+    if (!activeLayer) return;
+
+    const dummy = new THREE.Object3D();
+    dummy.position.copy(localPoint);
+    dummy.lookAt(localPoint.clone().add(n));
+    
+    // Preserve the user's manual Z rotation if they just slide around
+    // If they change normal significantly, we want it to align with normal first.
+    // To prevent sudden twisting, we'll just use dummy.rotation and let the user correct Z via slider.
+    
+    const newPos: [number, number, number] = [localPoint.x, localPoint.y, localPoint.z];
+    const newRot: [number, number, number] = [dummy.rotation.x, dummy.rotation.y, dummy.rotation.z];
+
+    if (activeSticker) {
+      onConfigChange({
+        ...config,
+        stickers: config.stickers.map((s) =>
+          s.id === activeLayerId ? { ...s, position: newPos, rotation: newRot } : s
+        ),
+      });
+    } else if (activeText) {
+      onConfigChange({
+        ...config,
+        texts: config.texts.map((t) =>
+          t.id === activeLayerId ? { ...t, position: newPos, rotation: newRot } : t
+        ),
+      });
+    }
+  };
+
+  const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
+    if (activeLayerId && e.face?.normal) {
+      e.stopPropagation();
+      setIsDragging(true);
+      updateActiveLayer(e.point, e.face.normal);
+    }
+  };
+
+  const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
+    if (isDragging && activeLayerId && e.face?.normal) {
+      e.stopPropagation();
+      updateActiveLayer(e.point, e.face.normal);
+    }
+  };
+
+  const handlePointerUp = () => {
+    setIsDragging(false);
+  };
+
+  const handlePointerMissed = () => {
+    if (isDragging) setIsDragging(false);
+    else onActiveLayerChange(null);
+  };
+
   return (
-    <mesh position={sticker.position} rotation={sticker.rotation} scale={sticker.scale}>
-      <planeGeometry args={[1, 0.6]} />
-      <meshStandardMaterial color="#ef4444" side={THREE.DoubleSide} />
-    </mesh>
+    <group
+      ref={groupRef}
+      scale={scale}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerMissed={handlePointerMissed}
+    >
+      <primitive object={gltf.scene} />
+      
+      {/* Render decals as children of the main mesh via React portal-like behavior or just relying on Decal's mesh prop? 
+          Wait, Drei's <Decal> uses the parent mesh if no `mesh` prop is given. 
+          But here, the parent is <group>. So we MUST pass the mesh ref. 
+      */}
+      {meshRef.current && config?.stickers.map((sticker) => (
+        <StickerDecal key={sticker.id} sticker={sticker} meshRef={meshRef as React.RefObject<THREE.Mesh>} />
+      ))}
+      {meshRef.current && config?.texts.map((textLayer) => (
+        <TextDecal key={textLayer.id} layer={textLayer} meshRef={meshRef as React.RefObject<THREE.Mesh>} />
+      ))}
+    </group>
   );
 }
 
-function TextDecal({ layer }: { layer: TextLayer }) {
+function StickerDecal({ sticker, meshRef }: { sticker: StickerLayer; meshRef: React.RefObject<THREE.Mesh> }) {
+  const texture = useTexture(sticker.imageUrl);
+  
   return (
-    <Text
+    <Decal
+      mesh={meshRef}
+      position={sticker.position}
+      rotation={sticker.rotation}
+      scale={[sticker.scale, sticker.scale, sticker.scale]} // Z scale defines projection depth
+    >
+      <meshStandardMaterial
+        map={texture}
+        transparent
+        polygonOffset
+        polygonOffsetFactor={-1} // Prevents z-fighting
+      />
+    </Decal>
+  );
+}
+
+import { RenderTexture, Text as DreiText } from "@react-three/drei";
+
+function TextDecal({ layer, meshRef }: { layer: TextLayer; meshRef: React.RefObject<THREE.Mesh> }) {
+  return (
+    <Decal
+      mesh={meshRef}
       position={layer.position}
       rotation={layer.rotation}
-      scale={layer.scale}
-      color={layer.color}
-      anchorX="center"
-      anchorY="middle"
-      fontSize={1}
+      scale={[layer.scale * 2, layer.scale * 1.2, layer.scale]}
     >
-      {layer.value}
-    </Text>
+      <meshStandardMaterial transparent polygonOffset polygonOffsetFactor={-1}>
+        <RenderTexture attach="map" anisotropy={16}>
+          <color attach="background" args={["transparent"]} />
+          <Center>
+            <DreiText fontSize={1} color={layer.color}>
+              {layer.value}
+            </DreiText>
+          </Center>
+        </RenderTexture>
+      </meshStandardMaterial>
+    </Decal>
   );
 }
 

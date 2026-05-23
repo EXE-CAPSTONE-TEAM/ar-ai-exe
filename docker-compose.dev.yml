@@ -1,0 +1,51 @@
+# Development Docker Compose — lightweight setup for local review
+# Backend: Python + SQLite (no OpenMVS/COLMAP compilation needed)
+# Frontend: Vite dev server with hot reload
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up --build
+#
+# Access:
+#   Frontend  → http://localhost:5173
+#   Backend   → http://localhost:8000
+#   API Docs  → http://localhost:8000/docs
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    restart: unless-stopped
+    env_file:
+      - ./deploy/backend.dev.env
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+      - backend_storage:/app/storage
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE_URL: "http://localhost:8000"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+    ports:
+      - "5173:5173"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  backend_storage:

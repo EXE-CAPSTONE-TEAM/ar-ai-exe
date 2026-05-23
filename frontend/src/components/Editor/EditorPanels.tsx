@@ -8,8 +8,10 @@ type EditorPanelsProps = {
   designName: string;
   isSaving: boolean;
   exportPackage: ExportPackage | null;
+  activeLayerId: string | null;
   onNameChange: (name: string) => void;
   onConfigChange: (config: DesignConfig) => void;
+  onActiveLayerChange: (id: string | null) => void;
   onSave: () => void;
   onExport: () => void;
   onDownload: () => void;
@@ -22,8 +24,10 @@ export function EditorPanels({
   designName,
   isSaving,
   exportPackage,
+  activeLayerId,
   onNameChange,
   onConfigChange,
+  onActiveLayerChange,
   onSave,
   onExport,
   onDownload,
@@ -39,6 +43,22 @@ export function EditorPanels({
   }
 
   const update = (patch: Partial<DesignConfig>) => onConfigChange({ ...config, ...patch });
+
+  const activeSticker = config.stickers.find((s) => s.id === activeLayerId);
+  const activeText = config.texts.find((t) => t.id === activeLayerId);
+  const activeLayer = activeSticker || activeText;
+
+  function updateLayer(id: string, patch: any) {
+    if (activeSticker) {
+      update({
+        stickers: config!.stickers.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+      });
+    } else if (activeText) {
+      update({
+        texts: config!.texts.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+      });
+    }
+  }
 
   return (
     <aside className="editor-panel">
@@ -93,15 +113,25 @@ export function EditorPanels({
 
       <section className="panel-section">
         <h3>Layers</h3>
-        <div className="layer-list">
+        <div className="layer-list" onClick={(e) => {
+          if (e.target === e.currentTarget) onActiveLayerChange(null);
+        }}>
           {config.stickers.map((sticker) => (
-            <div className="layer-row" key={sticker.id}>
+            <div
+              className={`layer-row ${activeLayerId === sticker.id ? "active" : ""}`}
+              key={sticker.id}
+              onClick={() => onActiveLayerChange(sticker.id)}
+            >
               <span>{sticker.id}</span>
               <span>sticker</span>
             </div>
           ))}
           {config.texts.map((textLayer) => (
-            <div className="layer-row" key={textLayer.id}>
+            <div
+              className={`layer-row ${activeLayerId === textLayer.id ? "active" : ""}`}
+              key={textLayer.id}
+              onClick={() => onActiveLayerChange(textLayer.id)}
+            >
               <span>{textLayer.value}</span>
               <span>text</span>
             </div>
@@ -111,6 +141,47 @@ export function EditorPanels({
           ) : null}
         </div>
       </section>
+
+      {activeLayer && (
+        <section className="panel-section highlight">
+          <h3>Layer Properties</h3>
+          {activeText && (
+            <label>
+              Text
+              <input
+                value={activeText.value}
+                onChange={(e) => updateLayer(activeLayer.id, { value: e.target.value })}
+              />
+            </label>
+          )}
+          <label>
+            Scale
+            <input
+              type="range"
+              min="0.05"
+              max="2"
+              step="0.05"
+              value={activeLayer.scale}
+              onChange={(e) => updateLayer(activeLayer.id, { scale: Number(e.target.value) })}
+            />
+          </label>
+          <label>
+            Rotation
+            <input
+              type="range"
+              min="-3.14"
+              max="3.14"
+              step="0.05"
+              value={activeLayer.rotation[2]}
+              onChange={(e) => {
+                const rot = [...activeLayer.rotation];
+                rot[2] = Number(e.target.value);
+                updateLayer(activeLayer.id, { rotation: rot as [number, number, number] });
+              }}
+            />
+          </label>
+        </section>
+      )}
 
       <section className="panel-section">
         <button className="primary-button" type="button" disabled={isSaving} onClick={onSave}>
