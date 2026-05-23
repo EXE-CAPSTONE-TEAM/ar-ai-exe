@@ -11,7 +11,7 @@ from app.models import Design, DesignStatus, ExportPackage, ModelAsset, User
 from app.schemas.export import ExportPackageResponse
 from app.services.designs import DesignService
 from app.services.model_assets import ModelAssetService
-from app.services.reconstruction import PLACEHOLDER_PNG
+from app.services.placeholders import PLACEHOLDER_PNG
 from app.services.storage import get_storage_service
 
 

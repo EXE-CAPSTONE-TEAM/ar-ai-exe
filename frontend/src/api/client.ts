@@ -3,7 +3,9 @@ import type {
   DesignConfig,
   ExportPackage,
   ModelAsset,
+  ModelImportResponse,
   ReconstructionReadiness,
+  ScanMetadata,
   ScanSession,
   User,
 } from "../types";
@@ -108,6 +110,35 @@ export const api = {
     return request<ModelAsset>(`/api/models/${modelAssetId}`);
   },
 
+  async importModel(payload: ModelImportPayload): Promise<ModelImportResponse> {
+    const form = new FormData();
+    form.append("name", payload.name);
+    form.append("format", payload.format);
+    form.append("metadata", JSON.stringify(payload.metadata));
+    if (payload.model) {
+      form.append("model", payload.model);
+    }
+    if (payload.mtl) {
+      form.append("mtl", payload.mtl);
+    }
+    if (payload.texture) {
+      form.append("texture", payload.texture);
+    }
+    if (payload.package) {
+      form.append("package", payload.package);
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/models/import`, {
+      method: "POST",
+      headers: authHeader(),
+      body: form,
+    });
+    if (!response.ok) {
+      throw new ApiError(await errorMessage(response), response.status);
+    }
+    return response.json() as Promise<ModelImportResponse>;
+  },
+
   async fetchModelBlobUrl(modelAsset: ModelAsset): Promise<string> {
     const response = await fetch(`${API_BASE_URL}${modelAsset.glbUrl}`, {
       headers: authHeader(),
@@ -173,6 +204,16 @@ export const api = {
     anchor.click();
     URL.revokeObjectURL(url);
   },
+};
+
+export type ModelImportPayload = {
+  name: string;
+  format: "glb" | "obj";
+  metadata: ScanMetadata;
+  model?: File | null;
+  mtl?: File | null;
+  texture?: File | null;
+  package?: File | null;
 };
 
 export function designStorageKey(modelAssetId: string): string {

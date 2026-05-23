@@ -25,7 +25,7 @@ Use this only when your phone and laptop are on the same trusted Wi-Fi.
 
 ```text
 WEB_APP_BASE_URL=http://192.168.1.20:5173
-CORS_ORIGINS='["http://192.168.1.20:5173","http://localhost:5173","http://127.0.0.1:5173"]'
+CORS_ORIGINS=["http://192.168.1.20:5173","http://localhost:5173","http://127.0.0.1:5173"]
 ```
 
 3. Run backend on all local interfaces:
@@ -164,7 +164,7 @@ Required production edits:
 ```text
 ENVIRONMENT=production
 DEBUG=false
-CORS_ORIGINS='["https://your-domain.example.com"]'
+CORS_ORIGINS=["https://your-domain.example.com"]
 WEB_APP_BASE_URL=https://your-domain.example.com
 DATABASE_URL=postgresql://USER:PASSWORD@HOST-POOLER.neon.tech/neondb?sslmode=require&channel_binding=require
 DATABASE_AUTO_CREATE_TABLES=false

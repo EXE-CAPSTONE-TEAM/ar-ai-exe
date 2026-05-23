@@ -2,9 +2,11 @@ import { AlertTriangle, CheckCircle2, Cpu, HardDrive, LogIn, RefreshCw, Search, 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { api, ApiError, designStorageKey } from "./api/client";
+import type { ModelImportPayload } from "./api/client";
 import { EditorPanels } from "./components/Editor/EditorPanels";
 import { AppShell } from "./components/Layout/AppShell";
 import { MetadataPanel } from "./components/MetadataPanel/MetadataPanel";
+import { ModelImportPanel } from "./components/ModelImport/ModelImportPanel";
 import { ModelViewer } from "./components/ModelViewer/ModelViewer";
 import type {
   Design,
@@ -29,6 +31,7 @@ export function App() {
   const [readiness, setReadiness] = useState<ReconstructionReadiness | null>(null);
   const [statusMessage, setStatusMessage] = useState("Ready");
   const [isSaving, setIsSaving] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authName, setAuthName] = useState("");
   const [authEmail, setAuthEmail] = useState("");
@@ -143,9 +146,7 @@ export function App() {
       const loadedScan = await api.getScanSession(scanId.trim());
       setScanSession(loadedScan);
 
-      const url = new URL(window.location.href);
-      url.searchParams.set("scanId", loadedScan.id);
-      window.history.replaceState({}, "", url);
+      setScanIdInUrl(loadedScan.id);
 
       if (!loadedScan.modelAssetId) {
         setStatusMessage(`${scanStatusLabel(loadedScan.status)}. Waiting for model output.`);
@@ -159,6 +160,31 @@ export function App() {
       setStatusMessage("Model loaded");
     } catch (error) {
       setStatusMessage(messageFromError(error));
+    }
+  }
+
+  async function importModel(payload: ModelImportPayload) {
+    setIsImporting(true);
+    setStatusMessage("Importing model");
+    setModelAsset(null);
+    setModelUrl(null);
+    setDesign(null);
+    setConfig(null);
+    setExportPackage(null);
+
+    try {
+      const imported = await api.importModel(payload);
+      setScanId(imported.scanSession.id);
+      setScanSession(imported.scanSession);
+      setModelAsset(imported.modelAsset);
+      setScanIdInUrl(imported.scanSession.id);
+      setModelUrl(await api.fetchModelBlobUrl(imported.modelAsset));
+      await loadSavedDesign(imported.modelAsset.id);
+      setStatusMessage("Imported model loaded");
+    } catch (error) {
+      setStatusMessage(messageFromError(error));
+    } finally {
+      setIsImporting(false);
     }
   }
 
@@ -266,26 +292,29 @@ export function App() {
         ) : (
           <>
             <section className="toolbar-band">
-              <div className="scan-loader">
-                <label>
-                  Scan session ID
-                  <input
-                    value={scanId}
-                    onChange={(event) => setScanId(event.target.value)}
-                    placeholder="scan_..."
-                  />
-                </label>
-                <button type="button" disabled={!canLoad} onClick={loadScan}>
-                  <Search size={16} aria-hidden="true" />
-                  Load
-                </button>
-                <button type="button" disabled={!scanSession} onClick={loadScan}>
-                  <RefreshCw size={16} aria-hidden="true" />
-                  Refresh
-                </button>
-                <button type="button" onClick={logout}>
-                  Sign out
-                </button>
+              <div className="toolbar-stack">
+                <div className="scan-loader">
+                  <label>
+                    Scan session ID
+                    <input
+                      value={scanId}
+                      onChange={(event) => setScanId(event.target.value)}
+                      placeholder="scan_..."
+                    />
+                  </label>
+                  <button type="button" disabled={!canLoad} onClick={loadScan}>
+                    <Search size={16} aria-hidden="true" />
+                    Load
+                  </button>
+                  <button type="button" disabled={!scanSession} onClick={loadScan}>
+                    <RefreshCw size={16} aria-hidden="true" />
+                    Refresh
+                  </button>
+                  <button type="button" onClick={logout}>
+                    Sign out
+                  </button>
+                </div>
+                <ModelImportPanel isBusy={isImporting} onImport={importModel} />
               </div>
               <span className="status-line">{statusMessage}</span>
             </section>
@@ -473,6 +502,12 @@ function createDefaultConfig(modelAssetId: string): DesignConfig {
     stickers: [],
     texts: [],
   };
+}
+
+function setScanIdInUrl(scanSessionId: string) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("scanId", scanSessionId);
+  window.history.replaceState({}, "", url);
 }
 
 function scanStatusLabel(status: string): string {

@@ -11,6 +11,8 @@ export type ScanSession = {
   id: string;
   userId: string;
   status: string;
+  sourceType: "scan" | "import";
+  importName: string | null;
   errorMessage: string | null;
   modelAssetId: string | null;
   webDesignUrl: string | null;
@@ -23,9 +25,32 @@ export type ScanSession = {
 export type ScanStatus = {
   id: string;
   status: string;
+  sourceType: "scan" | "import";
+  importName: string | null;
   errorMessage: string | null;
   modelAssetId: string | null;
   updatedAt: string;
+};
+
+export type ScanMetadata = {
+  shoe: {
+    sizeSystem: "EU" | "US" | "UK" | "CM";
+    size: string;
+    side: "left" | "right" | "both";
+    type: "sneaker" | "running" | "boot" | "sandal" | "other";
+    material: "canvas" | "leather" | "synthetic" | "mesh" | "unknown";
+    condition: string;
+  };
+  measurements: {
+    lengthCm: number;
+    widthCm: number;
+  };
+  scanSetup: {
+    calibrationReference: string;
+    lighting: string;
+    background: string;
+  };
+  customizationGoal: string[];
 };
 
 export type ReconstructionToolStatus = {
@@ -69,6 +94,11 @@ export type ModelAsset = {
   qualityReport: Record<string, unknown>;
   createdAt: string;
   updatedAt?: string | null;
+};
+
+export type ModelImportResponse = {
+  scanSession: ScanSession;
+  modelAsset: ModelAsset;
 };
 
 export type MaterialConfig = {

@@ -17,7 +17,9 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -44,7 +46,9 @@ button:hover:not(:disabled) {
   border-color: #497ca8;
 }
 
-input {
+input,
+select,
+textarea {
   min-height: 40px;
   width: 100%;
   border: 1px solid #c7d2df;
@@ -60,6 +64,12 @@ input[type="color"] {
 
 input[type="range"] {
   padding: 0;
+}
+
+textarea {
+  min-height: 40px;
+  padding: 9px 10px;
+  resize: vertical;
 }
 
 label {
@@ -154,6 +164,12 @@ h3 {
   padding: 0 0 16px;
 }
 
+.toolbar-stack {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
 .scan-loader,
 .button-row {
   display: flex;
@@ -169,6 +185,41 @@ h3 {
 
 .scan-loader label {
   min-width: 320px;
+}
+
+.model-import-panel {
+  display: grid;
+  gap: 12px;
+  max-width: 1040px;
+}
+
+.import-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.format-tabs {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.format-tabs button {
+  min-height: 34px;
+}
+
+.format-tabs button.active {
+  color: #ffffff;
+  border-color: #1f6f8b;
+  background: #1f6f8b;
+}
+
+.import-form-grid,
+.metadata-form-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 10px;
 }
 
 .status-line {
@@ -265,11 +316,22 @@ h3 {
 }
 
 .viewer-surface {
+  display: flex;
   min-height: 560px;
   overflow: hidden;
   border: 1px solid #d7dee8;
   border-radius: 8px;
   background: #f8fafc;
+}
+
+.viewer-surface > div {
+  flex: 1;
+}
+
+.viewer-surface canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .viewer-empty {
@@ -403,6 +465,7 @@ dd {
   .topbar,
   .toolbar-band,
   .scan-loader,
+  .import-title-row,
   .readiness-banner {
     align-items: stretch;
     flex-direction: column;
@@ -418,6 +481,11 @@ dd {
 
   .scan-loader label {
     min-width: 0;
+  }
+
+  .import-form-grid,
+  .metadata-form-grid {
+    grid-template-columns: 1fr;
   }
 
   .viewer-surface,

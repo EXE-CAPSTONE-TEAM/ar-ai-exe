@@ -114,6 +114,7 @@ RUN apt-get update \
         libtinygltf-dev \
         libtinyxml2-dev \
         nlohmann-json3-dev \
+        python3-numpy \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 

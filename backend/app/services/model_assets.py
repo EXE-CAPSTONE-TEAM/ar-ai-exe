@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import HTTPException, status
@@ -7,6 +8,17 @@ from sqlalchemy.orm import Session
 from app.models import ModelAsset, User
 from app.schemas.model_asset import ModelAssetResponse
 from app.services.storage import get_storage_service
+
+
+@dataclass(frozen=True)
+class ModelAssetFiles:
+    glb: Path
+    obj: Path
+    mtl: Path
+    texture: Path
+    metadata: Path
+    quality_report: Path
+    obj_package_zip: Path
 
 
 class ModelAssetService:
@@ -61,6 +73,85 @@ class ModelAssetService:
         if self.storage.exists(key):
             return self.storage.get_bytes(key)
         return Path(key).read_bytes()
+
+    def create_from_files(
+        self,
+        scan_session_id: str,
+        files: ModelAssetFiles,
+        storage_prefix: str | None = None,
+    ) -> ModelAsset:
+        prefix = (storage_prefix or f"models/{scan_session_id}").strip("/")
+        glb_object = self.storage.put_bytes(
+            f"{prefix}/shoe_preview.glb",
+            files.glb.read_bytes(),
+            "model/gltf-binary",
+        )
+        obj_object = self.storage.put_bytes(
+            f"{prefix}/shoe.obj",
+            files.obj.read_bytes(),
+            "text/plain",
+        )
+        mtl_object = self.storage.put_bytes(
+            f"{prefix}/shoe.mtl",
+            files.mtl.read_bytes(),
+            "text/plain",
+        )
+        texture_object = self.storage.put_bytes(
+            f"{prefix}/shoe_texture.png",
+            files.texture.read_bytes(),
+            "image/png",
+        )
+        metadata_object = self.storage.put_bytes(
+            f"{prefix}/metadata.json",
+            files.metadata.read_bytes(),
+            "application/json",
+        )
+        quality_object = self.storage.put_bytes(
+            f"{prefix}/quality_report.json",
+            files.quality_report.read_bytes(),
+            "application/json",
+        )
+        obj_package_object = self.storage.put_bytes(
+            f"{prefix}/shoe_obj_package.zip",
+            files.obj_package_zip.read_bytes(),
+            "application/zip",
+        )
+
+        asset = ModelAsset(
+            scan_session_id=scan_session_id,
+            glb_path=glb_object.key,
+            glb_size_bytes=glb_object.size_bytes,
+            glb_content_type=glb_object.content_type,
+            glb_checksum=glb_object.checksum,
+            obj_path=obj_object.key,
+            obj_size_bytes=obj_object.size_bytes,
+            obj_content_type=obj_object.content_type,
+            obj_checksum=obj_object.checksum,
+            mtl_path=mtl_object.key,
+            mtl_size_bytes=mtl_object.size_bytes,
+            mtl_content_type=mtl_object.content_type,
+            mtl_checksum=mtl_object.checksum,
+            texture_path=texture_object.key,
+            texture_size_bytes=texture_object.size_bytes,
+            texture_content_type=texture_object.content_type,
+            texture_checksum=texture_object.checksum,
+            metadata_path=metadata_object.key,
+            metadata_size_bytes=metadata_object.size_bytes,
+            metadata_content_type=metadata_object.content_type,
+            metadata_checksum=metadata_object.checksum,
+            quality_report_path=quality_object.key,
+            quality_report_size_bytes=quality_object.size_bytes,
+            quality_report_content_type=quality_object.content_type,
+            quality_report_checksum=quality_object.checksum,
+            obj_package_zip_path=obj_package_object.key,
+            obj_package_zip_size_bytes=obj_package_object.size_bytes,
+            obj_package_zip_content_type=obj_package_object.content_type,
+            obj_package_zip_checksum=obj_package_object.checksum,
+        )
+        self.db.add(asset)
+        self.db.commit()
+        self.db.refresh(asset)
+        return asset
 
     def response(self, asset: ModelAsset) -> ModelAssetResponse:
         quality_report: dict = {}

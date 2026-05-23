@@ -1,8 +1,6 @@
-import json
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, UploadFile, status
-from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -17,6 +15,7 @@ from app.schemas.scan import (
     ScanUploadResponse,
 )
 from app.services.reconstruction_toolchain import ReconstructionToolchainService
+from app.services.scan_metadata import parse_scan_metadata
 from app.services.scan_sessions import ScanSessionService
 from app.workers.reconstruction_worker import process_scan_session
 
@@ -37,15 +36,10 @@ ACTIVE_PROCESSING_STATUSES = {
 
 
 def scan_response(scan_session: ScanSession, model_asset_id: str | None) -> ScanSessionResponse:
-    uploaded_passes = []
-    if scan_session.side_video_path or scan_session.raw_video_path:
-        uploaded_passes.append("side_orbit")
-    if scan_session.top_video_path:
-        uploaded_passes.append("top_orbit")
     payload = ScanSessionResponse.model_validate(scan_session).model_dump()
     payload["model_asset_id"] = model_asset_id
-    payload["uploaded_passes"] = uploaded_passes
-    payload["required_passes"] = list(ScanSessionService.required_passes)
+    payload["uploaded_passes"] = ScanSessionService.uploaded_passes(scan_session)
+    payload["required_passes"] = ScanSessionService.required_passes_for(scan_session)
     if not payload.get("web_design_url"):
         payload["web_design_url"] = f"{get_settings().web_app_base_url.rstrip('/')}/design?scanId={scan_session.id}"
     return ScanSessionResponse.model_validate(payload)
@@ -56,10 +50,12 @@ def status_response(scan_session: ScanSession, service: ScanSessionService) -> S
         id=scan_session.id,
         status=scan_session.status,
         errorMessage=scan_session.error_message,
+        sourceType=scan_session.source_type,
+        importName=scan_session.import_name,
         modelAssetId=service.get_model_asset_id(scan_session.id),
         updatedAt=scan_session.updated_at,
         uploadedPasses=service.uploaded_passes(scan_session),
-        requiredPasses=list(service.required_passes),
+        requiredPasses=service.required_passes_for(scan_session),
         readyForProcessing=service.is_ready_for_processing(scan_session),
         processingStarted=scan_session.status in ACTIVE_PROCESSING_STATUSES,
         webDesignUrl=scan_session.web_design_url or service.web_design_url(scan_session.id),
@@ -192,11 +188,4 @@ def process_scan(
 
 
 def parse_metadata(raw_metadata: str) -> ScanMetadata:
-    try:
-        payload = json.loads(raw_metadata)
-        return ScanMetadata.model_validate(payload)
-    except (json.JSONDecodeError, ValidationError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid scan metadata: {exc}",
-        ) from exc
+    return parse_scan_metadata(raw_metadata)

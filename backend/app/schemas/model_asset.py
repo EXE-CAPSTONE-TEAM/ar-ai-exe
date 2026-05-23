@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import Field
 
 from app.schemas.common import CamelModel
+from app.schemas.scan import ScanSessionResponse
 
 
 class ModelAssetResponse(CamelModel):
@@ -17,3 +18,8 @@ class ModelAssetResponse(CamelModel):
     obj_package_zip_url: str = Field(alias="objPackageZipUrl")
     quality_report: dict = Field(default_factory=dict, alias="qualityReport")
     created_at: datetime = Field(alias="createdAt")
+
+
+class ModelImportResponse(CamelModel):
+    scan_session: ScanSessionResponse = Field(alias="scanSession")
+    model_asset: ModelAssetResponse = Field(alias="modelAsset")

@@ -7,6 +7,7 @@ from app.models.entities import (
     ExportStatus,
     ModelAsset,
     ScanSession,
+    ScanSource,
     ScanStatus,
     User,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "ExportStatus",
     "ModelAsset",
     "ScanSession",
+    "ScanSource",
     "ScanStatus",
     "User",
 ]

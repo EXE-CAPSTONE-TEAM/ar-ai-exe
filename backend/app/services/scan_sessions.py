@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from fastapi import HTTPException, status
@@ -6,8 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models import ModelAsset, ScanSession, ScanStatus, User
+from app.models import ModelAsset, ScanSession, ScanSource, ScanStatus, User
 from app.schemas.scan import ScanMetadata
+from app.services.scan_metadata import scan_metadata_bytes
 from app.services.storage import get_storage_service
 
 
@@ -37,7 +37,7 @@ class ScanSessionService:
         if metadata:
             metadata_object = self.storage.put_bytes(
                 self._metadata_key(scan_session.id),
-                json.dumps(metadata.model_dump(by_alias=True), indent=2).encode("utf-8"),
+                scan_metadata_bytes(metadata),
                 "application/json",
             )
             scan_session.metadata_path = metadata_object.key
@@ -59,7 +59,10 @@ class ScanSessionService:
         asset = self.db.scalar(select(ModelAsset).where(ModelAsset.scan_session_id == scan_session_id))
         return asset.id if asset else None
 
-    def uploaded_passes(self, scan_session: ScanSession) -> list[str]:
+    @classmethod
+    def uploaded_passes(cls, scan_session: ScanSession) -> list[str]:
+        if scan_session.source_type == ScanSource.IMPORT:
+            return []
         uploaded: list[str] = []
         if scan_session.side_video_path or scan_session.raw_video_path:
             uploaded.append("side_orbit")
@@ -67,8 +70,17 @@ class ScanSessionService:
             uploaded.append("top_orbit")
         return uploaded
 
-    def is_ready_for_processing(self, scan_session: ScanSession) -> bool:
-        return all(pass_type in self.uploaded_passes(scan_session) for pass_type in self.required_passes)
+    @classmethod
+    def is_ready_for_processing(cls, scan_session: ScanSession) -> bool:
+        if scan_session.source_type == ScanSource.IMPORT:
+            return scan_session.status == ScanStatus.COMPLETED
+        return all(pass_type in cls.uploaded_passes(scan_session) for pass_type in cls.required_passes)
+
+    @classmethod
+    def required_passes_for(cls, scan_session: ScanSession) -> list[str]:
+        if scan_session.source_type == ScanSource.IMPORT:
+            return []
+        return list(cls.required_passes)
 
     def normalize_pass_type(self, pass_type: str) -> str:
         normalized = self.pass_aliases.get(pass_type)
@@ -131,7 +143,7 @@ class ScanSessionService:
         if metadata:
             metadata_object = self.storage.put_bytes(
                 self._metadata_key(scan_session.id),
-                json.dumps(metadata.model_dump(by_alias=True), indent=2).encode("utf-8"),
+                scan_metadata_bytes(metadata),
                 "application/json",
             )
             scan_session.metadata_path = metadata_object.key
@@ -151,7 +163,7 @@ class ScanSessionService:
     def save_metadata(self, scan_session: ScanSession, metadata: ScanMetadata) -> ScanSession:
         metadata_object = self.storage.put_bytes(
             self._metadata_key(scan_session.id),
-            json.dumps(metadata.model_dump(by_alias=True), indent=2).encode("utf-8"),
+            scan_metadata_bytes(metadata),
             "application/json",
         )
         scan_session.metadata_path = metadata_object.key
@@ -211,6 +223,6 @@ class ScanSessionService:
         max_bytes = self.settings.max_upload_size_mb * 1024 * 1024
         if len(video_bytes) > max_bytes:
             raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 detail=f"Uploaded video exceeds {self.settings.max_upload_size_mb} MB.",
             )

@@ -40,6 +40,8 @@ class ScanSessionCreate(CamelModel):
 class ScanStatusResponse(CamelModel):
     id: str
     status: str
+    source_type: str = Field(default="scan", alias="sourceType")
+    import_name: str | None = Field(default=None, alias="importName")
     error_message: str | None = Field(default=None, alias="errorMessage")
     model_asset_id: str | None = Field(default=None, alias="modelAssetId")
     updated_at: datetime = Field(alias="updatedAt")
@@ -54,6 +56,8 @@ class ScanSessionResponse(CamelModel):
     id: str
     user_id: str = Field(alias="userId")
     status: str
+    source_type: str = Field(default="scan", alias="sourceType")
+    import_name: str | None = Field(default=None, alias="importName")
     error_message: str | None = Field(default=None, alias="errorMessage")
     model_asset_id: str | None = Field(default=None, alias="modelAssetId")
     web_design_url: str | None = Field(default=None, alias="webDesignUrl")

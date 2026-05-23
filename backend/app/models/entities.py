@@ -29,6 +29,11 @@ class ScanStatus:
     FAILED = "failed"
 
 
+class ScanSource:
+    SCAN = "scan"
+    IMPORT = "import"
+
+
 class DesignStatus:
     DRAFT = "draft"
     EXPORTED = "exported"
@@ -60,6 +65,8 @@ class ScanSession(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("scan"))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     status: Mapped[str] = mapped_column(String(32), default=ScanStatus.CREATED, index=True)
+    source_type: Mapped[str] = mapped_column(String(32), default=ScanSource.SCAN, index=True)
+    import_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     raw_video_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     side_video_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     top_video_path: Mapped[str | None] = mapped_column(Text, nullable=True)

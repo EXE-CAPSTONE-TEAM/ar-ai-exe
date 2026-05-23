@@ -9,6 +9,9 @@ desktop.ini
 *.swp
 *.swo
 
+# Local tooling
+.codegraph/
+
 # Environment files
 .env
 .env.*
@@ -72,6 +75,7 @@ pip-wheel-metadata/
 
 # Backend runtime data
 backend/storage/**/*.db
+backend/storage/imports/*
 backend/storage/raw-scans/*/
 backend/storage/frames/*/
 backend/storage/models/*/

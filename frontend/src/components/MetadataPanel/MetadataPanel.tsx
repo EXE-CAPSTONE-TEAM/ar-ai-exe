@@ -7,23 +7,34 @@ type MetadataPanelProps = {
 
 export function MetadataPanel({ scanSession, modelAsset }: MetadataPanelProps) {
   const qualityReport = modelAsset?.qualityReport;
+  const isImport = scanSession?.sourceType === "import";
 
   return (
     <aside className="metadata-panel">
       <section className="panel-section">
-        <h2>Scan</h2>
+        <h2>{isImport ? "Import" : "Scan"}</h2>
         {scanSession ? (
           <dl>
             <dt>Session</dt>
             <dd>{scanSession.id}</dd>
+            {isImport ? (
+              <>
+                <dt>Name</dt>
+                <dd>{scanSession.importName ?? "Imported model"}</dd>
+              </>
+            ) : null}
             <dt>Status</dt>
             <dd>
               <span className={`status-pill status-${scanSession.status}`}>{scanStatusLabel(scanSession.status)}</span>
             </dd>
-            <dt>Videos</dt>
-            <dd>
-              {scanSession.uploadedPasses.length}/{scanSession.requiredPasses.length} uploaded
-            </dd>
+            {!isImport ? (
+              <>
+                <dt>Videos</dt>
+                <dd>
+                  {scanSession.uploadedPasses.length}/{scanSession.requiredPasses.length} uploaded
+                </dd>
+              </>
+            ) : null}
             <dt>Model</dt>
             <dd>{scanSession.modelAssetId ?? "pending"}</dd>
             {scanSession.errorMessage ? (

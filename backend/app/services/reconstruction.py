@@ -1,4 +1,3 @@
-import base64
 import json
 import math
 import shutil
@@ -17,16 +16,11 @@ from app.services.blender_service import BlenderService
 from app.services.colmap_service import ColmapService
 from app.services.command_runner import CommandRunner
 from app.services.file_helpers import write_json
+from app.services.model_assets import ModelAssetFiles, ModelAssetService
 from app.services.openmvs_service import OpenMVSService
 from app.services.reconstruction_toolchain import ReconstructionToolchainService
 from app.services.scan_sessions import ScanSessionService
 from app.services.storage import get_storage_service
-
-
-PLACEHOLDER_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/ax"
-    "wDVkAAAAASUVORK5CYII="
-)
 
 
 @dataclass(frozen=True)
@@ -516,77 +510,18 @@ export_glb(output_dir / "shoe_preview.glb")
         quality_report_path: Path,
         obj_package_path: Path,
     ) -> ModelAsset:
-        glb_object = self.storage.put_bytes(
-            f"models/{scan_session_id}/shoe_preview.glb",
-            (model_dir / "shoe_preview.glb").read_bytes(),
-            "model/gltf-binary",
+        return ModelAssetService(self.db).create_from_files(
+            scan_session_id,
+            ModelAssetFiles(
+                glb=model_dir / "shoe_preview.glb",
+                obj=model_dir / "shoe.obj",
+                mtl=model_dir / "shoe.mtl",
+                texture=model_dir / "shoe_texture.png",
+                metadata=metadata_path,
+                quality_report=quality_report_path,
+                obj_package_zip=obj_package_path,
+            ),
         )
-        obj_object = self.storage.put_bytes(
-            f"models/{scan_session_id}/shoe.obj",
-            (model_dir / "shoe.obj").read_bytes(),
-            "text/plain",
-        )
-        mtl_object = self.storage.put_bytes(
-            f"models/{scan_session_id}/shoe.mtl",
-            (model_dir / "shoe.mtl").read_bytes(),
-            "text/plain",
-        )
-        texture_object = self.storage.put_bytes(
-            f"models/{scan_session_id}/shoe_texture.png",
-            (model_dir / "shoe_texture.png").read_bytes(),
-            "image/png",
-        )
-        metadata_object = self.storage.put_bytes(
-            f"models/{scan_session_id}/metadata.json",
-            metadata_path.read_bytes(),
-            "application/json",
-        )
-        quality_object = self.storage.put_bytes(
-            f"models/{scan_session_id}/quality_report.json",
-            quality_report_path.read_bytes(),
-            "application/json",
-        )
-        obj_package_object = self.storage.put_bytes(
-            f"models/{scan_session_id}/shoe_obj_package.zip",
-            obj_package_path.read_bytes(),
-            "application/zip",
-        )
-
-        asset = ModelAsset(
-            scan_session_id=scan_session_id,
-            glb_path=glb_object.key,
-            glb_size_bytes=glb_object.size_bytes,
-            glb_content_type=glb_object.content_type,
-            glb_checksum=glb_object.checksum,
-            obj_path=obj_object.key,
-            obj_size_bytes=obj_object.size_bytes,
-            obj_content_type=obj_object.content_type,
-            obj_checksum=obj_object.checksum,
-            mtl_path=mtl_object.key,
-            mtl_size_bytes=mtl_object.size_bytes,
-            mtl_content_type=mtl_object.content_type,
-            mtl_checksum=mtl_object.checksum,
-            texture_path=texture_object.key,
-            texture_size_bytes=texture_object.size_bytes,
-            texture_content_type=texture_object.content_type,
-            texture_checksum=texture_object.checksum,
-            metadata_path=metadata_object.key,
-            metadata_size_bytes=metadata_object.size_bytes,
-            metadata_content_type=metadata_object.content_type,
-            metadata_checksum=metadata_object.checksum,
-            quality_report_path=quality_object.key,
-            quality_report_size_bytes=quality_object.size_bytes,
-            quality_report_content_type=quality_object.content_type,
-            quality_report_checksum=quality_object.checksum,
-            obj_package_zip_path=obj_package_object.key,
-            obj_package_zip_size_bytes=obj_package_object.size_bytes,
-            obj_package_zip_content_type=obj_package_object.content_type,
-            obj_package_zip_checksum=obj_package_object.checksum,
-        )
-        self.db.add(asset)
-        self.db.commit()
-        self.db.refresh(asset)
-        return asset
 
     def _run_command(self, command: list[str], log_path: Path, cwd: Path | None = None) -> None:
         result = self.runner.run(
