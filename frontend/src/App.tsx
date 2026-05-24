@@ -38,6 +38,8 @@ export function App() {
   const [authPassword, setAuthPassword] = useState("");
   const [isAuthBusy, setIsAuthBusy] = useState(false);
   const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
+  const [meshBounds, setMeshBounds] = useState<{ center: [number, number, number]; size: [number, number, number] } | null>(null);
+  const [gizmoMode, setGizmoMode] = useState<"translate" | "rotate" | "scale">("translate");
 
   useEffect(() => {
     void loadReadiness();
@@ -131,6 +133,7 @@ export function App() {
     setConfig(null);
     setExportPackage(null);
     setActiveLayerId(null);
+    setMeshBounds(null);
     setStatusMessage("Signed out");
   }
 
@@ -174,6 +177,7 @@ export function App() {
     setConfig(null);
     setExportPackage(null);
     setActiveLayerId(null);
+    setMeshBounds(null);
 
     try {
       const imported = await api.importModel(payload);
@@ -330,8 +334,10 @@ export function App() {
                 modelUrl={modelUrl}
                 config={config}
                 activeLayerId={activeLayerId}
+                gizmoMode={gizmoMode}
                 onConfigChange={setConfig}
                 onActiveLayerChange={setActiveLayerId}
+                onMeshBoundsUpdate={setMeshBounds}
               />
               <EditorPanels
                 config={config}
@@ -340,9 +346,12 @@ export function App() {
                 isSaving={isSaving}
                 exportPackage={exportPackage}
                 activeLayerId={activeLayerId}
+                meshBounds={meshBounds}
+                gizmoMode={gizmoMode}
                 onNameChange={setDesignName}
                 onConfigChange={setConfig}
                 onActiveLayerChange={setActiveLayerId}
+                onGizmoModeChange={setGizmoMode}
                 onSave={saveDesign}
                 onExport={exportDesign}
                 onDownload={downloadExport}

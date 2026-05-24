@@ -1,5 +1,8 @@
-import { Download, ImagePlus, Save, Type } from "lucide-react";
+import { useState } from "react";
+import { Download, ImagePlus, Save, Type, Trash2, Move, RotateCcw, Maximize2 } from "lucide-react";
 
+import { stickerPresets } from "../../data/stickerPresets";
+import type { StickerPreset } from "../../data/stickerPresets";
 import type { DesignConfig, ExportPackage, ModelAsset } from "../../types";
 
 type EditorPanelsProps = {
@@ -9,9 +12,12 @@ type EditorPanelsProps = {
   isSaving: boolean;
   exportPackage: ExportPackage | null;
   activeLayerId: string | null;
+  meshBounds: { center: [number, number, number]; size: [number, number, number] } | null;
+  gizmoMode: "translate" | "rotate" | "scale";
   onNameChange: (name: string) => void;
   onConfigChange: (config: DesignConfig) => void;
   onActiveLayerChange: (id: string | null) => void;
+  onGizmoModeChange: (mode: "translate" | "rotate" | "scale") => void;
   onSave: () => void;
   onExport: () => void;
   onDownload: () => void;
@@ -25,9 +31,12 @@ export function EditorPanels({
   isSaving,
   exportPackage,
   activeLayerId,
+  meshBounds,
+  gizmoMode,
   onNameChange,
   onConfigChange,
   onActiveLayerChange,
+  onGizmoModeChange,
   onSave,
   onExport,
   onDownload,
@@ -41,6 +50,8 @@ export function EditorPanels({
       </aside>
     );
   }
+
+  const [activeCategory, setActiveCategory] = useState<string>("all");
 
   const update = (patch: Partial<DesignConfig>) => onConfigChange({ ...config, ...patch });
 
@@ -57,6 +68,17 @@ export function EditorPanels({
       update({
         texts: config!.texts.map((t) => (t.id === id ? { ...t, ...patch } : t)),
       });
+    }
+  }
+
+  function removeLayer(id: string) {
+    if (config!.stickers.find((s) => s.id === id)) {
+      update({ stickers: config!.stickers.filter((s) => s.id !== id) });
+    } else if (config!.texts.find((t) => t.id === id)) {
+      update({ texts: config!.texts.filter((t) => t.id !== id) });
+    }
+    if (activeLayerId === id) {
+      onActiveLayerChange(null);
     }
   }
 
@@ -98,16 +120,43 @@ export function EditorPanels({
       </section>
 
       <section className="panel-section">
-        <h3>Decals</h3>
+        <h3>Decals & Text</h3>
         <div className="button-row">
-          <button type="button" onClick={() => onConfigChange(addSticker(config))}>
-            <ImagePlus size={16} aria-hidden="true" />
-            Sticker
-          </button>
-          <button type="button" onClick={() => onConfigChange(addText(config))}>
+          <button type="button" onClick={() => {
+            const newConfig = addText(config, meshBounds);
+            onConfigChange(newConfig);
+            onActiveLayerChange(newConfig.texts[newConfig.texts.length - 1].id);
+          }}>
             <Type size={16} aria-hidden="true" />
-            Text
+            Add Text
           </button>
+        </div>
+        <div className="sticker-gallery-container">
+          <div className="category-tabs">
+            <button className={activeCategory === "all" ? "active" : ""} onClick={() => setActiveCategory("all")}>All</button>
+            <button className={activeCategory === "popular" ? "active" : ""} onClick={() => setActiveCategory("popular")}>Popular</button>
+            <button className={activeCategory === "symbols" ? "active" : ""} onClick={() => setActiveCategory("symbols")}>Symbols</button>
+            <button className={activeCategory === "nature" ? "active" : ""} onClick={() => setActiveCategory("nature")}>Nature</button>
+            <button className={activeCategory === "sport" ? "active" : ""} onClick={() => setActiveCategory("sport")}>Sport</button>
+          </div>
+          <div className="sticker-gallery">
+            {stickerPresets
+              .filter(p => activeCategory === "all" || p.category === activeCategory)
+              .map(preset => (
+                <button
+                  key={preset.id}
+                  className="sticker-card"
+                  title={preset.label}
+                  onClick={() => {
+                    const newConfig = addSticker(config, preset, meshBounds);
+                    onConfigChange(newConfig);
+                    onActiveLayerChange(newConfig.stickers[newConfig.stickers.length - 1].id);
+                  }}
+                >
+                  <img src={preset.imageUrl} alt={preset.label} />
+                </button>
+              ))}
+          </div>
         </div>
       </section>
 
@@ -122,8 +171,13 @@ export function EditorPanels({
               key={sticker.id}
               onClick={() => onActiveLayerChange(sticker.id)}
             >
-              <span>{sticker.id}</span>
-              <span>sticker</span>
+              <div className="layer-info">
+                <img src={sticker.imageUrl} className="sticker-thumb" alt="sticker" />
+                <span>{sticker.id}</span>
+              </div>
+              <button type="button" className="delete-btn" title="Delete layer" onClick={(e) => { e.stopPropagation(); removeLayer(sticker.id); }}>
+                <Trash2 size={14} aria-hidden="true" />
+              </button>
             </div>
           ))}
           {config.texts.map((textLayer) => (
@@ -132,8 +186,13 @@ export function EditorPanels({
               key={textLayer.id}
               onClick={() => onActiveLayerChange(textLayer.id)}
             >
-              <span>{textLayer.value}</span>
-              <span>text</span>
+              <div className="layer-info">
+                <div className="color-swatch" style={{ backgroundColor: textLayer.color }} />
+                <span>{textLayer.value}</span>
+              </div>
+              <button type="button" className="delete-btn" title="Delete layer" onClick={(e) => { e.stopPropagation(); removeLayer(textLayer.id); }}>
+                <Trash2 size={14} aria-hidden="true" />
+              </button>
             </div>
           ))}
           {config.stickers.length === 0 && config.texts.length === 0 ? (
@@ -145,14 +204,53 @@ export function EditorPanels({
       {activeLayer && (
         <section className="panel-section highlight">
           <h3>Layer Properties</h3>
+          <div className="button-row gizmo-toolbar">
+            <button
+              type="button"
+              className={gizmoMode === "translate" ? "active" : ""}
+              onClick={() => onGizmoModeChange("translate")}
+              title="Move (3D)"
+            >
+              <Move size={16} />
+            </button>
+            <button
+              type="button"
+              className={gizmoMode === "rotate" ? "active" : ""}
+              onClick={() => onGizmoModeChange("rotate")}
+              title="Rotate (3D)"
+            >
+              <RotateCcw size={16} />
+            </button>
+            <button
+              type="button"
+              className={gizmoMode === "scale" ? "active" : ""}
+              onClick={() => onGizmoModeChange("scale")}
+              title="Scale (3D)"
+            >
+              <Maximize2 size={16} />
+            </button>
+          </div>
           {activeText && (
-            <label>
-              Text
-              <input
-                value={activeText.value}
-                onChange={(e) => updateLayer(activeLayer.id, { value: e.target.value })}
-              />
-            </label>
+            <>
+              <label>
+                Text
+                <input
+                  value={activeText.value}
+                  onChange={(e) => updateLayer(activeLayer.id, { value: e.target.value })}
+                />
+              </label>
+              <label className="color-picker-row">
+                Color
+                <div className="color-input-wrapper">
+                  <input
+                    type="color"
+                    value={activeText.color}
+                    onChange={(e) => updateLayer(activeLayer.id, { color: e.target.value })}
+                  />
+                  <span>{activeText.color.toUpperCase()}</span>
+                </div>
+              </label>
+            </>
           )}
           <label>
             Scale
@@ -242,8 +340,12 @@ export function EditorPanels({
   );
 }
 
-function addSticker(config: DesignConfig): DesignConfig {
+function addSticker(config: DesignConfig, preset: StickerPreset, meshBounds: { center: [number, number, number]; size: [number, number, number] } | null): DesignConfig {
   const index = config.stickers.length + 1;
+  const c = meshBounds ? meshBounds.center : [0, 0, 0];
+  const s = meshBounds ? meshBounds.size : [1, 1, 1];
+  const stickerScale = Math.max(s[0], s[1], s[2]) * 0.15;
+
   return {
     ...config,
     stickers: [
@@ -251,17 +353,21 @@ function addSticker(config: DesignConfig): DesignConfig {
       {
         id: `sticker_${String(index).padStart(3, "0")}`,
         type: "image",
-        imageUrl: "/assets/stickers/flame.png",
-        position: [0.25, 0.45, 0.35],
-        rotation: [0, 0.35, 0],
-        scale: 0.35,
+        imageUrl: preset.imageUrl,
+        position: [c[0] + s[0] * 0.4, c[1], c[2]],
+        rotation: [0, 1.57, 0],
+        scale: stickerScale,
       },
     ],
   };
 }
 
-function addText(config: DesignConfig): DesignConfig {
+function addText(config: DesignConfig, meshBounds: { center: [number, number, number]; size: [number, number, number] } | null): DesignConfig {
   const index = config.texts.length + 1;
+  const c = meshBounds ? meshBounds.center : [0, 0, 0];
+  const s = meshBounds ? meshBounds.size : [1, 1, 1];
+  const scale = Math.max(s[0], s[1], s[2]) * 0.1;
+
   return {
     ...config,
     texts: [
@@ -270,10 +376,10 @@ function addText(config: DesignConfig): DesignConfig {
         id: `text_${String(index).padStart(3, "0")}`,
         value: "TAK",
         font: "Arial",
-        color: "#111111",
-        position: [-0.1, 0.48, 0.42],
-        rotation: [0, 0.35, 0],
-        scale: 0.22,
+        color: "#ffffff",
+        position: [c[0] + s[0] * 0.4, c[1] + s[1] * 0.1, c[2] + s[2] * 0.1],
+        rotation: [0, 1.57, 0],
+        scale: scale,
       },
     ],
   };

@@ -12,9 +12,11 @@ type ModelViewerProps = {
   activeLayerId: string | null;
   onConfigChange: (config: DesignConfig) => void;
   onActiveLayerChange: (id: string | null) => void;
+  onMeshBoundsUpdate: (bounds: { center: [number, number, number]; size: [number, number, number] }) => void;
+  gizmoMode: "translate" | "rotate" | "scale";
 };
 
-export function ModelViewer({ modelUrl, config, activeLayerId, onConfigChange, onActiveLayerChange }: ModelViewerProps) {
+export function ModelViewer({ modelUrl, config, activeLayerId, gizmoMode, onConfigChange, onActiveLayerChange, onMeshBoundsUpdate }: ModelViewerProps) {
   return (
     <div className="viewer-surface">
       {modelUrl ? (
@@ -29,8 +31,10 @@ export function ModelViewer({ modelUrl, config, activeLayerId, onConfigChange, o
                   url={modelUrl}
                   config={config}
                   activeLayerId={activeLayerId}
+                  gizmoMode={gizmoMode}
                   onConfigChange={onConfigChange}
                   onActiveLayerChange={onActiveLayerChange}
+                  onMeshBoundsUpdate={onMeshBoundsUpdate}
                 />
               </Center>
             </Suspense>
@@ -61,12 +65,15 @@ type ShoeModelProps = {
   activeLayerId: string | null;
   onConfigChange: (config: DesignConfig) => void;
   onActiveLayerChange: (id: string | null) => void;
+  onMeshBoundsUpdate: (bounds: { center: [number, number, number]; size: [number, number, number] }) => void;
+  gizmoMode: "translate" | "rotate" | "scale";
 };
 
-function ShoeModel({ url, config, activeLayerId, onConfigChange, onActiveLayerChange }: ShoeModelProps) {
+function ShoeModel({ url, config, activeLayerId, gizmoMode, onConfigChange, onActiveLayerChange, onMeshBoundsUpdate }: ShoeModelProps) {
   const gltf = useGLTF(url);
   const groupRef = useRef<THREE.Group>(null);
   const meshRef = useRef<THREE.Mesh | null>(null);
+  const [, setForceRender] = useState({});
 
   const scale = useMemo(() => {
     if (!gltf.scene) return 1;
@@ -78,11 +85,12 @@ function ShoeModel({ url, config, activeLayerId, onConfigChange, onActiveLayerCh
 
   useEffect(() => {
     let maxVerts = 0;
+    let bestMesh: THREE.Mesh | null = null;
     gltf.scene.traverse((node) => {
       if (node instanceof THREE.Mesh) {
-        if (!meshRef.current || node.geometry.attributes.position.count > maxVerts) {
+        if (!bestMesh || node.geometry.attributes.position.count > maxVerts) {
           maxVerts = node.geometry.attributes.position.count;
-          meshRef.current = node;
+          bestMesh = node;
         }
 
         if (!node.userData.originalMaterial) {
@@ -115,34 +123,56 @@ function ShoeModel({ url, config, activeLayerId, onConfigChange, onActiveLayerCh
         node.receiveShadow = true;
       }
     });
-  }, [config?.baseColor, config?.material.metallic, config?.material.roughness, gltf.scene]);
+
+    if (bestMesh && bestMesh !== meshRef.current) {
+      meshRef.current = bestMesh;
+      setForceRender({});
+      const mesh = bestMesh as THREE.Mesh;
+      mesh.geometry.computeBoundingBox();
+      const box = mesh.geometry.boundingBox;
+      if (box) {
+        const center = new THREE.Vector3();
+        const size = new THREE.Vector3();
+        box.getCenter(center);
+        box.getSize(size);
+        onMeshBoundsUpdate({
+          center: [center.x, center.y, center.z],
+          size: [size.x, size.y, size.z]
+        });
+      }
+    }
+  }, [config?.baseColor, config?.material.metallic, config?.material.roughness, gltf.scene, onMeshBoundsUpdate]);
 
   const [isDragging, setIsDragging] = useState(false);
+  const [isTransforming, setIsTransforming] = useState(false);
 
   const updateActiveLayer = (point: THREE.Vector3, normal: THREE.Vector3) => {
-    if (!config || !meshRef.current || !activeLayerId) return;
+    if (!config || !groupRef.current || !activeLayerId) return;
 
-    // The intersection point is in world space. We need it in the mesh's local space.
-    const localPoint = meshRef.current.worldToLocal(point.clone());
+    // Convert world point to group local space
+    const localPoint = groupRef.current.worldToLocal(point.clone());
     
-    // The normal is already in local space of the mesh geometry from the Raycaster.
-    const n = normal.clone();
+    // Convert normal to group local space
+    const normalMatrix = new THREE.Matrix3().getNormalMatrix(groupRef.current.matrixWorld);
+    const localNormal = normal.clone().applyMatrix3(normalMatrix.invert()).normalize();
+    
+    // Offset slightly above surface to prevent z-fighting
+    localPoint.add(localNormal.clone().multiplyScalar(0.01));
 
     const activeSticker = config.stickers.find((s) => s.id === activeLayerId);
     const activeText = config.texts.find((t) => t.id === activeLayerId);
     const activeLayer = activeSticker || activeText;
     if (!activeLayer) return;
 
-    const dummy = new THREE.Object3D();
-    dummy.position.copy(localPoint);
-    dummy.lookAt(localPoint.clone().add(n));
-    
-    // Preserve the user's manual Z rotation if they just slide around
-    // If they change normal significantly, we want it to align with normal first.
-    // To prevent sudden twisting, we'll just use dummy.rotation and let the user correct Z via slider.
-    
+    // Compute rotation: make plane face outward from surface
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1), localNormal
+    );
+    const euler = new THREE.Euler().setFromQuaternion(quaternion);
+
+    const currentZRot = activeLayer.rotation[2] || 0;
     const newPos: [number, number, number] = [localPoint.x, localPoint.y, localPoint.z];
-    const newRot: [number, number, number] = [dummy.rotation.x, dummy.rotation.y, dummy.rotation.z];
+    const newRot: [number, number, number] = [euler.x, euler.y, currentZRot];
 
     if (activeSticker) {
       onConfigChange({
@@ -162,6 +192,7 @@ function ShoeModel({ url, config, activeLayerId, onConfigChange, onActiveLayerCh
   };
 
   const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
+    if (isTransforming) return;
     if (activeLayerId && e.face?.normal) {
       e.stopPropagation();
       setIsDragging(true);
@@ -170,6 +201,7 @@ function ShoeModel({ url, config, activeLayerId, onConfigChange, onActiveLayerCh
   };
 
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
+    if (isTransforming) return;
     if (isDragging && activeLayerId && e.face?.normal) {
       e.stopPropagation();
       updateActiveLayer(e.point, e.face.normal);
@@ -185,6 +217,23 @@ function ShoeModel({ url, config, activeLayerId, onConfigChange, onActiveLayerCh
     else onActiveLayerChange(null);
   };
 
+  const handleTransformEnd = (id: string, isText: boolean, pos: [number, number, number], rot: [number, number, number], scale: number) => {
+    setIsTransforming(false);
+    if (!config) return;
+    
+    if (isText) {
+      onConfigChange({
+        ...config,
+        texts: config.texts.map((t) => t.id === id ? { ...t, position: pos, rotation: rot, scale } : t)
+      });
+    } else {
+      onConfigChange({
+        ...config,
+        stickers: config.stickers.map((s) => s.id === id ? { ...s, position: pos, rotation: rot, scale } : s)
+      });
+    }
+  };
+
   return (
     <group
       ref={groupRef}
@@ -196,62 +245,142 @@ function ShoeModel({ url, config, activeLayerId, onConfigChange, onActiveLayerCh
     >
       <primitive object={gltf.scene} />
       
-      {/* Render decals as children of the main mesh via React portal-like behavior or just relying on Decal's mesh prop? 
-          Wait, Drei's <Decal> uses the parent mesh if no `mesh` prop is given. 
-          But here, the parent is <group>. So we MUST pass the mesh ref. 
-      */}
-      {meshRef.current && config?.stickers.map((sticker) => (
-        <StickerDecal key={sticker.id} sticker={sticker} meshRef={meshRef as React.RefObject<THREE.Mesh>} />
+      {config?.stickers.map((sticker) => (
+        <StickerPlane 
+          key={sticker.id} 
+          sticker={sticker} 
+          isActive={sticker.id === activeLayerId}
+          gizmoMode={gizmoMode}
+          onTransformStart={() => setIsTransforming(true)}
+          onTransformEnd={(pos, rot, s) => handleTransformEnd(sticker.id, false, pos, rot, s)}
+        />
       ))}
-      {meshRef.current && config?.texts.map((textLayer) => (
-        <TextDecal key={textLayer.id} layer={textLayer} meshRef={meshRef as React.RefObject<THREE.Mesh>} />
+      {config?.texts.map((textLayer) => (
+        <TextPlane 
+          key={textLayer.id} 
+          layer={textLayer} 
+          isActive={textLayer.id === activeLayerId}
+          gizmoMode={gizmoMode}
+          onTransformStart={() => setIsTransforming(true)}
+          onTransformEnd={(pos, rot, s) => handleTransformEnd(textLayer.id, true, pos, rot, s)}
+        />
       ))}
     </group>
   );
 }
 
-function StickerDecal({ sticker, meshRef }: { sticker: StickerLayer; meshRef: React.RefObject<THREE.Mesh> }) {
+import { TransformControls, Text as DreiText } from "@react-three/drei";
+
+function StickerPlane({ 
+  sticker, 
+  isActive, 
+  gizmoMode, 
+  onTransformStart, 
+  onTransformEnd 
+}: { 
+  sticker: StickerLayer; 
+  isActive: boolean; 
+  gizmoMode: "translate" | "rotate" | "scale";
+  onTransformStart: () => void;
+  onTransformEnd: (pos: [number, number, number], rot: [number, number, number], scale: number) => void;
+}) {
   const texture = useTexture(sticker.imageUrl);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const ref = useRef<THREE.Mesh>(null);
   
-  return (
-    <Decal
-      mesh={meshRef}
-      position={sticker.position}
-      rotation={sticker.rotation}
-      scale={[sticker.scale, sticker.scale, sticker.scale]} // Z scale defines projection depth
-    >
+  const position = new THREE.Vector3(...sticker.position);
+  const rotation = new THREE.Euler(...sticker.rotation);
+  const scaleVec = new THREE.Vector3(sticker.scale, sticker.scale, sticker.scale);
+  
+  const mesh = (
+    <mesh ref={ref} position={position} rotation={rotation} scale={scaleVec}>
+      <planeGeometry args={[1, 1]} />
       <meshStandardMaterial
         map={texture}
         transparent
+        side={THREE.DoubleSide}
+        depthWrite={false}
         polygonOffset
-        polygonOffsetFactor={-1} // Prevents z-fighting
+        polygonOffsetFactor={-4}
       />
-    </Decal>
+    </mesh>
   );
+
+  if (isActive) {
+    return (
+      <TransformControls 
+        mode={gizmoMode}
+        onMouseDown={() => onTransformStart()}
+        onMouseUp={() => {
+          if (ref.current) {
+            const p = ref.current.position;
+            const r = ref.current.rotation;
+            const s = ref.current.scale;
+            onTransformEnd([p.x, p.y, p.z], [r.x, r.y, r.z], Math.max(s.x, s.y, s.z));
+          }
+        }}
+      >
+        {mesh}
+      </TransformControls>
+    );
+  }
+
+  return mesh;
 }
 
-import { RenderTexture, Text as DreiText } from "@react-three/drei";
-
-function TextDecal({ layer, meshRef }: { layer: TextLayer; meshRef: React.RefObject<THREE.Mesh> }) {
-  return (
-    <Decal
-      mesh={meshRef}
-      position={layer.position}
-      rotation={layer.rotation}
-      scale={[layer.scale * 2, layer.scale * 1.2, layer.scale]}
+function TextPlane({ 
+  layer, 
+  isActive, 
+  gizmoMode, 
+  onTransformStart, 
+  onTransformEnd 
+}: { 
+  layer: TextLayer; 
+  isActive: boolean; 
+  gizmoMode: "translate" | "rotate" | "scale";
+  onTransformStart: () => void;
+  onTransformEnd: (pos: [number, number, number], rot: [number, number, number], scale: number) => void;
+}) {
+  const ref = useRef<THREE.Mesh>(null);
+  const position = new THREE.Vector3(...layer.position);
+  const rotation = new THREE.Euler(...layer.rotation);
+  const scaleVec = new THREE.Vector3(layer.scale, layer.scale, layer.scale);
+  
+  const mesh = (
+    <DreiText 
+      ref={ref}
+      position={position} 
+      rotation={rotation}
+      scale={scaleVec}
+      color={layer.color}
+      fontSize={1}
+      anchorX="center"
+      anchorY="middle"
     >
-      <meshStandardMaterial transparent polygonOffset polygonOffsetFactor={-1}>
-        <RenderTexture attach="map" anisotropy={16}>
-          <color attach="background" args={["transparent"]} />
-          <Center>
-            <DreiText fontSize={1} color={layer.color}>
-              {layer.value}
-            </DreiText>
-          </Center>
-        </RenderTexture>
-      </meshStandardMaterial>
-    </Decal>
+      {layer.value}
+    </DreiText>
   );
+
+  if (isActive) {
+    return (
+      <TransformControls 
+        mode={gizmoMode}
+        onMouseDown={() => onTransformStart()}
+        onMouseUp={() => {
+          if (ref.current) {
+            const p = ref.current.position;
+            const r = ref.current.rotation;
+            const s = ref.current.scale;
+            onTransformEnd([p.x, p.y, p.z], [r.x, r.y, r.z], Math.max(s.x, s.y, s.z));
+          }
+        }}
+      >
+        {mesh}
+      </TransformControls>
+    );
+  }
+
+  return mesh;
 }
 
 function BoxIcon() {
