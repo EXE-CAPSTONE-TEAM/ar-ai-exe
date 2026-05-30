@@ -13,6 +13,7 @@ class ModelAssetResponse(CamelModel):
     obj_url: str = Field(alias="objUrl")
     mtl_url: str = Field(alias="mtlUrl")
     texture_url: str = Field(alias="textureUrl")
+    normal_map_url: str | None = Field(default=None, alias="normalMapUrl")
     metadata_url: str = Field(alias="metadataUrl")
     quality_report_url: str = Field(alias="qualityReportUrl")
     obj_package_zip_url: str = Field(alias="objPackageZipUrl")

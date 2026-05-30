@@ -56,6 +56,15 @@ class Settings(BaseSettings):
     reconstruction_min_available_memory_gb: float = 4.0
     reconstruction_min_free_storage_gb: float = 8.0
 
+    # Auto-sculpt & bake pipeline parameters
+    sculpt_enable: bool = True
+    sculpt_voxel_size: float = 0.005
+    sculpt_smooth_iterations: int = 5
+    sculpt_smooth_factor: float = 0.5
+    sculpt_decimate_ratio: float = 0.08
+    sculpt_normal_map_size: int = 2048
+    sculpt_texture_size: int = 2048
+
     model_config = SettingsConfigDict(
         env_file=BACKEND_ROOT / ".env",
         env_file_encoding="utf-8",

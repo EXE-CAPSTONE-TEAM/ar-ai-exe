@@ -19,6 +19,7 @@ class ModelAssetFiles:
     metadata: Path
     quality_report: Path
     obj_package_zip: Path
+    normal_map: Path | None = None
 
 
 class ModelAssetService:
@@ -29,13 +30,17 @@ class ModelAssetService:
     def get(self, model_asset_id: str) -> ModelAsset:
         asset = self.db.get(ModelAsset, model_asset_id)
         if not asset:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model asset not found.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Model asset not found."
+            )
         return asset
 
     def get_for_user(self, model_asset_id: str, user: User) -> ModelAsset:
         asset = self.get(model_asset_id)
         if asset.scan_session.user_id != user.id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model asset not found.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Model asset not found."
+            )
         return asset
 
     def file_key(self, asset: ModelAsset, file_type: str) -> str:
@@ -44,6 +49,7 @@ class ModelAssetService:
             "obj": asset.obj_path,
             "mtl": asset.mtl_path,
             "texture": asset.texture_path,
+            "normal-map": asset.normal_map_path,
             "metadata": asset.metadata_path,
             "quality-report": asset.quality_report_path,
             "obj-package": asset.obj_package_zip_path,
@@ -116,6 +122,13 @@ class ModelAssetService:
             files.obj_package_zip.read_bytes(),
             "application/zip",
         )
+        normal_map_object = None
+        if files.normal_map and files.normal_map.exists():
+            normal_map_object = self.storage.put_bytes(
+                f"{prefix}/shoe_normal_map.png",
+                files.normal_map.read_bytes(),
+                "image/png",
+            )
 
         asset = ModelAsset(
             scan_session_id=scan_session_id,
@@ -135,6 +148,10 @@ class ModelAssetService:
             texture_size_bytes=texture_object.size_bytes,
             texture_content_type=texture_object.content_type,
             texture_checksum=texture_object.checksum,
+            normal_map_path=normal_map_object.key if normal_map_object else None,
+            normal_map_size_bytes=normal_map_object.size_bytes if normal_map_object else None,
+            normal_map_content_type=normal_map_object.content_type if normal_map_object else None,
+            normal_map_checksum=normal_map_object.checksum if normal_map_object else None,
             metadata_path=metadata_object.key,
             metadata_size_bytes=metadata_object.size_bytes,
             metadata_content_type=metadata_object.content_type,
@@ -159,6 +176,9 @@ class ModelAssetService:
             quality_report = json.loads(self.file_bytes(asset, "quality-report").decode("utf-8"))
         except (HTTPException, json.JSONDecodeError, UnicodeDecodeError):
             quality_report = {}
+        normal_map_url = None
+        if asset.normal_map_path:
+            normal_map_url = f"/api/models/{asset.id}/download/normal-map"
         return ModelAssetResponse(
             id=asset.id,
             scanSessionId=asset.scan_session_id,
@@ -166,6 +186,7 @@ class ModelAssetService:
             objUrl=f"/api/models/{asset.id}/download/obj",
             mtlUrl=f"/api/models/{asset.id}/download/mtl",
             textureUrl=f"/api/models/{asset.id}/download/texture",
+            normalMapUrl=normal_map_url,
             metadataUrl=f"/api/models/{asset.id}/download/metadata",
             qualityReportUrl=f"/api/models/{asset.id}/quality-report",
             objPackageZipUrl=f"/api/models/{asset.id}/download/obj-package",

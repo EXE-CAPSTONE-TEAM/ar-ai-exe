@@ -21,6 +21,7 @@ class ScanStatus:
     FILTERING_FRAMES = "filtering_frames"
     PREPARING_RECONSTRUCTION = "preparing_reconstruction"
     RECONSTRUCTING = "reconstructing"
+    SCULPTING_MESH = "sculpting_mesh"
     CLEANING_MESH = "cleaning_mesh"
     UV_UNWRAPPING = "uv_unwrapping"
     TEXTURE_BAKING = "texture_baking"
@@ -130,6 +131,10 @@ class ModelAsset(Base):
     texture_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     texture_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
     texture_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    normal_map_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    normal_map_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    normal_map_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    normal_map_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
     metadata_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     metadata_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
     metadata_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -158,7 +163,9 @@ class Design(Base):
     preview_glb_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     preview_glb_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
     preview_glb_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    preview_status: Mapped[str] = mapped_column(String(32), default=DesignPreviewStatus.NONE, index=True)
+    preview_status: Mapped[str] = mapped_column(
+        String(32), default=DesignPreviewStatus.NONE, index=True
+    )
     preview_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     preview_updated_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)

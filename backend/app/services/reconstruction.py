@@ -21,6 +21,7 @@ from app.services.openmvs_service import OpenMVSService
 from app.services.reconstruction_toolchain import ReconstructionToolchainService
 from app.services.scan_sessions import ScanSessionService
 from app.services.storage import get_storage_service
+from app.services.mesh_sculpt_service import MeshSculptService, SculptResult
 
 
 @dataclass(frozen=True)
@@ -101,18 +102,33 @@ class ReconstructionService:
         self.scan_service.set_status(scan_session_id, ScanStatus.RECONSTRUCTING)
         textured_obj_path = self._run_photogrammetry(selected_dir, work_dir, log_path)
 
+        sculpt_result = None
+        if self.settings.sculpt_enable:
+            self.scan_service.set_status(scan_session_id, ScanStatus.SCULPTING_MESH)
+            sculpt_service = MeshSculptService(self.settings)
+            sculpt_result = sculpt_service.sculpt_and_bake(
+                input_mesh=textured_obj_path,
+                output_dir=model_dir,
+                log_path=log_path,
+            )
+            final_mesh_path = sculpt_result.low_poly_obj
+        else:
+            final_mesh_path = textured_obj_path
+
         self.scan_service.set_status(scan_session_id, ScanStatus.CLEANING_MESH)
         self._write_blender_script(model_dir / "export_shoe_assets.py")
-        self._run_blender_export(textured_obj_path, model_dir, log_path)
-        self._copy_obj_package(textured_obj_path, model_dir)
+        self._run_blender_export(final_mesh_path, model_dir, log_path)
+        self._copy_obj_package(final_mesh_path, model_dir)
 
         self.scan_service.set_status(scan_session_id, ScanStatus.EXPORTING)
         quality_report_path = model_dir / "quality_report.json"
-        self._write_quality_report(quality_report_path, selections)
+        self._write_quality_report(quality_report_path, selections, sculpt_result)
         obj_package_path = model_dir / "shoe_obj_package.zip"
         self._zip_obj_package(model_dir, obj_package_path)
 
-        asset = self._store_asset(scan_session_id, model_dir, metadata_path, quality_report_path, obj_package_path)
+        asset = self._store_asset(
+            scan_session_id, model_dir, metadata_path, quality_report_path, obj_package_path
+        )
         self.scan_service.set_status(scan_session_id, ScanStatus.COMPLETED)
         return asset
 
@@ -258,9 +274,13 @@ class ReconstructionService:
         database_path = work_dir / "colmap.db"
         sparse_dir = work_dir / "sparse"
         sparse_dir.mkdir(parents=True, exist_ok=True)
-        self._run_command(self.colmap.feature_extraction_command(image_dir, database_path), log_path)
+        self._run_command(
+            self.colmap.feature_extraction_command(image_dir, database_path), log_path
+        )
         self._run_command(self.colmap.matching_command(database_path), log_path)
-        self._run_command(self.colmap.mapper_command(image_dir, database_path, sparse_dir), log_path)
+        self._run_command(
+            self.colmap.mapper_command(image_dir, database_path, sparse_dir), log_path
+        )
 
         sparse_model = sparse_dir / "0"
         if not sparse_model.exists():
@@ -276,7 +296,9 @@ class ReconstructionService:
             log_path,
             cwd=work_dir,
         )
-        self._run_command(self.openmvs.densify_command(scene_path, dense_scene_path), log_path, cwd=work_dir)
+        self._run_command(
+            self.openmvs.densify_command(scene_path, dense_scene_path), log_path, cwd=work_dir
+        )
         self._run_command(
             self.openmvs.reconstruct_mesh_command(dense_scene_path, mesh_scene_path),
             log_path,
@@ -375,10 +397,16 @@ export_glb(output_dir / "shoe_preview.glb")
         for line in mtl_text.splitlines():
             if line.strip().startswith("map_Kd "):
                 mtl_lines.append("map_Kd shoe_texture.png")
+            elif "normal_map.png" in line:
+                mtl_lines.append(line.replace("normal_map.png", "shoe_normal_map.png"))
             else:
                 mtl_lines.append(line)
         (model_dir / "shoe.mtl").write_text("\n".join(mtl_lines) + "\n", encoding="utf-8")
         shutil.copyfile(source_texture, model_dir / "shoe_texture.png")
+
+        normal_map_src = model_dir / "normal_map.png"
+        if normal_map_src.exists():
+            shutil.copyfile(normal_map_src, model_dir / "shoe_normal_map.png")
 
     def _find_material_and_texture(self, source_obj: Path) -> tuple[Path, Path]:
         source_dir = source_obj.parent
@@ -444,24 +472,33 @@ export_glb(output_dir / "shoe_preview.glb")
         self,
         path: Path,
         selections: dict[str, FrameSelection],
+        sculpt_result: SculptResult | None = None,
     ) -> None:
         frames_extracted = {
             pass_type: selection.extracted_count for pass_type, selection in selections.items()
         }
-        frames_selected = {pass_type: len(selection.selected) for pass_type, selection in selections.items()}
+        frames_selected = {
+            pass_type: len(selection.selected) for pass_type, selection in selections.items()
+        }
         rejected: dict[str, int] = {}
         for selection in selections.values():
             for reason, count in selection.rejected_by_reason.items():
                 rejected[reason] = rejected.get(reason, 0) + count
 
-        brightness = self._average([selection.average_brightness for selection in selections.values()])
-        sharpness = self._average([selection.average_sharpness for selection in selections.values()])
+        brightness = self._average(
+            [selection.average_brightness for selection in selections.values()]
+        )
+        sharpness = self._average(
+            [selection.average_sharpness for selection in selections.values()]
+        )
         lighting_score = self._clamp((brightness / 160) * 100)
         blur_score = self._clamp((sharpness / 450) * 100)
         selected_total = sum(frames_selected.values())
         target_total = max(1, self.settings.reconstruction_max_frames_per_pass * len(selections))
         coverage_score = self._clamp((selected_total / target_total) * 100)
-        overall = round(self._clamp((lighting_score * 0.25) + (blur_score * 0.35) + (coverage_score * 0.40)))
+        overall = round(
+            self._clamp((lighting_score * 0.25) + (blur_score * 0.35) + (coverage_score * 0.40))
+        )
         confidence = "high" if overall >= 80 else "medium" if overall >= 55 else "low"
         warnings = []
         if lighting_score < 50:
@@ -471,35 +508,46 @@ export_glb(output_dir / "shoe_preview.glb")
         if coverage_score < 35:
             warnings.append("Frame coverage is low; reconstruction may miss shoe areas.")
 
-        write_json(
-            path,
-            {
-                "overallScore": overall,
-                "status": "completed",
-                "inputVideos": list(selections.keys()),
-                "framesExtracted": frames_extracted,
-                "framesSelected": frames_selected,
-                "rejectedFramesByReason": rejected,
-                "lightingScore": round(lighting_score, 1),
-                "blurScore": round(blur_score, 1),
-                "coverageScore": round(coverage_score, 1),
-                "textureConfidence": confidence,
-                "geometryConfidence": confidence,
-                "scaleConfidence": "medium",
-                "warnings": warnings,
-                "recommendation": "Use for visual shoe similarity review; not for industrial measurement.",
-            },
-        )
+        report = {
+            "overallScore": overall,
+            "status": "completed",
+            "inputVideos": list(selections.keys()),
+            "framesExtracted": frames_extracted,
+            "framesSelected": frames_selected,
+            "rejectedFramesByReason": rejected,
+            "lightingScore": round(lighting_score, 1),
+            "blurScore": round(blur_score, 1),
+            "coverageScore": round(coverage_score, 1),
+            "textureConfidence": confidence,
+            "geometryConfidence": confidence,
+            "scaleConfidence": "medium",
+            "warnings": warnings,
+            "recommendation": "Use for visual shoe similarity review; not for industrial measurement.",
+        }
+        if sculpt_result:
+            report["sculptMetrics"] = {
+                "highPolyFaceCount": sculpt_result.high_poly_face_count,
+                "lowPolyFaceCount": sculpt_result.low_poly_face_count,
+                "reductionRatio": sculpt_result.reduction_ratio,
+                "normalMapResolution": self.settings.sculpt_normal_map_size,
+                "textureResolution": self.settings.sculpt_texture_size,
+            }
+
+        write_json(path, report)
 
     def _zip_obj_package(self, model_dir: Path, zip_path: Path) -> None:
+        files = [
+            "shoe.obj",
+            "shoe.mtl",
+            "shoe_texture.png",
+            "metadata.json",
+            "quality_report.json",
+        ]
+        if (model_dir / "shoe_normal_map.png").exists():
+            files.append("shoe_normal_map.png")
+
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for name in [
-                "shoe.obj",
-                "shoe.mtl",
-                "shoe_texture.png",
-                "metadata.json",
-                "quality_report.json",
-            ]:
+            for name in files:
                 archive.write(model_dir / name, name)
 
     def _store_asset(
@@ -510,6 +558,7 @@ export_glb(output_dir / "shoe_preview.glb")
         quality_report_path: Path,
         obj_package_path: Path,
     ) -> ModelAsset:
+        normal_map_path = model_dir / "shoe_normal_map.png"
         return ModelAssetService(self.db).create_from_files(
             scan_session_id,
             ModelAssetFiles(
@@ -520,6 +569,7 @@ export_glb(output_dir / "shoe_preview.glb")
                 metadata=metadata_path,
                 quality_report=quality_report_path,
                 obj_package_zip=obj_package_path,
+                normal_map=normal_map_path if normal_map_path.exists() else None,
             ),
         )
 
@@ -533,7 +583,9 @@ export_glb(output_dir / "shoe_preview.glb")
         )
         if not result.ok:
             message = result.stderr.strip() or result.stdout.strip() or "command failed"
-            raise RuntimeError(f"Reconstruction command failed: {' '.join(command)}\n{message[-1200:]}")
+            raise RuntimeError(
+                f"Reconstruction command failed: {' '.join(command)}\n{message[-1200:]}"
+            )
 
     def _pipeline_env(self) -> dict[str, str]:
         max_threads = str(max(1, self.settings.reconstruction_max_threads))
