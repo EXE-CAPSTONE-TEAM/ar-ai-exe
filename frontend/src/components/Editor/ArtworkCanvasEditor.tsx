@@ -21,6 +21,9 @@ export function ArtworkCanvasEditor({ disabled, onExport }: ArtworkCanvasEditorP
   const [undoStack, setUndoStack] = useState<ImageData[]>([]);
   const [redoStack, setRedoStack] = useState<ImageData[]>([]);
   const [isExporting, setIsExporting] = useState(false);
+  const toolRef = useRef(tool);
+  const colorRef = useRef(color);
+  const brushSizeRef = useRef(brushSize);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -28,6 +31,18 @@ export function ArtworkCanvasEditor({ disabled, onExport }: ArtworkCanvasEditorP
     canvas.width = CANVAS_SIZE;
     canvas.height = CANVAS_SIZE;
   }, []);
+
+  useEffect(() => {
+    toolRef.current = tool;
+  }, [tool]);
+
+  useEffect(() => {
+    colorRef.current = color;
+  }, [color]);
+
+  useEffect(() => {
+    brushSizeRef.current = brushSize;
+  }, [brushSize]);
 
   const canvasContext = (): CanvasRenderingContext2D | null => {
     const canvas = canvasRef.current;
@@ -59,9 +74,9 @@ export function ArtworkCanvasEditor({ disabled, onExport }: ArtworkCanvasEditorP
     context.save();
     context.lineCap = "round";
     context.lineJoin = "round";
-    context.lineWidth = brushSize;
-    context.globalCompositeOperation = tool === "eraser" ? "destination-out" : "source-over";
-    context.strokeStyle = color;
+    context.lineWidth = brushSizeRef.current;
+    context.globalCompositeOperation = toolRef.current === "eraser" ? "destination-out" : "source-over";
+    context.strokeStyle = colorRef.current;
     context.beginPath();
     context.moveTo(previous.x, previous.y);
     context.lineTo(point.x, point.y);
@@ -139,6 +154,21 @@ export function ArtworkCanvasEditor({ disabled, onExport }: ArtworkCanvasEditorP
     }
   };
 
+  const updateColor = (nextColor: string) => {
+    colorRef.current = nextColor;
+    setColor(nextColor);
+  };
+
+  const updateTool = (nextTool: DrawingTool) => {
+    toolRef.current = nextTool;
+    setTool(nextTool);
+  };
+
+  const updateBrushSize = (nextBrushSize: number) => {
+    brushSizeRef.current = nextBrushSize;
+    setBrushSize(nextBrushSize);
+  };
+
   return (
     <div className="artwork-editor">
       <div className="artwork-toolbar">
@@ -147,7 +177,7 @@ export function ArtworkCanvasEditor({ disabled, onExport }: ArtworkCanvasEditorP
           className={tool === "brush" ? "active" : ""}
           disabled={disabled}
           title="Brush"
-          onClick={() => setTool("brush")}
+          onClick={() => updateTool("brush")}
         >
           <Brush size={16} aria-hidden="true" />
         </button>
@@ -156,7 +186,7 @@ export function ArtworkCanvasEditor({ disabled, onExport }: ArtworkCanvasEditorP
           className={tool === "eraser" ? "active" : ""}
           disabled={disabled}
           title="Eraser"
-          onClick={() => setTool("eraser")}
+          onClick={() => updateTool("eraser")}
         >
           <Eraser size={16} aria-hidden="true" />
         </button>
@@ -186,7 +216,13 @@ export function ArtworkCanvasEditor({ disabled, onExport }: ArtworkCanvasEditorP
         <label className="color-picker-row">
           Color
           <div className="color-input-wrapper">
-            <input type="color" value={color} disabled={disabled} onChange={(event) => setColor(event.target.value)} />
+            <input
+              type="color"
+              value={color}
+              disabled={disabled}
+              onInput={(event) => updateColor(event.currentTarget.value)}
+              onChange={(event) => updateColor(event.currentTarget.value)}
+            />
             <span>{color.toUpperCase()}</span>
           </div>
         </label>
@@ -199,7 +235,8 @@ export function ArtworkCanvasEditor({ disabled, onExport }: ArtworkCanvasEditorP
             step="1"
             value={brushSize}
             disabled={disabled}
-            onChange={(event) => setBrushSize(Number(event.target.value))}
+            onInput={(event) => updateBrushSize(Number(event.currentTarget.value))}
+            onChange={(event) => updateBrushSize(Number(event.currentTarget.value))}
           />
         </label>
       </div>

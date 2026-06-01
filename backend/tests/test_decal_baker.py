@@ -206,6 +206,46 @@ def test_prepare_decals_limits_combined_sticker_and_text_count(tmp_path: Path) -
     assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
 
 
+def test_prepare_material_sanitizes_base_color_and_material_values() -> None:
+    service = decal_service()
+
+    material = service._prepare_material(
+        {
+            "baseColor": "not-a-color",
+            "material": {
+                "roughness": 2,
+                "metallic": -1,
+            },
+        }
+    )
+
+    assert material == {
+        "baseColor": "#ffffff",
+        "roughness": 1.0,
+        "metallic": 0.0,
+    }
+
+
+def test_prepare_material_preserves_valid_base_color_and_material_values() -> None:
+    service = decal_service()
+
+    material = service._prepare_material(
+        {
+            "baseColor": "#123abc",
+            "material": {
+                "roughness": 0.8,
+                "metallic": 0.2,
+            },
+        }
+    )
+
+    assert material == {
+        "baseColor": "#123abc",
+        "roughness": 0.8,
+        "metallic": 0.2,
+    }
+
+
 def test_blender_script_uses_explicit_projection_and_miss_guard(tmp_path: Path) -> None:
     service = decal_service()
     script_path = tmp_path / "apply_decals.py"
@@ -214,6 +254,7 @@ def test_blender_script_uses_explicit_projection_and_miss_guard(tmp_path: Path) 
     script = script_path.read_text(encoding="utf-8")
 
     compile(script, str(script_path), "exec")
+    assert "import math" in script
     assert "def project_decal_vertices_to_targets" in script
     assert "def find_target_meshes" in script
     assert "from mathutils.bvhtree import BVHTree" in script
@@ -222,8 +263,20 @@ def test_blender_script_uses_explicit_projection_and_miss_guard(tmp_path: Path) 
     assert "def decal_outward_normal" in script
     assert "def gltf_vector_to_blender" in script
     assert "def gltf_rotation_to_blender" in script
+    assert "def three_euler_xyz_matrix" in script
+    assert "three_euler_xyz_matrix(value)" in script
+    assert "def apply_design_material" in script
+    assert "def apply_material_settings" in script
+    assert "not base_color.links" in script
+    assert "target.data.materials.clear()" not in script
+    assert "polygon.material_index = 0" in script
+    assert "apply_design_material(manifest.get(\"material\", {}))" in script
+    assert script.index("apply_design_material(manifest.get(\"material\", {}))") < script.index(
+        "for decal in manifest.get"
+    )
     assert 'Matrix.Rotation(1.5707963267948966, 4, "X")' in script
     assert "def orient_surface_normal" in script
+    assert "def orient_surface_normal(surface_normal, outward_normal)" in script
     assert "def effective_projection_depth" in script
     assert "def effective_surface_offset" in script
     assert "find_nearest" in script
@@ -234,7 +287,9 @@ def test_blender_script_uses_explicit_projection_and_miss_guard(tmp_path: Path) 
     assert "decal_size * 1.25" in script
     assert "projection = directional_projection_on_targets" in script
     assert "projection = closest_nearest_projection" in script
+    assert "reference_direction = world_point - point_world" not in script
     assert "surface_normal = orient_surface_normal(surface_normal, outward_normal)" in script
+    assert "material.use_backface_culling = False" in script
     assert "missed the shoe surface" in script
     assert "hit_ratio < 0.25" in script
 

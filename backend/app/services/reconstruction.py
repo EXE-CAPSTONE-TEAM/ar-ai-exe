@@ -12,10 +12,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models import ModelAsset, ScanSession, ScanStatus
-from app.services.blender_service import BlenderService
 from app.services.colmap_service import ColmapService
 from app.services.command_runner import CommandRunner
 from app.services.file_helpers import write_json
+from app.services.mesh_cleanup import MeshCleanupReport, MeshCleanupService
 from app.services.model_assets import ModelAssetFiles, ModelAssetService
 from app.services.openmvs_service import OpenMVSService
 from app.services.reconstruction_toolchain import ReconstructionToolchainService
@@ -49,7 +49,7 @@ class ReconstructionService:
         self.storage = get_storage_service()
         self.colmap = ColmapService()
         self.openmvs = OpenMVSService()
-        self.blender = BlenderService()
+        self.mesh_cleanup = MeshCleanupService()
         self.toolchain = ReconstructionToolchainService(self.settings)
 
     def process(self, scan_session_id: str) -> ModelAsset:
@@ -102,13 +102,11 @@ class ReconstructionService:
         textured_obj_path = self._run_photogrammetry(selected_dir, work_dir, log_path)
 
         self.scan_service.set_status(scan_session_id, ScanStatus.CLEANING_MESH)
-        self._write_blender_script(model_dir / "export_shoe_assets.py")
-        self._run_blender_export(textured_obj_path, model_dir, log_path)
-        self._copy_obj_package(textured_obj_path, model_dir)
+        cleanup_report = self._cleanup_reconstructed_model(textured_obj_path, model_dir, log_path)
 
         self.scan_service.set_status(scan_session_id, ScanStatus.EXPORTING)
         quality_report_path = model_dir / "quality_report.json"
-        self._write_quality_report(quality_report_path, selections)
+        self._write_quality_report(quality_report_path, selections, cleanup_report)
         obj_package_path = model_dir / "shoe_obj_package.zip"
         self._zip_obj_package(model_dir, obj_package_path)
 
@@ -299,86 +297,19 @@ class ReconstructionService:
                 return candidate
         raise RuntimeError("OpenMVS did not produce an OBJ mesh.")
 
-    def _write_blender_script(self, script_path: Path) -> None:
-        script_path.write_text(
-            """
-import mathutils
-import pathlib
-import sys
-
-import bpy
-
-
-def import_obj(path):
-    if hasattr(bpy.ops.wm, "obj_import"):
-        bpy.ops.wm.obj_import(filepath=str(path))
-    else:
-        bpy.ops.import_scene.obj(filepath=str(path))
-
-
-def export_glb(path):
-    bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLB")
-
-
-def normalize_scene():
-    meshes = [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
-    if not meshes:
-        raise RuntimeError("No mesh objects imported.")
-    min_corner = mathutils.Vector((float("inf"), float("inf"), float("inf")))
-    max_corner = mathutils.Vector((float("-inf"), float("-inf"), float("-inf")))
-    for obj in meshes:
-        for corner in obj.bound_box:
-            world = obj.matrix_world @ mathutils.Vector(corner)
-            min_corner.x = min(min_corner.x, world.x)
-            min_corner.y = min(min_corner.y, world.y)
-            min_corner.z = min(min_corner.z, world.z)
-            max_corner.x = max(max_corner.x, world.x)
-            max_corner.y = max(max_corner.y, world.y)
-            max_corner.z = max(max_corner.z, world.z)
-    center = (min_corner + max_corner) / 2
-    extent = max(max_corner.x - min_corner.x, max_corner.y - min_corner.y, max_corner.z - min_corner.z)
-    scale = 2.4 / extent if extent > 0 else 1
-    for obj in meshes:
-        obj.location -= center
-        obj.scale *= scale
-
-
-input_obj = pathlib.Path(sys.argv[-2])
-output_dir = pathlib.Path(sys.argv[-1])
-bpy.ops.object.select_all(action="SELECT")
-bpy.ops.object.delete()
-import_obj(input_obj)
-normalize_scene()
-export_glb(output_dir / "shoe_preview.glb")
-""".strip(),
-            encoding="utf-8",
+    def _cleanup_reconstructed_model(
+        self,
+        textured_obj_path: Path,
+        model_dir: Path,
+        log_path: Path,
+    ) -> MeshCleanupReport:
+        _, source_texture = self._find_material_and_texture(textured_obj_path)
+        return self.mesh_cleanup.cleanup(
+            textured_obj_path,
+            model_dir,
+            texture_path=source_texture,
+            log_path=log_path,
         )
-
-    def _run_blender_export(self, textured_obj_path: Path, model_dir: Path, log_path: Path) -> None:
-        script_path = model_dir / "export_shoe_assets.py"
-        command = self.blender.cleanup_export_command(script_path, textured_obj_path, model_dir)
-        self._run_command(command, log_path, cwd=model_dir)
-        if not (model_dir / "shoe_preview.glb").exists():
-            raise RuntimeError("Blender did not export shoe_preview.glb.")
-
-    def _copy_obj_package(self, source_obj: Path, model_dir: Path) -> None:
-        source_mtl, source_texture = self._find_material_and_texture(source_obj)
-        obj_text = source_obj.read_text(encoding="utf-8", errors="ignore")
-        obj_lines = [
-            "mtllib shoe.mtl" if line.startswith("mtllib ") else line
-            for line in obj_text.splitlines()
-        ]
-        (model_dir / "shoe.obj").write_text("\n".join(obj_lines) + "\n", encoding="utf-8")
-
-        mtl_text = source_mtl.read_text(encoding="utf-8", errors="ignore")
-        mtl_lines = []
-        for line in mtl_text.splitlines():
-            if line.strip().startswith("map_Kd "):
-                mtl_lines.append("map_Kd shoe_texture.png")
-            else:
-                mtl_lines.append(line)
-        (model_dir / "shoe.mtl").write_text("\n".join(mtl_lines) + "\n", encoding="utf-8")
-        shutil.copyfile(source_texture, model_dir / "shoe_texture.png")
 
     def _find_material_and_texture(self, source_obj: Path) -> tuple[Path, Path]:
         source_dir = source_obj.parent
@@ -444,6 +375,7 @@ export_glb(output_dir / "shoe_preview.glb")
         self,
         path: Path,
         selections: dict[str, FrameSelection],
+        cleanup_report: MeshCleanupReport,
     ) -> None:
         frames_extracted = {
             pass_type: selection.extracted_count for pass_type, selection in selections.items()
@@ -488,6 +420,7 @@ export_glb(output_dir / "shoe_preview.glb")
                 "scaleConfidence": "medium",
                 "warnings": warnings,
                 "recommendation": "Use for visual shoe similarity review; not for industrial measurement.",
+                **cleanup_report.to_quality_fields(),
             },
         )
 

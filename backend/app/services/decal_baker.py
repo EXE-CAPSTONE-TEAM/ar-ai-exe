@@ -48,7 +48,16 @@ class DecalBakeService:
         shutil.copyfile(source_glb, source_copy)
 
         manifest_path = work_dir / "decal_manifest.json"
-        manifest_path.write_text(json.dumps({"decals": decals}, indent=2), encoding="utf-8")
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "decals": decals,
+                    "material": self._prepare_material(design_config),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
         script_path = work_dir / "apply_decals.py"
         self._write_blender_script(script_path)
@@ -103,6 +112,15 @@ class DecalBakeService:
                 detail=f"Design cannot export more than {MAX_STICKERS} decal layers.",
             )
         return decals
+
+    def _prepare_material(self, design_config: dict[str, Any]) -> dict[str, Any]:
+        raw_material = design_config.get("material", {})
+        material = raw_material if isinstance(raw_material, dict) else {}
+        return {
+            "baseColor": self._safe_color(str(design_config.get("baseColor") or "#ffffff")),
+            "roughness": self._number(material.get("roughness"), 1.0, minimum=0.0, maximum=1.0),
+            "metallic": self._number(material.get("metallic"), 0.0, minimum=0.0, maximum=1.0),
+        }
 
     def _prepare_stickers(self, output_dir: Path, design_config: dict[str, Any]) -> list[dict[str, Any]]:
         raw_stickers = design_config.get("stickers", [])
@@ -418,6 +436,7 @@ class DecalBakeService:
         path.write_text(
             r'''
 import json
+import math
 import pathlib
 import sys
 import traceback
@@ -515,6 +534,7 @@ def create_image_material(decal):
     image = bpy.data.images.load(decal["imagePath"], check_existing=True)
     material = bpy.data.materials.new(f"decal_{decal['id']}_material")
     material.use_nodes = True
+    material.use_backface_culling = False
     material.blend_method = "BLEND"
     material.diffuse_color = (1, 1, 1, 1)
     set_optional(material, "show_transparent_back", True)
@@ -545,10 +565,60 @@ def parse_hex_color(value):
     return (red, green, blue, 1)
 
 
+def create_design_base_material(color, roughness, metallic):
+    material = bpy.data.materials.new("design_base_material")
+    material.use_nodes = True
+    apply_material_settings(material, color, roughness, metallic)
+    return material
+
+
+def apply_material_settings(material, color, roughness, metallic):
+    material.use_backface_culling = False
+    material.diffuse_color = color
+    if not material.use_nodes:
+        material.use_nodes = True
+
+    nodes = material.node_tree.nodes
+    bsdf = nodes.get("Principled BSDF")
+    if bsdf:
+        base_color = bsdf.inputs.get("Base Color")
+        if base_color and not base_color.links:
+            base_color.default_value = color
+        roughness_input = bsdf.inputs.get("Roughness")
+        if roughness_input:
+            roughness_input.default_value = roughness
+        metallic_input = bsdf.inputs.get("Metallic")
+        if metallic_input:
+            metallic_input.default_value = metallic
+
+
+def apply_design_material(material_config):
+    color = parse_hex_color(material_config.get("baseColor"))
+    roughness = max(0.0, min(1.0, float(material_config.get("roughness", 1.0))))
+    metallic = max(0.0, min(1.0, float(material_config.get("metallic", 0.0))))
+
+    for target in target_mesh_candidates():
+        materials = [material for material in target.data.materials if material]
+        if not materials:
+            target.data.materials.append(create_design_base_material(color, roughness, metallic))
+            for polygon in target.data.polygons:
+                polygon.material_index = 0
+            continue
+
+        for material in materials:
+            apply_material_settings(material, color, roughness, metallic)
+
+        slot_count = len(target.data.materials)
+        for polygon in target.data.polygons:
+            if polygon.material_index >= slot_count or not target.data.materials[polygon.material_index]:
+                polygon.material_index = 0
+
+
 def create_solid_material(decal):
     color = parse_hex_color(decal.get("color"))
     material = bpy.data.materials.new(f"decal_{decal['id']}_material")
     material.use_nodes = True
+    material.use_backface_culling = False
     material.diffuse_color = color
     nodes = material.node_tree.nodes
     bsdf = nodes.get("Principled BSDF")
@@ -704,8 +774,22 @@ def gltf_vector_to_blender(value):
 
 
 def gltf_rotation_to_blender(value):
-    rotation_matrix = gltf_to_blender_matrix().to_3x3() @ mathutils.Euler(value, "XYZ").to_matrix()
+    rotation_matrix = gltf_to_blender_matrix().to_3x3() @ three_euler_xyz_matrix(value)
     return rotation_matrix.to_euler("XYZ")
+
+
+def three_euler_xyz_matrix(value):
+    x, y, z = float(value[0]), float(value[1]), float(value[2])
+    a, b = math.cos(x), math.sin(x)
+    c, d = math.cos(y), math.sin(y)
+    e, f = math.cos(z), math.sin(z)
+    return mathutils.Matrix(
+        (
+            (c * e, -c * f, d),
+            (a * f + b * d * e, a * e - b * d * f, -b * c),
+            (b * f - a * d * e, b * e + a * d * f, a * c),
+        )
+    )
 
 
 def raycast_target(target, origin_world, direction_world, limit):
@@ -907,6 +991,7 @@ try:
 
     clear_scene()
     import_model(source_glb)
+    apply_design_material(manifest.get("material", {}))
     for decal in manifest.get("decals", manifest.get("stickers", [])):
         create_decal(decal)
 

@@ -265,10 +265,15 @@ export function App() {
       const savedDesign = await api.getDesign(savedDesignId);
       setDesign(savedDesign);
       setDesignName(savedDesign.name);
-      const hydratedConfig = await hydrateDesignAssetPreviewUrls(savedDesign.designConfig);
+      const hydratedConfig = normalizeFixedMaterial(await hydrateDesignAssetPreviewUrls(savedDesign.designConfig));
+      const savedFingerprint = configFingerprint(savedDesign.designConfig);
       setConfig(hydratedConfig);
-      setSavedConfigFingerprint(configFingerprint(savedDesign.designConfig));
+      setSavedConfigFingerprint(savedFingerprint);
       setPreviewErrorMessage(savedDesign.previewStatus === "failed" ? savedDesign.previewErrorMessage : null);
+      if (configFingerprint(hydratedConfig) !== savedFingerprint) {
+        clearBakedPreview();
+        return false;
+      }
       return await loadBakedPreview(savedDesign);
     } catch {
       localStorage.removeItem(designStorageKey(modelAssetId));
@@ -816,9 +821,10 @@ function findLayer(config: DesignConfig, layerId: string) {
 }
 
 function persistableConfig(config: DesignConfig): DesignConfig {
+  const fixedConfig = normalizeFixedMaterial(config);
   return {
-    ...config,
-    stickers: config.stickers.map((sticker) => {
+    ...fixedConfig,
+    stickers: fixedConfig.stickers.map((sticker) => {
       const { previewUrl: _previewUrl, ...persistableSticker } = sticker;
       return persistableSticker;
     }),
@@ -836,13 +842,26 @@ function stripRuntimeLayer(layer: ReturnType<typeof findLayer>) {
 function createDefaultConfig(modelAssetId: string): DesignConfig {
   return {
     modelAssetId,
-    baseColor: "#ffffff",
+    baseColor: FIXED_BASE_COLOR,
     material: {
-      roughness: 0.5,
-      metallic: 0,
+      ...FIXED_MATERIAL,
     },
     stickers: [],
     texts: [],
+  };
+}
+
+const FIXED_BASE_COLOR = "#ffffff";
+const FIXED_MATERIAL = {
+  roughness: 1,
+  metallic: 0,
+};
+
+function normalizeFixedMaterial(config: DesignConfig): DesignConfig {
+  return {
+    ...config,
+    baseColor: FIXED_BASE_COLOR,
+    material: { ...FIXED_MATERIAL },
   };
 }
 

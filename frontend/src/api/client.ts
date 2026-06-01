@@ -183,6 +183,7 @@ export const api = {
     }
     const response = await fetch(`${API_BASE_URL}${design.previewGlbUrl}`, {
       headers: authHeader(),
+      cache: "no-store",
     });
     if (!response.ok) {
       throw new ApiError(await errorMessage(response), response.status);

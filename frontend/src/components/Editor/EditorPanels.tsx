@@ -153,33 +153,6 @@ export function EditorPanels({
       </section>
 
       <section className="panel-section">
-        <h3>Material</h3>
-        <label>
-          Base color
-          <input
-            type="color"
-            value={config.baseColor}
-            onChange={(event) => update({ baseColor: event.target.value })}
-          />
-        </label>
-        <label>
-          Roughness
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={config.material.roughness}
-            onChange={(event) =>
-              update({
-                material: { ...config.material, roughness: Number(event.target.value) },
-              })
-            }
-          />
-        </label>
-      </section>
-
-      <section className="panel-section">
         <h3>Decals & Text</h3>
         <div className="decal-guidance">
           <ImagePlus size={18} aria-hidden="true" />

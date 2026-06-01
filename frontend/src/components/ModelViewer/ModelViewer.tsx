@@ -156,6 +156,12 @@ function ShoeModel({
   useEffect(() => {
     gltf.scene.traverse((node) => {
       if (node instanceof THREE.Mesh) {
+        if (isDecalMeshName(node.name)) {
+          node.castShadow = true;
+          node.receiveShadow = true;
+          return;
+        }
+
         if (!node.userData.originalMaterial) {
           if (Array.isArray(node.material)) {
             node.userData.originalMaterial = node.material.map((m: THREE.Material) => m.clone());
@@ -169,7 +175,7 @@ function ShoeModel({
             const m = mat.clone();
             if (m instanceof THREE.MeshStandardMaterial || m instanceof THREE.MeshPhysicalMaterial) {
               m.color = new THREE.Color(config?.baseColor ?? "#ffffff");
-              m.roughness = config?.material.roughness ?? 0.5;
+              m.roughness = config?.material.roughness ?? 1;
               m.metalness = config?.material.metallic ?? 0;
             }
             return m;
