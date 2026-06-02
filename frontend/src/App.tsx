@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle2, Cpu, HardDrive, LogIn, RefreshCw, Search, UserPlus, Wrench } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, ApiError, designStorageKey } from "./api/client";
 import type { ModelImportPayload } from "./api/client";
@@ -10,11 +10,13 @@ import { ModelImportPanel } from "./components/ModelImport/ModelImportPanel";
 import { ModelViewer } from "./components/ModelViewer/ModelViewer";
 import type {
   Design,
+  DesignAssetSource,
   DesignConfig,
   ExportPackage,
   ModelAsset,
   ReconstructionReadiness,
   ScanSession,
+  TextLayer,
   User,
 } from "./types";
 
@@ -45,6 +47,7 @@ export function App() {
   const [meshBounds, setMeshBounds] = useState<{ center: [number, number, number]; size: [number, number, number] } | null>(null);
   const [gizmoMode, setGizmoMode] = useState<"translate" | "rotate" | "scale">("translate");
   const [surfaceApplyRequest, setSurfaceApplyRequest] = useState(0);
+  const assetPreviewUrlsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     void loadReadiness();
@@ -93,6 +96,12 @@ export function App() {
       }
     };
   }, [previewModelUrl]);
+
+  useEffect(() => {
+    return () => {
+      clearAssetPreviewUrls();
+    };
+  }, []);
 
   const canLoad = useMemo(() => scanId.trim().length > 0 && Boolean(user), [scanId, user]);
   const activeModelUrl = previewModelUrl ?? modelUrl;
@@ -149,12 +158,27 @@ export function App() {
     clearBakedPreview();
   }
 
+  function rememberAssetPreviewUrl(url: string): string {
+    if (url.startsWith("blob:")) {
+      assetPreviewUrlsRef.current.add(url);
+    }
+    return url;
+  }
+
+  function clearAssetPreviewUrls() {
+    for (const url of assetPreviewUrlsRef.current) {
+      URL.revokeObjectURL(url);
+    }
+    assetPreviewUrlsRef.current.clear();
+  }
+
   function logout() {
     api.logout();
     setUser(null);
     setScanSession(null);
     setModelAsset(null);
     setModelUrl(null);
+    clearAssetPreviewUrls();
     clearSavedDesignState();
     setDesign(null);
     setConfig(null);
@@ -172,6 +196,7 @@ export function App() {
     setStatusMessage("Loading scan");
     setModelAsset(null);
     setModelUrl(null);
+    clearAssetPreviewUrls();
     clearSavedDesignState();
     setExportPackage(null);
 
@@ -201,6 +226,7 @@ export function App() {
     setStatusMessage("Importing model");
     setModelAsset(null);
     setModelUrl(null);
+    clearAssetPreviewUrls();
     clearSavedDesignState();
     setDesign(null);
     setConfig(null);
@@ -239,9 +265,15 @@ export function App() {
       const savedDesign = await api.getDesign(savedDesignId);
       setDesign(savedDesign);
       setDesignName(savedDesign.name);
-      setConfig(savedDesign.designConfig);
-      setSavedConfigFingerprint(configFingerprint(savedDesign.designConfig));
+      const hydratedConfig = normalizeFixedMaterial(await hydrateDesignAssetPreviewUrls(savedDesign.designConfig));
+      const savedFingerprint = configFingerprint(savedDesign.designConfig);
+      setConfig(hydratedConfig);
+      setSavedConfigFingerprint(savedFingerprint);
       setPreviewErrorMessage(savedDesign.previewStatus === "failed" ? savedDesign.previewErrorMessage : null);
+      if (configFingerprint(hydratedConfig) !== savedFingerprint) {
+        clearBakedPreview();
+        return false;
+      }
       return await loadBakedPreview(savedDesign);
     } catch {
       localStorage.removeItem(designStorageKey(modelAssetId));
@@ -274,6 +306,25 @@ export function App() {
     }
   }
 
+  async function hydrateDesignAssetPreviewUrls(designConfig: DesignConfig): Promise<DesignConfig> {
+    const stickers = await Promise.all(
+      designConfig.stickers.map(async (sticker) => {
+        if (!sticker.assetId || sticker.previewUrl) {
+          return sticker;
+        }
+        try {
+          return {
+            ...sticker,
+            previewUrl: rememberAssetPreviewUrl(await api.fetchDesignAssetBlobUrl(sticker.assetId)),
+          };
+        } catch {
+          return sticker;
+        }
+      }),
+    );
+    return { ...designConfig, stickers };
+  }
+
   async function saveDesign() {
     if (!modelAsset || !config) {
       return;
@@ -288,7 +339,7 @@ export function App() {
         : await api.createDesign(modelAsset.id, designName, bakeConfig);
       setDesign(savedDesign);
       setDesignName(savedDesign.name);
-      setConfig(savedDesign.designConfig);
+      setConfig(await hydrateDesignAssetPreviewUrls(savedDesign.designConfig));
       setSavedConfigFingerprint(configFingerprint(savedDesign.designConfig));
       localStorage.setItem(designStorageKey(modelAsset.id), savedDesign.id);
       const hasPreview = await loadBakedPreview(savedDesign);
@@ -318,6 +369,16 @@ export function App() {
 
   function applyActiveLayerToSurface() {
     setSurfaceApplyRequest((value) => value + 1);
+  }
+
+  async function uploadDesignAssetWithPreview(file: File, sourceType: Extract<DesignAssetSource, "upload" | "canvas">) {
+    const asset = await api.uploadDesignAsset(file, sourceType);
+    return {
+      assetId: asset.id,
+      sourceType,
+      fileName: asset.fileName,
+      previewUrl: rememberAssetPreviewUrl(await api.fetchDesignAssetBlobUrl(asset.id)),
+    };
   }
 
   async function exportDesign() {
@@ -442,6 +503,7 @@ export function App() {
                 onExport={exportDesign}
                 onDownload={downloadExport}
                 onDownloadModelFile={downloadModelFile}
+                onUploadDesignAsset={uploadDesignAssetWithPreview}
               />
             </section>
           </>
@@ -598,13 +660,25 @@ function AuthPanel({
 }
 
 async function prepareBakeConfig(config: DesignConfig): Promise<DesignConfig> {
+  const persistable = persistableConfig(config);
   const stickers = await Promise.all(
-    config.stickers.map(async (sticker) => ({
-      ...sticker,
-      imageUrl: await rasterizeSvgDataUriToPng(sticker.imageUrl),
+    persistable.stickers.map(async (sticker) => {
+      if (sticker.assetId) {
+        return sticker;
+      }
+      return {
+        ...sticker,
+        imageUrl: sticker.imageUrl ? await rasterizeSvgDataUriToPng(sticker.imageUrl) : sticker.imageUrl,
+      };
+    }),
+  );
+  const texts = await Promise.all(
+    persistable.texts.map(async (textLayer) => ({
+      ...textLayer,
+      renderAssetId: await uploadRenderedTextLayer(textLayer),
     })),
   );
-  return { ...config, stickers };
+  return { ...persistable, stickers, texts };
 }
 
 async function rasterizeSvgDataUriToPng(imageUrl: string): Promise<string> {
@@ -648,12 +722,72 @@ function clampInt(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
+async function uploadRenderedTextLayer(layer: TextLayer): Promise<string | undefined> {
+  if (!layer.value.trim()) {
+    return undefined;
+  }
+  const file = await renderTextLayerToPngFile(layer);
+  const asset = await api.uploadDesignAsset(file, "text-render");
+  return asset.id;
+}
+
+async function renderTextLayerToPngFile(layer: TextLayer): Promise<File> {
+  const aspect = textAspect(layer.value);
+  const width = clampInt(512 * aspect, 512, 4096);
+  const height = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Text render failed.");
+  }
+
+  const fontFamily = cssFontFamily(layer.font || "Arial");
+  if (document.fonts?.load) {
+    await document.fonts.load(`700 300px ${fontFamily}`);
+  }
+
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = safeTextColor(layer.color);
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  let fontSize = 300;
+  do {
+    context.font = `700 ${fontSize}px ${fontFamily}`;
+    if (context.measureText(layer.value).width <= width * 0.9 || fontSize <= 72) {
+      break;
+    }
+    fontSize -= 12;
+  } while (fontSize > 72);
+
+  context.fillText(layer.value, width / 2, height / 2);
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((value) => (value ? resolve(value) : reject(new Error("Text render export failed."))), "image/png");
+  });
+  return new File([blob], `${layer.id || "text"}-${Date.now()}.png`, { type: "image/png" });
+}
+
+function textAspect(value: string): number {
+  return Math.max(value.trim().length * 0.62, 1);
+}
+
+function cssFontFamily(value: string): string {
+  const cleaned = value.replace(/["\\]/g, "").trim() || "Arial";
+  return `"${cleaned}", sans-serif`;
+}
+
+function safeTextColor(value: string): string {
+  return /^#[0-9A-Fa-f]{6}$/.test(value) ? value : "#ffffff";
+}
+
 function layerIds(config: DesignConfig): string[] {
   return [...config.stickers.map((sticker) => sticker.id), ...config.texts.map((text) => text.id)];
 }
 
 function configFingerprint(config: DesignConfig): string {
-  return JSON.stringify(config);
+  return JSON.stringify(persistableConfig(config));
 }
 
 function canKeepBakedPreview(
@@ -671,7 +805,11 @@ function canKeepBakedPreview(
   for (const layerId of bakedLayerIds) {
     const previousLayer = findLayer(previousConfig, layerId);
     const nextLayer = findLayer(nextConfig, layerId);
-    if (!previousLayer || !nextLayer || JSON.stringify(previousLayer) !== JSON.stringify(nextLayer)) {
+    if (
+      !previousLayer ||
+      !nextLayer ||
+      JSON.stringify(stripRuntimeLayer(previousLayer)) !== JSON.stringify(stripRuntimeLayer(nextLayer))
+    ) {
       return false;
     }
   }
@@ -682,16 +820,48 @@ function findLayer(config: DesignConfig, layerId: string) {
   return config.stickers.find((sticker) => sticker.id === layerId) ?? config.texts.find((text) => text.id === layerId);
 }
 
+function persistableConfig(config: DesignConfig): DesignConfig {
+  const fixedConfig = normalizeFixedMaterial(config);
+  return {
+    ...fixedConfig,
+    stickers: fixedConfig.stickers.map((sticker) => {
+      const { previewUrl: _previewUrl, ...persistableSticker } = sticker;
+      return persistableSticker;
+    }),
+  };
+}
+
+function stripRuntimeLayer(layer: ReturnType<typeof findLayer>) {
+  if (!layer || !("type" in layer)) {
+    return layer;
+  }
+  const { previewUrl: _previewUrl, ...persistableLayer } = layer;
+  return persistableLayer;
+}
+
 function createDefaultConfig(modelAssetId: string): DesignConfig {
   return {
     modelAssetId,
-    baseColor: "#ffffff",
+    baseColor: FIXED_BASE_COLOR,
     material: {
-      roughness: 0.5,
-      metallic: 0,
+      ...FIXED_MATERIAL,
     },
     stickers: [],
     texts: [],
+  };
+}
+
+const FIXED_BASE_COLOR = "#ffffff";
+const FIXED_MATERIAL = {
+  roughness: 1,
+  metallic: 0,
+};
+
+function normalizeFixedMaterial(config: DesignConfig): DesignConfig {
+  return {
+    ...config,
+    baseColor: FIXED_BASE_COLOR,
+    material: { ...FIXED_MATERIAL },
   };
 }
 

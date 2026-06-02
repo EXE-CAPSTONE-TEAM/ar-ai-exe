@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     reconstruction_max_threads: int = 4
     reconstruction_min_available_memory_gb: float = 4.0
     reconstruction_min_free_storage_gb: float = 8.0
+    mesh_cleanup_target_max_dimension: float = 2.4
+    mesh_cleanup_decimate_triangle_threshold: int = 250_000
+    mesh_cleanup_decimate_ratio: float = 0.75
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_ROOT / ".env",

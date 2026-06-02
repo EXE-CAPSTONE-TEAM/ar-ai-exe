@@ -9,6 +9,9 @@ Before performing any task, read [CONTEXT.md](file:///F:/_FPT/_EXE101/ar-ai-exe/
 - Respect the boundaries of backend (FastAPI/Python), frontend (React/Vite/TS), and mobile.
 - Do not assume file paths; use the structural skills to discover directories.
 
+## Known Agent Pitfalls
+- In the backend Blender decal bake flow, never clear or replace base shoe mesh material slots just to enforce `baseColor` or roughness. Imported GLB/OBJ shoes can rely on existing material slots, texture maps, and polygon material indices; clearing them makes saved draft previews lose the original shoe appearance. Preserve existing materials/textures, adjust only safe PBR factors such as roughness/metallic/base color when the base color input is not texture-linked, and create a new white material only for meshes that have no material.
+
 ## Agent Skills
 See `.agents/skills/` for active skill workflows.
 

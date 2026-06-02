@@ -101,6 +101,19 @@ export type ModelImportResponse = {
   modelAsset: ModelAsset;
 };
 
+export type DesignAssetSource = "upload" | "canvas" | "text-render";
+
+export type DesignAsset = {
+  id: string;
+  sourceType: DesignAssetSource;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  checksum: string;
+  downloadUrl: string;
+  createdAt: string;
+};
+
 export type MaterialConfig = {
   roughness: number;
   metallic: number;
@@ -109,7 +122,10 @@ export type MaterialConfig = {
 export type StickerLayer = {
   id: string;
   type: "image";
-  imageUrl: string;
+  source?: "preset" | "upload" | "canvas";
+  imageUrl?: string;
+  assetId?: string;
+  previewUrl?: string;
   position: [number, number, number];
   rotation: [number, number, number];
   normal?: [number, number, number];
@@ -127,6 +143,7 @@ export type TextLayer = {
   value: string;
   font: string;
   color: string;
+  renderAssetId?: string;
   position: [number, number, number];
   rotation: [number, number, number];
   normal?: [number, number, number];

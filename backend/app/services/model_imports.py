@@ -12,11 +12,9 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models import ModelAsset, ScanSession, ScanSource, ScanStatus, User
 from app.schemas.scan import ScanMetadata
-from app.services.blender_service import BlenderService
-from app.services.command_runner import CommandRunner
 from app.services.file_helpers import write_json
+from app.services.mesh_cleanup import MeshCleanupReport, MeshCleanupService
 from app.services.model_assets import ModelAssetFiles, ModelAssetService
-from app.services.placeholders import PLACEHOLDER_PNG
 from app.services.scan_metadata import scan_metadata_bytes
 from app.services.scan_sessions import ScanSessionService
 from app.services.storage import get_storage_service
@@ -48,8 +46,7 @@ class ModelImportService:
         self.storage = get_storage_service()
         self.scan_service = ScanSessionService(db)
         self.asset_service = ModelAssetService(db)
-        self.blender = BlenderService()
-        self.runner = CommandRunner()
+        self.mesh_cleanup = MeshCleanupService()
 
     def import_model(
         self,
@@ -90,9 +87,7 @@ class ModelImportService:
                 if normalized_format == "glb"
                 else self._stage_obj(work_dir, model_file, mtl_file, texture_file, package_file)
             )
-            self._write_import_script(work_dir / "import_model.py")
-            self._run_blender_import(work_dir / "import_model.py", staged, model_dir)
-            self._ensure_canonical_files(model_dir, staged.texture_path)
+            cleanup_report = self._cleanup_staged_model(staged, model_dir)
             metadata_path = model_dir / "metadata.json"
             metadata_path.write_bytes(scan_metadata_bytes(metadata))
             quality_report_path = model_dir / "quality_report.json"
@@ -101,6 +96,7 @@ class ModelImportService:
                 display_name,
                 normalized_format,
                 staged.source_files,
+                cleanup_report,
             )
             obj_package_path = model_dir / "shoe_obj_package.zip"
             self._zip_obj_package(model_dir, obj_package_path)
@@ -301,129 +297,13 @@ class ModelImportService:
         target.write_bytes(upload.data)
         return target
 
-    def _run_blender_import(self, script_path: Path, staged: StagedModel, model_dir: Path) -> None:
-        command = [
-            self.blender.require_available(),
-            "--background",
-            "--python",
-            str(script_path),
-            "--",
-            str(staged.input_path),
-            str(model_dir),
-            str(staged.texture_path or ""),
-        ]
-        result = self.runner.run(
-            command,
+    def _cleanup_staged_model(self, staged: StagedModel, model_dir: Path) -> MeshCleanupReport:
+        return self.mesh_cleanup.cleanup(
+            staged.input_path,
+            model_dir,
+            texture_path=staged.texture_path,
             log_path=model_dir / "import.log",
-            cwd=staged.input_path.parent,
-            timeout=self.settings.reconstruction_command_timeout_seconds,
         )
-        if not result.ok:
-            message = result.stderr.strip() or result.stdout.strip() or "Blender import failed."
-            raise RuntimeError(message[-1200:])
-
-    def _write_import_script(self, path: Path) -> None:
-        path.write_text(
-            r'''
-import sys
-import traceback
-from pathlib import Path
-
-import bpy
-
-
-def patch_numpy_compat():
-    try:
-        import numpy as np
-    except Exception as exc:
-        raise RuntimeError("Blender GLB importer requires numpy in the backend image.") from exc
-
-    aliases = {
-        "bool": bool,
-        "int": int,
-        "float": float,
-        "complex": complex,
-        "object": object,
-        "str": str,
-    }
-    for name, value in aliases.items():
-        if name not in np.__dict__:
-            setattr(np, name, value)
-
-
-def clear_scene():
-    bpy.ops.object.select_all(action="SELECT")
-    bpy.ops.object.delete()
-
-
-def import_model(input_path: Path):
-    suffix = input_path.suffix.lower()
-    if suffix == ".glb":
-        patch_numpy_compat()
-        bpy.ops.import_scene.gltf(filepath=str(input_path))
-        return
-    if suffix == ".obj":
-        if hasattr(bpy.ops.wm, "obj_import"):
-            bpy.ops.wm.obj_import(filepath=str(input_path))
-        else:
-            bpy.ops.import_scene.obj(filepath=str(input_path))
-        return
-    raise RuntimeError(f"Unsupported model extension: {suffix}")
-
-
-def export_obj(path: Path):
-    if hasattr(bpy.ops.wm, "obj_export"):
-        bpy.ops.wm.obj_export(filepath=str(path), export_materials=True)
-    else:
-        bpy.ops.export_scene.obj(filepath=str(path), use_materials=True, path_mode="COPY")
-
-
-def save_texture(texture_path: str, output_path: Path):
-    if not texture_path:
-        return
-    image = bpy.data.images.load(texture_path)
-    image.filepath_raw = str(output_path)
-    image.file_format = "PNG"
-    image.save()
-
-
-try:
-    argv = sys.argv[sys.argv.index("--") + 1:]
-    input_path = Path(argv[0])
-    output_dir = Path(argv[1])
-    texture_path = argv[2] if len(argv) > 2 else ""
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    clear_scene()
-    import_model(input_path)
-    mesh_objects = [item for item in bpy.context.scene.objects if item.type == "MESH"]
-    if not mesh_objects:
-        raise RuntimeError("Imported model contains no mesh objects.")
-
-    bpy.ops.export_scene.gltf(filepath=str(output_dir / "shoe_preview.glb"), export_format="GLB")
-    export_obj(output_dir / "shoe.obj")
-    save_texture(texture_path, output_dir / "shoe_texture.png")
-except Exception:
-    traceback.print_exc()
-    sys.exit(1)
-'''.lstrip(),
-            encoding="utf-8",
-        )
-
-    def _ensure_canonical_files(self, model_dir: Path, texture_path: Path | None) -> None:
-        for required in ["shoe_preview.glb", "shoe.obj"]:
-            if not (model_dir / required).is_file():
-                raise RuntimeError(f"Blender did not create {required}.")
-        if not (model_dir / "shoe.mtl").is_file():
-            (model_dir / "shoe.mtl").write_text(
-                "newmtl imported_material\nKd 1.000000 1.000000 1.000000\nmap_Kd shoe_texture.png\n",
-                encoding="utf-8",
-            )
-        if not (model_dir / "shoe_texture.png").is_file():
-            if texture_path and texture_path.suffix.lower() == ".png":
-                shutil.copyfile(texture_path, model_dir / "shoe_texture.png")
-            else:
-                (model_dir / "shoe_texture.png").write_bytes(PLACEHOLDER_PNG)
 
     def _write_quality_report(
         self,
@@ -431,6 +311,7 @@ except Exception:
         name: str,
         import_format: str,
         source_files: list[str],
+        cleanup_report: MeshCleanupReport,
     ) -> None:
         write_json(
             path,
@@ -446,6 +327,7 @@ except Exception:
                 "coverageScore": 100,
                 "warnings": ["Model was uploaded directly; scan quality metrics are not available."],
                 "recommendation": "Use for visual shoe customization review.",
+                **cleanup_report.to_quality_fields(),
             },
         )
 

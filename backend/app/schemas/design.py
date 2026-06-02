@@ -7,7 +7,7 @@ from app.schemas.common import CamelModel
 
 
 class MaterialConfig(CamelModel):
-    roughness: float = 0.5
+    roughness: float = 1.0
     metallic: float = 0.0
 
 

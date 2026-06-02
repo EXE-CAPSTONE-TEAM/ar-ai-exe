@@ -7,6 +7,9 @@ import * as THREE from "three";
 import type { DesignConfig, StickerLayer, TextLayer } from "../../types";
 import { ErrorBoundary } from "../Layout/ErrorBoundary";
 
+const TRANSPARENT_PIXEL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+
 type ModelViewerProps = {
   modelUrl: string | null;
   config: DesignConfig | null;
@@ -153,6 +156,12 @@ function ShoeModel({
   useEffect(() => {
     gltf.scene.traverse((node) => {
       if (node instanceof THREE.Mesh) {
+        if (isDecalMeshName(node.name)) {
+          node.castShadow = true;
+          node.receiveShadow = true;
+          return;
+        }
+
         if (!node.userData.originalMaterial) {
           if (Array.isArray(node.material)) {
             node.userData.originalMaterial = node.material.map((m: THREE.Material) => m.clone());
@@ -166,7 +175,7 @@ function ShoeModel({
             const m = mat.clone();
             if (m instanceof THREE.MeshStandardMaterial || m instanceof THREE.MeshPhysicalMaterial) {
               m.color = new THREE.Color(config?.baseColor ?? "#ffffff");
-              m.roughness = config?.material.roughness ?? 0.5;
+              m.roughness = config?.material.roughness ?? 1;
               m.metalness = config?.material.metallic ?? 0;
             }
             return m;
@@ -525,7 +534,7 @@ function StickerPlane({
   gizmoMode: "translate" | "rotate" | "scale";
   onTransformEnd: (pos: [number, number, number], rot: [number, number, number], scale: number) => void;
 }) {
-  const texture = useTexture(sticker.imageUrl);
+  const texture = useTexture(stickerTextureUrl(sticker));
   const ref = useRef<THREE.Mesh>(null);
   texture.colorSpace = THREE.SRGBColorSpace;
 
@@ -570,6 +579,10 @@ function StickerPlane({
       ) : null}
     </Fragment>
   );
+}
+
+function stickerTextureUrl(sticker: StickerLayer): string {
+  return sticker.previewUrl ?? sticker.imageUrl ?? TRANSPARENT_PIXEL;
 }
 
 function TextPlane({

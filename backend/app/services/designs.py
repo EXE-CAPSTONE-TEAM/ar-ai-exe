@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.models import Design, DesignPreviewStatus, DesignStatus, ModelAsset, User
 from app.schemas.design import DesignConfig, DesignResponse
 from app.services.decal_baker import DecalBakeService
+from app.services.design_assets import DesignAssetService
 from app.services.model_assets import ModelAssetService
 from app.services.storage import get_storage_service
 
@@ -150,7 +151,13 @@ class DesignService:
 
             source_glb = preview_dir / "source.glb"
             source_glb.write_bytes(ModelAssetService(self.db).file_bytes(asset, "glb"))
-            decals_baked = DecalBakeService().bake(source_glb, preview_dir, design_config)
+            asset_service = DesignAssetService(self.db)
+            decals_baked = DecalBakeService(
+                asset_resolver=lambda asset_id: asset_service.image_payload_for_user_id(
+                    asset_id,
+                    design.user_id,
+                )
+            ).bake(source_glb, preview_dir, design_config)
             if not decals_baked:
                 self._mark_preview_none(design)
             else:

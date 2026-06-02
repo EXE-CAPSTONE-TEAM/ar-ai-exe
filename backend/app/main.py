@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, designs, exports, models, scan_sessions, system
+from app.api import auth, design_assets, designs, exports, models, scan_sessions, system
 from app.core.config import get_settings
 from app.core.storage import ensure_storage_directories
 from app.db.database import Base, engine
@@ -38,6 +38,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(scan_sessions.router, prefix=settings.api_prefix)
 app.include_router(models.router, prefix=settings.api_prefix)
+app.include_router(design_assets.router, prefix=settings.api_prefix)
 app.include_router(designs.router, prefix=settings.api_prefix)
 app.include_router(exports.router, prefix=settings.api_prefix)
 app.include_router(system.router, prefix=settings.api_prefix)

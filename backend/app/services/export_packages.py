@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.models import Design, DesignStatus, ExportPackage, ModelAsset, User
 from app.schemas.export import ExportPackageResponse
 from app.services.decal_baker import DecalBakeService
+from app.services.design_assets import DesignAssetService
 from app.services.designs import DesignService
 from app.services.model_assets import ModelAssetService
 from app.services.placeholders import PLACEHOLDER_PNG
@@ -67,7 +68,13 @@ class ExportPackageService:
         )
         self._write_measurements(asset, measurement_info_path)
         self._write_previews(preview_dir)
-        decals_baked = DecalBakeService().bake(glb_path, export_dir, design_config)
+        asset_service = DesignAssetService(self.db)
+        decals_baked = DecalBakeService(
+            asset_resolver=lambda asset_id: asset_service.image_payload_for_user_id(
+                asset_id,
+                design.user_id,
+            )
+        ).bake(glb_path, export_dir, design_config)
         self._write_production_notes(design, production_notes_path, decals_baked)
 
         zip_path = export_dir / f"{export_package.id}.zip"

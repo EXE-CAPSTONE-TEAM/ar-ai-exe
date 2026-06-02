@@ -63,6 +63,7 @@ class User(Base):
 
     scan_sessions: Mapped[list["ScanSession"]] = relationship(back_populates="user")
     designs: Mapped[list["Design"]] = relationship(back_populates="user")
+    design_assets: Mapped[list["DesignAsset"]] = relationship(back_populates="user")
 
 
 class ScanSession(Base):
@@ -167,6 +168,22 @@ class Design(Base):
     user: Mapped[User] = relationship(back_populates="designs")
     model_asset: Mapped[ModelAsset] = relationship(back_populates="designs")
     export_packages: Mapped[list["ExportPackage"]] = relationship(back_populates="design")
+
+
+class DesignAsset(Base):
+    __tablename__ = "design_assets"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("asset"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    source_type: Mapped[str] = mapped_column(String(32), index=True)
+    file_name: Mapped[str] = mapped_column(String(180))
+    storage_path: Mapped[str] = mapped_column(Text)
+    content_type: Mapped[str] = mapped_column(String(120))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    checksum: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+    user: Mapped[User] = relationship(back_populates="design_assets")
 
 
 class ExportPackage(Base):

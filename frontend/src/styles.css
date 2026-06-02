@@ -227,6 +227,15 @@ h3 {
   font-size: 13px;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
 .readiness-banner {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -557,7 +566,9 @@ dd {
   }
 
   .import-form-grid,
-  .metadata-form-grid {
+  .metadata-form-grid,
+  .artwork-actions,
+  .artwork-control-grid {
     grid-template-columns: 1fr;
   }
 
@@ -602,6 +613,71 @@ dd {
   flex-direction: column;
   gap: 12px;
   margin-top: 8px;
+}
+
+.artwork-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.artwork-actions button.active,
+.artwork-toolbar button.active {
+  color: #ffffff;
+  border-color: #1f6f8b;
+  background: #1f6f8b;
+}
+
+.artwork-editor {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+.artwork-toolbar {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(34px, 1fr));
+  gap: 6px;
+}
+
+.artwork-toolbar button {
+  min-height: 34px;
+  padding: 0 8px;
+}
+
+.artwork-canvas-frame {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid #c7d2df;
+  border-radius: 6px;
+  background:
+    linear-gradient(45deg, #eef2f6 25%, transparent 25%),
+    linear-gradient(-45deg, #eef2f6 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #eef2f6 75%),
+    linear-gradient(-45deg, transparent 75%, #eef2f6 75%);
+  background-color: #ffffff;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+  background-size: 16px 16px;
+}
+
+.artwork-canvas-frame canvas {
+  width: 100%;
+  aspect-ratio: 1;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.artwork-control-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
 }
 
 .category-tabs {

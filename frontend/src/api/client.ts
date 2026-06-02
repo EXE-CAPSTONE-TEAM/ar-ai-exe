@@ -1,5 +1,7 @@
 import type {
   Design,
+  DesignAsset,
+  DesignAssetSource,
   DesignConfig,
   ExportPackage,
   ModelAsset,
@@ -139,6 +141,32 @@ export const api = {
     return response.json() as Promise<ModelImportResponse>;
   },
 
+  async uploadDesignAsset(file: File, sourceType: DesignAssetSource): Promise<DesignAsset> {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("sourceType", sourceType);
+
+    const response = await fetch(`${API_BASE_URL}/api/design-assets`, {
+      method: "POST",
+      headers: authHeader(),
+      body: form,
+    });
+    if (!response.ok) {
+      throw new ApiError(await errorMessage(response), response.status);
+    }
+    return response.json() as Promise<DesignAsset>;
+  },
+
+  async fetchDesignAssetBlobUrl(assetId: string): Promise<string> {
+    const response = await fetch(`${API_BASE_URL}/api/design-assets/${assetId}/download`, {
+      headers: authHeader(),
+    });
+    if (!response.ok) {
+      throw new ApiError(await errorMessage(response), response.status);
+    }
+    return URL.createObjectURL(await response.blob());
+  },
+
   async fetchModelBlobUrl(modelAsset: ModelAsset): Promise<string> {
     const response = await fetch(`${API_BASE_URL}${modelAsset.glbUrl}`, {
       headers: authHeader(),
@@ -155,6 +183,7 @@ export const api = {
     }
     const response = await fetch(`${API_BASE_URL}${design.previewGlbUrl}`, {
       headers: authHeader(),
+      cache: "no-store",
     });
     if (!response.ok) {
       throw new ApiError(await errorMessage(response), response.status);

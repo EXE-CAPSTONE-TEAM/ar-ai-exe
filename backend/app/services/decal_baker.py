@@ -7,7 +7,7 @@ import math
 import re
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import unquote_to_bytes
 
 from fastapi import HTTPException, status
@@ -27,13 +27,15 @@ MIME_EXTENSIONS = {
 MAX_STICKERS = 50
 MAX_STICKER_BYTES = 5 * 1024 * 1024
 MAX_TEXT_LENGTH = 80
+ImageAssetResolver = Callable[[str], tuple[bytes, str]]
 
 
 class DecalBakeService:
-    def __init__(self) -> None:
+    def __init__(self, asset_resolver: ImageAssetResolver | None = None) -> None:
         self.settings = get_settings()
         self.blender = BlenderService()
         self.runner = CommandRunner()
+        self.asset_resolver = asset_resolver
 
     def bake(self, source_glb: Path, output_dir: Path, design_config: dict[str, Any]) -> bool:
         decals = self._prepare_decals(output_dir, design_config)
@@ -46,7 +48,16 @@ class DecalBakeService:
         shutil.copyfile(source_glb, source_copy)
 
         manifest_path = work_dir / "decal_manifest.json"
-        manifest_path.write_text(json.dumps({"decals": decals}, indent=2), encoding="utf-8")
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "decals": decals,
+                    "material": self._prepare_material(design_config),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
         script_path = work_dir / "apply_decals.py"
         self._write_blender_script(script_path)
@@ -102,6 +113,15 @@ class DecalBakeService:
             )
         return decals
 
+    def _prepare_material(self, design_config: dict[str, Any]) -> dict[str, Any]:
+        raw_material = design_config.get("material", {})
+        material = raw_material if isinstance(raw_material, dict) else {}
+        return {
+            "baseColor": self._safe_color(str(design_config.get("baseColor") or "#ffffff")),
+            "roughness": self._number(material.get("roughness"), 1.0, minimum=0.0, maximum=1.0),
+            "metallic": self._number(material.get("metallic"), 0.0, minimum=0.0, maximum=1.0),
+        }
+
     def _prepare_stickers(self, output_dir: Path, design_config: dict[str, Any]) -> list[dict[str, Any]]:
         raw_stickers = design_config.get("stickers", [])
         if not isinstance(raw_stickers, list):
@@ -120,16 +140,23 @@ class DecalBakeService:
         for index, sticker in enumerate(raw_stickers, start=1):
             if not isinstance(sticker, dict):
                 continue
-            image_url = sticker.get("imageUrl")
-            if not isinstance(image_url, str) or not image_url.strip():
-                continue
-
             sticker_id = self._safe_name(str(sticker.get("id") or f"sticker_{index:03d}"))
-            image_path, mime_type = self._write_sticker_image(
-                image_url,
-                stickers_dir,
-                f"{index:03d}_{sticker_id}",
-            )
+            asset_id = self._asset_id(sticker.get("assetId") or sticker.get("asset_id"))
+            if asset_id:
+                image_path, mime_type = self._write_asset_image(
+                    asset_id,
+                    stickers_dir,
+                    f"{index:03d}_{sticker_id}",
+                )
+            else:
+                image_url = sticker.get("imageUrl")
+                if not isinstance(image_url, str) or not image_url.strip():
+                    continue
+                image_path, mime_type = self._write_sticker_image(
+                    image_url,
+                    stickers_dir,
+                    f"{index:03d}_{sticker_id}",
+                )
             scale = self._number(sticker.get("scale"), 0.2, minimum=0.01, maximum=10.0)
             width = self._number(sticker.get("width"), scale, minimum=0.01, maximum=10.0)
             height = self._number(sticker.get("height"), scale, minimum=0.01, maximum=10.0)
@@ -200,8 +227,44 @@ class DecalBakeService:
             height = self._number(text_layer.get("height"), scale, minimum=0.01, maximum=10.0)
             color = self._safe_color(str(text_layer.get("color") or "#ffffff"))
             font = self._safe_font(str(text_layer.get("font") or "Arial"))
-            image_path = self._write_text_svg(value, font, color, stickers_dir, f"{index:03d}_{text_id}")
+            render_asset_id = self._asset_id(
+                text_layer.get("renderAssetId") or text_layer.get("render_asset_id")
+            )
             normal = self._normal(text_layer.get("normal"))
+
+            if render_asset_id:
+                image_path, mime_type = self._write_asset_image(
+                    render_asset_id,
+                    stickers_dir,
+                    f"{index:03d}_{text_id}",
+                )
+                decal = {
+                    "id": text_id,
+                    "kind": "image",
+                    "imagePath": str(image_path),
+                    "mimeType": mime_type,
+                    "position": self._vec3(text_layer.get("position"), [0.0, 0.0, 0.0]),
+                    "rotation": self._vec3(text_layer.get("rotation"), [0.0, 0.0, 0.0]),
+                    "targetMeshName": text_layer.get("targetMeshName") or "",
+                    "width": width,
+                    "height": height,
+                    "offset": self._number(text_layer.get("offset"), 0.004, minimum=0.0, maximum=0.1),
+                    "projectionDepth": self._number(
+                        text_layer.get("projectionDepth"),
+                        max(scale * 1.5, 0.05),
+                        minimum=0.01,
+                        maximum=10.0,
+                    ),
+                    "subdivisions": int(
+                        self._number(text_layer.get("subdivisions"), 32, minimum=4, maximum=128)
+                    ),
+                }
+                if normal:
+                    decal["normal"] = normal
+                prepared.append(decal)
+                continue
+
+            image_path = self._write_text_svg(value, font, color, stickers_dir, f"{index:03d}_{text_id}")
 
             decal = {
                 "id": text_id,
@@ -272,6 +335,37 @@ class DecalBakeService:
         image_path.write_bytes(data)
         return image_path, mime_type
 
+    def _write_asset_image(self, asset_id: str, output_dir: Path, basename: str) -> tuple[Path, str]:
+        resolver = getattr(self, "asset_resolver", None)
+        if resolver is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Design asset images cannot be resolved for this export.",
+            )
+
+        data, content_type = resolver(asset_id)
+        mime_type = content_type.lower()
+        if mime_type not in MIME_EXTENSIONS or mime_type == "image/svg+xml":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Design asset images must be PNG or JPEG.",
+            )
+        if not data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Design asset image is empty.",
+            )
+        if len(data) > MAX_STICKER_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail="Design asset image exceeds the 5 MB export limit.",
+            )
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        image_path = output_dir / f"{basename}{MIME_EXTENSIONS[mime_type]}"
+        image_path.write_bytes(data)
+        return image_path, mime_type
+
     def _write_text_svg(
         self,
         value: str,
@@ -311,6 +405,12 @@ class DecalBakeService:
         cleaned = re.sub(r"[^A-Za-z0-9 ._-]+", "", value).strip()
         return cleaned[:80] or "Arial"
 
+    def _asset_id(self, value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        cleaned = value.strip()
+        return cleaned if cleaned else None
+
     def _number(self, value: Any, default: float, minimum: float, maximum: float) -> float:
         try:
             number = float(value)
@@ -336,6 +436,7 @@ class DecalBakeService:
         path.write_text(
             r'''
 import json
+import math
 import pathlib
 import sys
 import traceback
@@ -433,6 +534,7 @@ def create_image_material(decal):
     image = bpy.data.images.load(decal["imagePath"], check_existing=True)
     material = bpy.data.materials.new(f"decal_{decal['id']}_material")
     material.use_nodes = True
+    material.use_backface_culling = False
     material.blend_method = "BLEND"
     material.diffuse_color = (1, 1, 1, 1)
     set_optional(material, "show_transparent_back", True)
@@ -463,10 +565,60 @@ def parse_hex_color(value):
     return (red, green, blue, 1)
 
 
+def create_design_base_material(color, roughness, metallic):
+    material = bpy.data.materials.new("design_base_material")
+    material.use_nodes = True
+    apply_material_settings(material, color, roughness, metallic)
+    return material
+
+
+def apply_material_settings(material, color, roughness, metallic):
+    material.use_backface_culling = False
+    material.diffuse_color = color
+    if not material.use_nodes:
+        material.use_nodes = True
+
+    nodes = material.node_tree.nodes
+    bsdf = nodes.get("Principled BSDF")
+    if bsdf:
+        base_color = bsdf.inputs.get("Base Color")
+        if base_color and not base_color.links:
+            base_color.default_value = color
+        roughness_input = bsdf.inputs.get("Roughness")
+        if roughness_input:
+            roughness_input.default_value = roughness
+        metallic_input = bsdf.inputs.get("Metallic")
+        if metallic_input:
+            metallic_input.default_value = metallic
+
+
+def apply_design_material(material_config):
+    color = parse_hex_color(material_config.get("baseColor"))
+    roughness = max(0.0, min(1.0, float(material_config.get("roughness", 1.0))))
+    metallic = max(0.0, min(1.0, float(material_config.get("metallic", 0.0))))
+
+    for target in target_mesh_candidates():
+        materials = [material for material in target.data.materials if material]
+        if not materials:
+            target.data.materials.append(create_design_base_material(color, roughness, metallic))
+            for polygon in target.data.polygons:
+                polygon.material_index = 0
+            continue
+
+        for material in materials:
+            apply_material_settings(material, color, roughness, metallic)
+
+        slot_count = len(target.data.materials)
+        for polygon in target.data.polygons:
+            if polygon.material_index >= slot_count or not target.data.materials[polygon.material_index]:
+                polygon.material_index = 0
+
+
 def create_solid_material(decal):
     color = parse_hex_color(decal.get("color"))
     material = bpy.data.materials.new(f"decal_{decal['id']}_material")
     material.use_nodes = True
+    material.use_backface_culling = False
     material.diffuse_color = color
     nodes = material.node_tree.nodes
     bsdf = nodes.get("Principled BSDF")
@@ -622,8 +774,22 @@ def gltf_vector_to_blender(value):
 
 
 def gltf_rotation_to_blender(value):
-    rotation_matrix = gltf_to_blender_matrix().to_3x3() @ mathutils.Euler(value, "XYZ").to_matrix()
+    rotation_matrix = gltf_to_blender_matrix().to_3x3() @ three_euler_xyz_matrix(value)
     return rotation_matrix.to_euler("XYZ")
+
+
+def three_euler_xyz_matrix(value):
+    x, y, z = float(value[0]), float(value[1]), float(value[2])
+    a, b = math.cos(x), math.sin(x)
+    c, d = math.cos(y), math.sin(y)
+    e, f = math.cos(z), math.sin(z)
+    return mathutils.Matrix(
+        (
+            (c * e, -c * f, d),
+            (a * f + b * d * e, a * e - b * d * f, -b * c),
+            (b * f - a * d * e, b * e + a * d * f, a * c),
+        )
+    )
 
 
 def raycast_target(target, origin_world, direction_world, limit):
@@ -825,6 +991,7 @@ try:
 
     clear_scene()
     import_model(source_glb)
+    apply_design_material(manifest.get("material", {}))
     for decal in manifest.get("decals", manifest.get("stickers", [])):
         create_decal(decal)
 

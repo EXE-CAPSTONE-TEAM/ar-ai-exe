@@ -1,9 +1,32 @@
-import { useState } from "react";
-import { Crosshair, Download, ImagePlus, Save, Type, Trash2, Move, RotateCcw, Maximize2 } from "lucide-react";
+import { useRef, useState } from "react";
+import {
+  Crosshair,
+  Download,
+  ImagePlus,
+  Maximize2,
+  Move,
+  PenLine,
+  RotateCcw,
+  Save,
+  Type,
+  Trash2,
+  Upload,
+} from "lucide-react";
 
 import { stickerPresets } from "../../data/stickerPresets";
 import type { StickerPreset } from "../../data/stickerPresets";
-import type { DesignConfig, ExportPackage, ModelAsset } from "../../types";
+import type { DesignAssetSource, DesignConfig, ExportPackage, ModelAsset, StickerLayer } from "../../types";
+import { ArtworkCanvasEditor } from "./ArtworkCanvasEditor";
+
+const MAX_ARTWORK_FILE_BYTES = 5 * 1024 * 1024;
+type ArtworkAssetSource = Extract<DesignAssetSource, "upload" | "canvas">;
+
+export type UploadedDesignAssetPreview = {
+  assetId: string;
+  sourceType: ArtworkAssetSource;
+  fileName: string;
+  previewUrl: string;
+};
 
 type EditorPanelsProps = {
   config: DesignConfig | null;
@@ -23,6 +46,10 @@ type EditorPanelsProps = {
   onExport: () => void;
   onDownload: () => void;
   onDownloadModelFile: (urlPath: string, filename: string) => void;
+  onUploadDesignAsset: (
+    file: File,
+    sourceType: ArtworkAssetSource,
+  ) => Promise<UploadedDesignAssetPreview>;
 };
 
 export function EditorPanels({
@@ -43,7 +70,14 @@ export function EditorPanels({
   onExport,
   onDownload,
   onDownloadModelFile,
+  onUploadDesignAsset,
 }: EditorPanelsProps) {
+  const [activeCategory, setActiveCategory] = useState<string>("all");
+  const [isArtworkEditorOpen, setIsArtworkEditorOpen] = useState(false);
+  const [isUploadingArtwork, setIsUploadingArtwork] = useState(false);
+  const [artworkMessage, setArtworkMessage] = useState<string | null>(null);
+  const artworkInputRef = useRef<HTMLInputElement | null>(null);
+
   if (!config) {
     return (
       <aside className="editor-panel">
@@ -53,13 +87,12 @@ export function EditorPanels({
     );
   }
 
-  const [activeCategory, setActiveCategory] = useState<string>("all");
-
   const update = (patch: Partial<DesignConfig>) => onConfigChange({ ...config, ...patch });
 
   const activeSticker = config.stickers.find((s) => s.id === activeLayerId);
   const activeText = config.texts.find((t) => t.id === activeLayerId);
   const activeLayer = activeSticker || activeText;
+  const isArtworkBusy = isSaving || isUploadingArtwork;
 
   function updateLayer(id: string, patch: any) {
     if (activeSticker) {
@@ -84,6 +117,31 @@ export function EditorPanels({
     }
   }
 
+  async function addArtworkFromFile(file: File, sourceType: ArtworkAssetSource) {
+    if (!config) {
+      return;
+    }
+    const clientError = validateArtworkFile(file);
+    if (clientError) {
+      setArtworkMessage(clientError);
+      return;
+    }
+
+    setIsUploadingArtwork(true);
+    setArtworkMessage(sourceType === "canvas" ? "Saving artwork" : "Uploading artwork");
+    try {
+      const uploaded = await onUploadDesignAsset(file, sourceType);
+      const newConfig = addArtworkSticker(config, uploaded, meshBounds);
+      onConfigChange(newConfig);
+      onActiveLayerChange(newConfig.stickers[newConfig.stickers.length - 1].id);
+      setArtworkMessage(sourceType === "canvas" ? "Artwork added" : "Image added");
+    } catch (error) {
+      setArtworkMessage(error instanceof Error ? error.message : "Artwork upload failed.");
+    } finally {
+      setIsUploadingArtwork(false);
+    }
+  }
+
   return (
     <aside className="editor-panel">
       <section className="panel-section">
@@ -91,33 +149,6 @@ export function EditorPanels({
         <label>
           Draft name
           <input value={designName} onChange={(event) => onNameChange(event.target.value)} />
-        </label>
-      </section>
-
-      <section className="panel-section">
-        <h3>Material</h3>
-        <label>
-          Base color
-          <input
-            type="color"
-            value={config.baseColor}
-            onChange={(event) => update({ baseColor: event.target.value })}
-          />
-        </label>
-        <label>
-          Roughness
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={config.material.roughness}
-            onChange={(event) =>
-              update({
-                material: { ...config.material, roughness: Number(event.target.value) },
-              })
-            }
-          />
         </label>
       </section>
 
@@ -137,6 +168,40 @@ export function EditorPanels({
             Add Text
           </button>
         </div>
+        <div className="artwork-actions">
+          <input
+            ref={artworkInputRef}
+            type="file"
+            accept="image/png,image/jpeg"
+            className="sr-only"
+            disabled={isArtworkBusy}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void addArtworkFromFile(file, "upload");
+            }}
+          />
+          <button type="button" disabled={isArtworkBusy} onClick={() => artworkInputRef.current?.click()}>
+            <Upload size={16} aria-hidden="true" />
+            Upload image
+          </button>
+          <button
+            type="button"
+            className={isArtworkEditorOpen ? "active" : ""}
+            disabled={isSaving}
+            onClick={() => setIsArtworkEditorOpen((value) => !value)}
+          >
+            <PenLine size={16} aria-hidden="true" />
+            Draw artwork
+          </button>
+        </div>
+        {artworkMessage ? <span className="status-line">{artworkMessage}</span> : null}
+        {isArtworkEditorOpen ? (
+          <ArtworkCanvasEditor
+            disabled={isArtworkBusy}
+            onExport={(file) => addArtworkFromFile(file, "canvas")}
+          />
+        ) : null}
         <div className="sticker-gallery-container">
           <div className="category-tabs">
             <button className={activeCategory === "all" ? "active" : ""} onClick={() => setActiveCategory("all")}>All</button>
@@ -179,8 +244,12 @@ export function EditorPanels({
               onClick={() => onActiveLayerChange(sticker.id)}
             >
               <div className="layer-info">
-                <img src={sticker.imageUrl} className="sticker-thumb" alt="sticker" />
-                <span>{sticker.id}</span>
+                {stickerThumbUrl(sticker) ? (
+                  <img src={stickerThumbUrl(sticker)} className="sticker-thumb" alt="sticker" />
+                ) : (
+                  <div className="color-swatch" />
+                )}
+                <span>{stickerLayerLabel(sticker)}</span>
               </div>
               <button type="button" className="delete-btn" title="Delete layer" disabled={isSaving} onClick={(e) => { e.stopPropagation(); removeLayer(sticker.id); }}>
                 <Trash2 size={14} aria-hidden="true" />
@@ -257,13 +326,29 @@ export function EditorPanels({
                 <input
                   value={activeText.value}
                   disabled={isSaving}
+                  maxLength={80}
                   onChange={(e) =>
                     updateLayer(activeLayer.id, {
                       value: e.target.value,
                       width: activeText.scale * textAspect(e.target.value),
+                      renderAssetId: undefined,
                     })
                   }
                 />
+              </label>
+              <label>
+                Font
+                <select
+                  value={activeText.font}
+                  disabled={isSaving}
+                  onChange={(e) => updateLayer(activeLayer.id, { font: e.target.value, renderAssetId: undefined })}
+                >
+                  {fontOptions.map((font) => (
+                    <option value={font} key={font}>
+                      {font}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="color-picker-row">
                 Color
@@ -272,7 +357,7 @@ export function EditorPanels({
                     type="color"
                     value={activeText.color}
                     disabled={isSaving}
-                    onChange={(e) => updateLayer(activeLayer.id, { color: e.target.value })}
+                    onChange={(e) => updateLayer(activeLayer.id, { color: e.target.value, renderAssetId: undefined })}
                   />
                   <span>{activeText.color.toUpperCase()}</span>
                 </div>
@@ -401,7 +486,44 @@ function addSticker(config: DesignConfig, preset: StickerPreset, meshBounds: { c
       {
         id: `sticker_${String(index).padStart(3, "0")}`,
         type: "image",
+        source: "preset",
         imageUrl: preset.imageUrl,
+        position: [c[0] + s[0] * 0.4, c[1], c[2]],
+        rotation: [0, 1.57, 0],
+        normal: [1, 0, 0],
+        targetMeshName: null,
+        scale: stickerScale,
+        width: stickerScale,
+        height: stickerScale,
+        offset: 0.004,
+        projectionDepth: Math.max(maxModelSize * 1.25, stickerScale * 2, 0.05),
+        subdivisions: 32,
+      },
+    ],
+  };
+}
+
+function addArtworkSticker(
+  config: DesignConfig,
+  uploaded: UploadedDesignAssetPreview,
+  meshBounds: { center: [number, number, number]; size: [number, number, number] } | null,
+): DesignConfig {
+  const index = config.stickers.length + 1;
+  const c = meshBounds ? meshBounds.center : [0, 0, 0];
+  const s = meshBounds ? meshBounds.size : [1, 1, 1];
+  const maxModelSize = Math.max(s[0], s[1], s[2]);
+  const stickerScale = maxModelSize * 0.15;
+
+  return {
+    ...config,
+    stickers: [
+      ...config.stickers,
+      {
+        id: `artwork_${String(index).padStart(3, "0")}`,
+        type: "image",
+        source: uploaded.sourceType,
+        assetId: uploaded.assetId,
+        previewUrl: uploaded.previewUrl,
         position: [c[0] + s[0] * 0.4, c[1], c[2]],
         rotation: [0, 1.57, 0],
         normal: [1, 0, 0],
@@ -450,3 +572,34 @@ function addText(config: DesignConfig, meshBounds: { center: [number, number, nu
 function textAspect(value: string): number {
   return Math.max(value.trim().length * 0.62, 1);
 }
+
+function validateArtworkFile(file: File): string | null {
+  if (!["image/png", "image/jpeg"].includes(file.type)) {
+    return "Artwork must be a PNG or JPEG image.";
+  }
+  if (file.size > MAX_ARTWORK_FILE_BYTES) {
+    return "Artwork image must be 5 MB or smaller.";
+  }
+  return null;
+}
+
+function stickerThumbUrl(sticker: StickerLayer): string | undefined {
+  return sticker.previewUrl ?? sticker.imageUrl;
+}
+
+function stickerLayerLabel(sticker: StickerLayer): string {
+  if (sticker.source === "canvas") return "Drawn artwork";
+  if (sticker.source === "upload") return "Uploaded image";
+  return sticker.id;
+}
+
+const fontOptions = [
+  "Arial",
+  "Helvetica",
+  "Georgia",
+  "Times New Roman",
+  "Courier New",
+  "Verdana",
+  "Trebuchet MS",
+  "Impact",
+];
