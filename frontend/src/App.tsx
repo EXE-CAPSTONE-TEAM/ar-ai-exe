@@ -32,6 +32,7 @@ import type {
   TextLayer,
   User,
 } from "./types";
+import { isCustomizableMeshName } from "./utils/customizationZones";
 
 export function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -346,6 +347,11 @@ export function App() {
   async function saveDesign() {
     if (!modelAsset || !config) {
       return;
+    }
+    const unappliedLayer = findUnappliedLayer(config);
+    if (unappliedLayer) {
+      setStatusMessage(`${unappliedLayer} must be applied to an allowed customization area before saving.`);
+      return null;
     }
 
     setIsSaving(true);
@@ -929,6 +935,20 @@ function safeTextColor(value: string): string {
 
 function layerIds(config: DesignConfig): string[] {
   return [...config.stickers.map((sticker) => sticker.id), ...config.texts.map((text) => text.id)];
+}
+
+function findUnappliedLayer(config: DesignConfig): string | null {
+  const sticker = config.stickers.find(
+    (layer) => !layer.targetMeshName || !isCustomizableMeshName(layer.targetMeshName),
+  );
+  if (sticker) {
+    return sticker.id;
+  }
+
+  const text = config.texts.find(
+    (layer) => layer.value.trim() && (!layer.targetMeshName || !isCustomizableMeshName(layer.targetMeshName)),
+  );
+  return text?.id ?? null;
 }
 
 function configFingerprint(config: DesignConfig): string {

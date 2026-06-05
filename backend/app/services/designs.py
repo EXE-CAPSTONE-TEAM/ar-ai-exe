@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.models import Design, DesignPreviewStatus, DesignStatus, ModelAsset, User
 from app.schemas.design import DesignConfig, DesignResponse
 from app.services.decal_baker import DecalBakeService
+from app.services.customization_zones import validate_design_config_customization_zones
 from app.services.design_assets import DesignAssetService
 from app.services.model_assets import ModelAssetService
 from app.services.storage import get_storage_service
@@ -38,6 +39,7 @@ class DesignService:
             if config
             else DesignConfig(modelAssetId=model_asset_id).model_dump(by_alias=True)
         )
+        validate_design_config_customization_zones(config_payload)
         design = Design(
             user_id=user.id,
             model_asset_id=model_asset_id,
@@ -75,9 +77,11 @@ class DesignService:
         if name is not None:
             design.name = name
         if config is not None:
+            config_payload = config.model_dump(by_alias=True)
+            validate_design_config_customization_zones(config_payload)
             self.storage.put_bytes(
                 design.design_config_path,
-                json.dumps(config.model_dump(by_alias=True), indent=2).encode("utf-8"),
+                json.dumps(config_payload, indent=2).encode("utf-8"),
                 "application/json",
             )
         self.db.commit()

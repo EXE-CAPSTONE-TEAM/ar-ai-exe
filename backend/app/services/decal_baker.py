@@ -15,6 +15,7 @@ from fastapi import HTTPException, status
 from app.core.config import get_settings
 from app.services.blender_service import BlenderService
 from app.services.command_runner import CommandRunner
+from app.services.customization_zones import require_customizable_target_name
 
 
 DATA_URI_RE = re.compile(r"^data:(?P<mime>image/(?:png|jpe?g|svg\+xml))(?P<meta>[^,]*),(?P<data>.*)$", re.I | re.S)
@@ -161,6 +162,10 @@ class DecalBakeService:
             width = self._number(sticker.get("width"), scale, minimum=0.01, maximum=10.0)
             height = self._number(sticker.get("height"), scale, minimum=0.01, maximum=10.0)
             normal = self._normal(sticker.get("normal"))
+            target_mesh_name = require_customizable_target_name(
+                sticker.get("targetMeshName"),
+                f"Sticker {sticker_id}",
+            )
             decal = {
                 "id": sticker_id,
                 "kind": "image",
@@ -168,7 +173,7 @@ class DecalBakeService:
                 "mimeType": mime_type,
                 "position": self._vec3(sticker.get("position"), [0.0, 0.0, 0.0]),
                 "rotation": self._vec3(sticker.get("rotation"), [0.0, 0.0, 0.0]),
-                "targetMeshName": sticker.get("targetMeshName") or "",
+                "targetMeshName": target_mesh_name,
                 "width": width,
                 "height": height,
                 "offset": self._number(sticker.get("offset"), 0.004, minimum=0.0, maximum=0.1),
@@ -231,6 +236,10 @@ class DecalBakeService:
                 text_layer.get("renderAssetId") or text_layer.get("render_asset_id")
             )
             normal = self._normal(text_layer.get("normal"))
+            target_mesh_name = require_customizable_target_name(
+                text_layer.get("targetMeshName"),
+                f"Text layer {text_id}",
+            )
 
             if render_asset_id:
                 image_path, mime_type = self._write_asset_image(
@@ -245,7 +254,7 @@ class DecalBakeService:
                     "mimeType": mime_type,
                     "position": self._vec3(text_layer.get("position"), [0.0, 0.0, 0.0]),
                     "rotation": self._vec3(text_layer.get("rotation"), [0.0, 0.0, 0.0]),
-                    "targetMeshName": text_layer.get("targetMeshName") or "",
+                    "targetMeshName": target_mesh_name,
                     "width": width,
                     "height": height,
                     "offset": self._number(text_layer.get("offset"), 0.004, minimum=0.0, maximum=0.1),
@@ -276,7 +285,7 @@ class DecalBakeService:
                 "color": color,
                 "position": self._vec3(text_layer.get("position"), [0.0, 0.0, 0.0]),
                 "rotation": self._vec3(text_layer.get("rotation"), [0.0, 0.0, 0.0]),
-                "targetMeshName": text_layer.get("targetMeshName") or "",
+                "targetMeshName": target_mesh_name,
                 "width": width,
                 "height": height,
                 "offset": self._number(text_layer.get("offset"), 0.004, minimum=0.0, maximum=0.1),
@@ -497,30 +506,116 @@ def mesh_objects():
     return [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
 
 
-def target_mesh_candidates():
+CUSTOMIZABLE_ALLOW_TERMS = (
+    "upper",
+    "vamp",
+    "quarter",
+    "toe",
+    "toe_box",
+    "heel",
+    "counter",
+    "tongue",
+    "side",
+    "panel",
+    "body",
+)
+CUSTOMIZABLE_BLOCK_TERMS = (
+    "sole",
+    "outsole",
+    "midsole",
+    "lace",
+    "laces",
+    "eyelet",
+    "hardware",
+    "zipper",
+    "logo",
+    "decal",
+    "text_decal",
+    "svg_decal",
+    "ground",
+)
+
+
+def normalize_mesh_name(value):
+    return "".join(char if char.isalnum() else "_" for char in str(value or "").lower())
+
+
+def matches_any_term(name, terms):
+    return any(term in name for term in terms)
+
+
+def is_decal_mesh_name(name):
+    normalized = normalize_mesh_name(name)
+    return matches_any_term(normalized, ("decal", "svg_decal", "text_decal"))
+
+
+def base_mesh_candidates():
     candidates = [
         obj for obj in mesh_objects()
-        if not obj.name.startswith("decal_")
-        and not obj.name.startswith("svg_decal_")
-        and not obj.name.startswith("text_decal_")
+        if not is_decal_mesh_name(obj.name)
+        and not is_decal_mesh_name(getattr(obj.data, "name", ""))
     ]
     if not candidates:
         raise RuntimeError("Imported model contains no target mesh.")
     return candidates
 
 
-def find_target_meshes(target_name):
-    candidates = target_mesh_candidates()
-    if target_name:
-        matches = []
-        for obj in candidates:
-            if obj.name == target_name or obj.data.name == target_name:
-                matches.append(obj)
-            if obj.name.startswith(target_name):
-                matches.append(obj)
-        if matches:
-            return matches
+def is_customizable_mesh_object(obj):
+    names = [obj.name, getattr(obj.data, "name", "")]
+    normalized_names = [normalize_mesh_name(name) for name in names if str(name or "").strip()]
+    if not normalized_names:
+        return False
+    if any(matches_any_term(name, CUSTOMIZABLE_BLOCK_TERMS) for name in normalized_names):
+        return False
+    return any(matches_any_term(name, CUSTOMIZABLE_ALLOW_TERMS) for name in normalized_names)
+
+
+def is_customizable_mesh_name(name):
+    normalized = normalize_mesh_name(name)
+    if not normalized:
+        return False
+    if matches_any_term(normalized, CUSTOMIZABLE_BLOCK_TERMS):
+        return False
+    return matches_any_term(normalized, CUSTOMIZABLE_ALLOW_TERMS)
+
+
+def target_mesh_candidates():
+    candidates = [obj for obj in base_mesh_candidates() if is_customizable_mesh_object(obj)]
+    if not candidates:
+        raise RuntimeError(
+            "Imported model contains no customizable target mesh. "
+            "Use upper, tongue, heel, or panel mesh names."
+        )
     return candidates
+
+
+def find_target_meshes(target_name):
+    target_name = str(target_name or "").strip()
+    if not target_name:
+        raise RuntimeError("Decal target mesh is required for strict customization areas.")
+    if not is_customizable_mesh_name(target_name):
+        raise RuntimeError(f"Decal target mesh '{target_name}' is not customizable.")
+
+    candidates = target_mesh_candidates()
+    matches = []
+    seen = set()
+    for obj in candidates:
+        data_name = getattr(obj.data, "name", "")
+        if (
+            obj.name == target_name
+            or data_name == target_name
+            or obj.name.startswith(target_name)
+            or data_name.startswith(target_name)
+        ):
+            key = obj.name
+            if key not in seen:
+                seen.add(key)
+                matches.append(obj)
+    if not matches:
+        raise RuntimeError(
+            f"Decal target mesh '{target_name}' was not found in customizable shoe areas."
+        )
+    return matches
 
 
 def set_optional(obj, name, value):
@@ -530,26 +625,83 @@ def set_optional(obj, name, value):
         pass
 
 
-def create_image_material(decal):
-    image = bpy.data.images.load(decal["imagePath"], check_existing=True)
-    material = bpy.data.materials.new(f"decal_{decal['id']}_material")
+def set_image_colorspace(image, colorspace):
+    try:
+        image.colorspace_settings.name = colorspace
+    except Exception:
+        pass
+
+
+def load_decal_image(path):
+    image = bpy.data.images.load(path, check_existing=True)
+    set_image_colorspace(image, "sRGB")
+    set_optional(image, "alpha_mode", "STRAIGHT")
+    return image
+
+
+def material_factor(material_config, name, default):
+    try:
+        value = float(material_config.get(name, default))
+    except Exception:
+        value = default
+    return max(0.0, min(1.0, value))
+
+
+def configure_decal_material(material, material_config, color=(1, 1, 1, 1)):
     material.use_nodes = True
     material.use_backface_culling = False
     material.blend_method = "BLEND"
-    material.diffuse_color = (1, 1, 1, 1)
+    material.diffuse_color = color
     set_optional(material, "show_transparent_back", True)
+    set_optional(material, "alpha_threshold", 0.01)
+
+    roughness = material_factor(material_config, "roughness", 1.0)
+    metallic = material_factor(material_config, "metallic", 0.0)
+    nodes = material.node_tree.nodes
+    bsdf = nodes.get("Principled BSDF")
+    if not bsdf:
+        return
+
+    base_color = bsdf.inputs.get("Base Color")
+    if base_color and not base_color.links:
+        base_color.default_value = color
+    alpha_input = bsdf.inputs.get("Alpha")
+    if alpha_input and not alpha_input.links:
+        alpha_input.default_value = color[3]
+    roughness_input = bsdf.inputs.get("Roughness")
+    if roughness_input:
+        roughness_input.default_value = roughness
+    metallic_input = bsdf.inputs.get("Metallic")
+    if metallic_input:
+        metallic_input.default_value = metallic
+
+
+def create_image_material(decal, material_config):
+    image = load_decal_image(decal["imagePath"])
+    material = bpy.data.materials.new(f"decal_{decal['id']}_material")
+    configure_decal_material(material, material_config)
 
     nodes = material.node_tree.nodes
     links = material.node_tree.links
     bsdf = nodes.get("Principled BSDF")
     texture_node = nodes.new("ShaderNodeTexImage")
     texture_node.image = image
+    texture_node.extension = "CLIP"
     if bsdf:
-        links.new(texture_node.outputs["Color"], bsdf.inputs["Base Color"])
-        if "Alpha" in bsdf.inputs:
-            links.new(texture_node.outputs["Alpha"], bsdf.inputs["Alpha"])
-            bsdf.inputs["Alpha"].default_value = 1.0
+        base_color = bsdf.inputs.get("Base Color")
+        if base_color:
+            links.new(texture_node.outputs["Color"], base_color)
+        alpha_input = bsdf.inputs.get("Alpha")
+        if alpha_input:
+            links.new(texture_node.outputs["Alpha"], alpha_input)
+            alpha_input.default_value = 1.0
     return material
+
+
+def srgb_channel_to_linear(value):
+    if value <= 0.04045:
+        return value / 12.92
+    return ((value + 0.055) / 1.055) ** 2.4
 
 
 def parse_hex_color(value):
@@ -562,7 +714,12 @@ def parse_hex_color(value):
         blue = int(text[4:6], 16) / 255
     except ValueError:
         red, green, blue = 1, 1, 1
-    return (red, green, blue, 1)
+    return (
+        srgb_channel_to_linear(red),
+        srgb_channel_to_linear(green),
+        srgb_channel_to_linear(blue),
+        1,
+    )
 
 
 def create_design_base_material(color, roughness, metallic):
@@ -594,10 +751,10 @@ def apply_material_settings(material, color, roughness, metallic):
 
 def apply_design_material(material_config):
     color = parse_hex_color(material_config.get("baseColor"))
-    roughness = max(0.0, min(1.0, float(material_config.get("roughness", 1.0))))
-    metallic = max(0.0, min(1.0, float(material_config.get("metallic", 0.0))))
+    roughness = material_factor(material_config, "roughness", 1.0)
+    metallic = material_factor(material_config, "metallic", 0.0)
 
-    for target in target_mesh_candidates():
+    for target in base_mesh_candidates():
         materials = [material for material in target.data.materials if material]
         if not materials:
             target.data.materials.append(create_design_base_material(color, roughness, metallic))
@@ -614,22 +771,14 @@ def apply_design_material(material_config):
                 polygon.material_index = 0
 
 
-def create_solid_material(decal):
+def create_solid_material(decal, material_config):
     color = parse_hex_color(decal.get("color"))
     material = bpy.data.materials.new(f"decal_{decal['id']}_material")
-    material.use_nodes = True
-    material.use_backface_culling = False
-    material.diffuse_color = color
-    nodes = material.node_tree.nodes
-    bsdf = nodes.get("Principled BSDF")
-    if bsdf:
-        bsdf.inputs["Base Color"].default_value = color
-        if "Alpha" in bsdf.inputs:
-            bsdf.inputs["Alpha"].default_value = color[3]
+    configure_decal_material(material, material_config, color)
     return material
 
 
-def create_grid_object(decal):
+def create_grid_object(decal, material_config):
     cuts = max(4, min(128, int(decal["subdivisions"])))
     width = float(decal["width"])
     height = float(decal["height"])
@@ -666,7 +815,7 @@ def create_grid_object(decal):
 
     obj = bpy.data.objects.new(f"decal_{decal['id']}", mesh)
     bpy.context.scene.collection.objects.link(obj)
-    obj.data.materials.append(create_image_material(decal))
+    obj.data.materials.append(create_image_material(decal, material_config))
     return obj
 
 
@@ -705,6 +854,14 @@ def import_svg_object(decal):
     return obj
 
 
+def configure_imported_decal_materials(obj, material_config):
+    for material in obj.data.materials:
+        if not material:
+            continue
+        color = tuple(material.diffuse_color) if material.diffuse_color else (1, 1, 1, 1)
+        configure_decal_material(material, material_config, color)
+
+
 def normalize_svg_mesh(obj, width, height):
     vertices = obj.data.vertices
     if not vertices:
@@ -727,7 +884,7 @@ def normalize_svg_mesh(obj, width, height):
     obj.data.update()
 
 
-def create_text_object(decal):
+def create_text_object(decal, material_config):
     curve = bpy.data.curves.new(f"text_decal_{decal['id']}_curve", "FONT")
     curve.body = str(decal.get("text") or "")
     curve.align_x = "CENTER"
@@ -745,7 +902,7 @@ def create_text_object(decal):
     converted = bpy.context.view_layer.objects.active
     normalize_svg_mesh(converted, float(decal["width"]), float(decal["height"]))
     converted.data.materials.clear()
-    converted.data.materials.append(create_solid_material(decal))
+    converted.data.materials.append(create_solid_material(decal, material_config))
     return converted
 
 
@@ -968,16 +1125,17 @@ def project_decal_vertices_to_targets(obj, targets, decal):
     return hit_ratio
 
 
-def create_decal(decal):
+def create_decal(decal, material_config):
     targets = find_target_meshes(decal.get("targetMeshName", ""))
     if decal.get("kind") == "text":
-        obj = create_text_object(decal)
+        obj = create_text_object(decal, material_config)
         subdivide_mesh(obj, decal["subdivisions"])
     elif decal["mimeType"] == "image/svg+xml":
         obj = import_svg_object(decal)
+        configure_imported_decal_materials(obj, material_config)
         subdivide_mesh(obj, decal["subdivisions"])
     else:
-        obj = create_grid_object(decal)
+        obj = create_grid_object(decal, material_config)
     set_decal_transform(obj, decal)
     project_decal_vertices_to_targets(obj, targets, decal)
 
@@ -991,9 +1149,10 @@ try:
 
     clear_scene()
     import_model(source_glb)
-    apply_design_material(manifest.get("material", {}))
+    material_config = manifest.get("material", {})
+    apply_design_material(material_config)
     for decal in manifest.get("decals", manifest.get("stickers", [])):
-        create_decal(decal)
+        create_decal(decal, material_config)
 
     bpy.ops.export_scene.gltf(
         filepath=str(output_dir / "final_shoe.glb"),

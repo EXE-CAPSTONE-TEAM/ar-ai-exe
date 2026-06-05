@@ -1,4 +1,4 @@
-import { ContactShadows, Grid, OrbitControls, TransformControls, useGLTF, useTexture } from "@react-three/drei";
+import { Grid, OrbitControls, TransformControls, useGLTF, useTexture } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { Box, Search, Upload } from "lucide-react";
 import { Fragment, Suspense, useEffect, useMemo, useRef } from "react";
@@ -6,10 +6,12 @@ import type { RefObject } from "react";
 import * as THREE from "three";
 
 import type { DesignConfig, StickerLayer, TextLayer } from "../../types";
+import { isCustomizableMeshName, resolveCustomizableMeshName } from "../../utils/customizationZones";
 import { ErrorBoundary } from "../Layout/ErrorBoundary";
 
 const TRANSPARENT_PIXEL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+const GRID_OFFSET_BELOW_SOLE = 0.01;
 
 type ModelViewerProps = {
   modelUrl: string | null;
@@ -48,39 +50,18 @@ export function ModelViewer({
             camera={{ position: [3.2, 2.1, 3.4], fov: 38, near: 0.1, far: 100 }}
             dpr={[1, 2]}
             gl={{ antialias: true, powerPreference: "high-performance" }}
-            shadows
             onCreated={({ gl }) => {
               gl.outputColorSpace = THREE.SRGBColorSpace;
               gl.toneMapping = THREE.ACESFilmicToneMapping;
-              gl.toneMappingExposure = 1.08;
-              gl.shadowMap.type = THREE.PCFSoftShadowMap;
+              gl.toneMappingExposure = 1.03;
             }}
           >
-            <color attach="background" args={["#fff6f2"]} />
-            <fog attach="fog" args={["#fff6f2", 5.5, 11]} />
-            <hemisphereLight args={["#ffffff", "#f1d7cc", 0.72]} />
-            <ambientLight intensity={0.34} />
-            <directionalLight
-              position={[4.5, 5.2, 4]}
-              intensity={2.15}
-              castShadow
-              shadow-mapSize={[2048, 2048]}
-              shadow-camera-near={0.1}
-              shadow-camera-far={14}
-              shadow-camera-left={-5}
-              shadow-camera-right={5}
-              shadow-camera-top={5}
-              shadow-camera-bottom={-5}
-            />
-            <directionalLight position={[-4, 2.2, -2.6]} intensity={0.52} color="#ffe0d4" />
-            <spotLight
-              position={[-3, 4.5, 3]}
-              angle={0.42}
-              penumbra={0.72}
-              intensity={0.95}
-              color="#ffffff"
-              castShadow
-            />
+            <color attach="background" args={["#fffaf7"]} />
+            <hemisphereLight args={["#ffffff", "#f4ded5", 1.15]} />
+            <ambientLight intensity={0.82} />
+            <directionalLight position={[4.5, 5.2, 4]} intensity={1.15} color="#ffffff" />
+            <directionalLight position={[-4, 3.2, -3.2]} intensity={0.86} color="#fff1eb" />
+            <directionalLight position={[0, 4.8, -4]} intensity={0.54} color="#ffffff" />
             <ErrorBoundary fallbackMessage="Failed to load 3D model. The file might be invalid or corrupted.">
               <Suspense fallback={null}>
                 <ShoeModel
@@ -98,26 +79,6 @@ export function ModelViewer({
                 />
               </Suspense>
             </ErrorBoundary>
-            <Grid
-              args={[5, 5]}
-              cellSize={0.5}
-              cellThickness={0.35}
-              sectionSize={1}
-              sectionThickness={0.58}
-              position={[0, -0.02, 0]}
-              fadeDistance={4.2}
-              fadeStrength={1.2}
-              infiniteGrid
-            />
-            <ContactShadows
-              position={[0, -1.28, 0]}
-              opacity={0.34}
-              scale={5.5}
-              blur={2.35}
-              far={2.8}
-              resolution={1024}
-              color="#6d5046"
-            />
             <OrbitControls makeDefault enablePan enableZoom enableRotate />
           </Canvas>
           {isSaving ? (
@@ -195,7 +156,7 @@ function ShoeModel({
     const size = bounds.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
     const previewScale = maxDim > 0 ? 2.5 / maxDim : 1;
-    return { center, size, previewScale };
+    return { bounds, center, size, previewScale };
   }, [gltf.scene]);
 
   const centeredModelPosition = useMemo(
@@ -206,6 +167,15 @@ function ShoeModel({
     () => createModelRaycastTargets(gltf.scene, modelMetrics.center),
     [gltf.scene, modelMetrics.center],
   );
+  const gridMetrics = useMemo(() => {
+    const gridSize = Math.max(modelMetrics.size.x, modelMetrics.size.z, 1) * 1.35;
+    return {
+      size: gridSize,
+      cellSize: Math.max(gridSize / 20, 0.02),
+      sectionSize: Math.max(gridSize / 4, 0.1),
+      y: modelMetrics.bounds.min.y - modelMetrics.center.y - GRID_OFFSET_BELOW_SOLE,
+    };
+  }, [modelMetrics]);
 
   useEffect(() => {
     onMeshBoundsUpdate({
@@ -218,8 +188,26 @@ function ShoeModel({
     gltf.scene.traverse((node) => {
       if (node instanceof THREE.Mesh) {
         if (isDecalMeshName(node.name)) {
-          node.castShadow = true;
-          node.receiveShadow = true;
+          if (!node.userData.originalDecalMaterial) {
+            if (Array.isArray(node.material)) {
+              node.userData.originalDecalMaterial = node.material.map((m: THREE.Material) => m.clone());
+            } else if (node.material) {
+              node.userData.originalDecalMaterial = node.material.clone();
+            }
+          }
+
+          if (node.userData.originalDecalMaterial) {
+            if (Array.isArray(node.userData.originalDecalMaterial)) {
+              node.material = node.userData.originalDecalMaterial.map((m: THREE.Material) =>
+                configureBakedDecalMaterial(m, config?.material),
+              );
+            } else {
+              node.material = configureBakedDecalMaterial(node.userData.originalDecalMaterial, config?.material);
+            }
+          }
+
+          node.castShadow = false;
+          node.receiveShadow = false;
           return;
         }
 
@@ -251,8 +239,8 @@ function ShoeModel({
           }
         }
 
-        node.castShadow = true;
-        node.receiveShadow = true;
+        node.castShadow = false;
+        node.receiveShadow = false;
       }
     });
   }, [config?.baseColor, config?.material.metallic, config?.material.roughness, gltf.scene]);
@@ -270,12 +258,16 @@ function ShoeModel({
 
     const snappedConfig = snapLayerToSurface(config, activeLayerId, modelMetrics.center, raycastTargets);
     if (!snappedConfig) {
-      onSurfaceApplyResult("No shoe surface found near the selected layer.");
+      const message =
+        raycastTargets.length === 0
+          ? "No customizable shoe area detected. Use upper, tongue, heel, or panel mesh names."
+          : "Selected layer is outside the allowed customization area.";
+      onSurfaceApplyResult(message);
       return;
     }
 
     onConfigChange(snappedConfig);
-    onSurfaceApplyResult("Layer applied to shoe surface.");
+    onSurfaceApplyResult("Layer applied inside the customization area.");
   }, [
     activeLayerId,
     config,
@@ -299,45 +291,20 @@ function ShoeModel({
   ) => {
     if (!config) return;
 
-    if (isText) {
+    const transformedConfig = updateLayerTransform(config, id, isText, pos, rot, scale);
+    const snappedConfig = snapLayerToSurface(transformedConfig, id, modelMetrics.center, raycastTargets);
+    if (!snappedConfig) {
       onConfigChange({
         ...config,
-        texts: config.texts.map((t) =>
-          t.id === id
-            ? {
-                ...t,
-                position: pos,
-                rotation: rot,
-                normal: normalFromRotation(rot),
-                targetMeshName: null,
-                scale,
-                width: scale * textAspect(t.value),
-                height: scale,
-                projectionDepth: Math.max(t.projectionDepth ?? 0, scale * 3, 0.05),
-              }
-            : t,
-        ),
+        stickers: [...config.stickers],
+        texts: [...config.texts],
       });
-    } else {
-      onConfigChange({
-        ...config,
-        stickers: config.stickers.map((s) =>
-          s.id === id
-            ? {
-                ...s,
-                position: pos,
-                rotation: rot,
-                normal: normalFromRotation(rot),
-                targetMeshName: null,
-                scale,
-                width: scale,
-                height: scale,
-                projectionDepth: Math.max(s.projectionDepth ?? 0, scale * 3, 0.05),
-              }
-            : s,
-        ),
-      });
+      onSurfaceApplyResult("Layer moved outside the allowed customization area.");
+      return;
     }
+
+    onConfigChange(snappedConfig);
+    onSurfaceApplyResult("Layer kept inside the customization area.");
   };
 
   return (
@@ -345,9 +312,20 @@ function ShoeModel({
       <group position={centeredModelPosition}>
         <primitive object={gltf.scene} />
       </group>
+      <Grid
+        args={[gridMetrics.size, gridMetrics.size]}
+        cellSize={gridMetrics.cellSize}
+        cellThickness={0.35}
+        sectionSize={gridMetrics.sectionSize}
+        sectionThickness={0.58}
+        position={[0, gridMetrics.y, 0]}
+        fadeDistance={gridMetrics.size * 0.84}
+        fadeStrength={1.1}
+        infiniteGrid
+      />
 
       {config?.stickers
-        .filter((sticker) => !hiddenLayerSet.has(sticker.id))
+        .filter((sticker) => !hiddenLayerSet.has(sticker.id) && layerHasCustomizableTarget(sticker))
         .map((sticker) => (
           <StickerPlane
             key={sticker.id}
@@ -360,7 +338,7 @@ function ShoeModel({
           />
         ))}
       {config?.texts
-        .filter((textLayer) => !hiddenLayerSet.has(textLayer.id))
+        .filter((textLayer) => !hiddenLayerSet.has(textLayer.id) && layerHasCustomizableTarget(textLayer))
         .map((textLayer) => (
           <TextPlane
             key={textLayer.id}
@@ -413,7 +391,11 @@ function createModelRaycastTargets(root: THREE.Object3D, modelCenter: THREE.Vect
   const centerOffset = new THREE.Matrix4().makeTranslation(-modelCenter.x, -modelCenter.y, -modelCenter.z);
 
   root.traverse((node) => {
-    if (!(node instanceof THREE.Mesh) || !node.geometry.attributes.position || isDecalMeshName(node.name)) {
+    if (!(node instanceof THREE.Mesh) || !node.geometry.attributes.position) {
+      return;
+    }
+    const targetName = resolveCustomizableMeshName(node.name, node.geometry.name);
+    if (!targetName) {
       return;
     }
 
@@ -421,7 +403,7 @@ function createModelRaycastTargets(root: THREE.Object3D, modelCenter: THREE.Vect
     const mesh = new THREE.Mesh(node.geometry);
     const relativeMatrix = rootWorldInverse.clone().multiply(node.matrixWorld);
     const stageMatrix = centerOffset.clone().multiply(relativeMatrix);
-    mesh.name = node.name || node.geometry.name || "model_mesh";
+    mesh.name = targetName;
     mesh.matrixAutoUpdate = false;
     mesh.matrix.copy(stageMatrix);
     mesh.matrixWorld.copy(stageMatrix);
@@ -433,6 +415,59 @@ function createModelRaycastTargets(root: THREE.Object3D, modelCenter: THREE.Vect
 
 function isDecalMeshName(name: string): boolean {
   return name.startsWith("decal_") || name.startsWith("svg_decal_") || name.startsWith("text_decal_");
+}
+
+function layerHasCustomizableTarget(layer: StickerLayer | TextLayer): boolean {
+  return Boolean(layer.targetMeshName && isCustomizableMeshName(layer.targetMeshName));
+}
+
+function updateLayerTransform(
+  config: DesignConfig,
+  id: string,
+  isText: boolean,
+  pos: [number, number, number],
+  rot: [number, number, number],
+  scale: number,
+): DesignConfig {
+  if (isText) {
+    return {
+      ...config,
+      texts: config.texts.map((t) =>
+        t.id === id
+          ? {
+              ...t,
+              position: pos,
+              rotation: rot,
+              normal: normalFromRotation(rot),
+              targetMeshName: null,
+              scale,
+              width: scale * textAspect(t.value),
+              height: scale,
+              projectionDepth: Math.max(t.projectionDepth ?? 0, scale * 3, 0.05),
+            }
+          : t,
+      ),
+    };
+  }
+
+  return {
+    ...config,
+    stickers: config.stickers.map((s) =>
+      s.id === id
+        ? {
+            ...s,
+            position: pos,
+            rotation: rot,
+            normal: normalFromRotation(rot),
+            targetMeshName: null,
+            scale,
+            width: scale,
+            height: scale,
+            projectionDepth: Math.max(s.projectionDepth ?? 0, scale * 3, 0.05),
+          }
+        : s,
+    ),
+  };
 }
 
 function snapLayerToSurface(
@@ -598,11 +633,47 @@ function configureTexture(texture: THREE.Texture | null | undefined, srgb = fals
 
 function configureMaterialTextures(material: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial): void {
   configureTexture(material.map, true);
+  configureTexture(material.alphaMap);
   configureTexture(material.emissiveMap, true);
   configureTexture(material.roughnessMap);
   configureTexture(material.metalnessMap);
   configureTexture(material.normalMap);
   configureTexture(material.aoMap);
+}
+
+type ColorMappedMaterial = THREE.Material & {
+  map?: THREE.Texture | null;
+  alphaMap?: THREE.Texture | null;
+};
+
+function configureColorMappedMaterialTextures(material: THREE.Material): void {
+  const mapped = material as ColorMappedMaterial;
+  configureTexture(mapped.map, true);
+  configureTexture(mapped.alphaMap);
+}
+
+function configureBakedDecalMaterial(
+  sourceMaterial: THREE.Material,
+  materialConfig: DesignConfig["material"] | undefined,
+): THREE.Material {
+  const material = sourceMaterial.clone();
+  material.transparent = true;
+  material.depthWrite = false;
+  material.side = THREE.DoubleSide;
+  material.polygonOffset = true;
+  material.polygonOffsetFactor = -4;
+  material.polygonOffsetUnits = -4;
+
+  if (material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhysicalMaterial) {
+    material.roughness = materialConfig?.roughness ?? 1;
+    material.metalness = materialConfig?.metallic ?? 0;
+    configureMaterialTextures(material);
+  } else {
+    configureColorMappedMaterialTextures(material);
+  }
+
+  material.needsUpdate = true;
+  return material;
 }
 
 function StickerPlane({
@@ -640,6 +711,8 @@ function StickerPlane({
         <planeGeometry args={[1, 1]} />
         <meshStandardMaterial
           map={texture}
+          roughness={1}
+          metalness={0}
           transparent
           side={THREE.DoubleSide}
           depthWrite={false}
@@ -706,8 +779,10 @@ function TextPlane({
         scale={[scale, scale, scale]}
       >
         <planeGeometry args={[aspect, 1]} />
-        <meshBasicMaterial
+        <meshStandardMaterial
           map={texture}
+          roughness={1}
+          metalness={0}
           transparent
           side={THREE.DoubleSide}
           depthWrite={false}

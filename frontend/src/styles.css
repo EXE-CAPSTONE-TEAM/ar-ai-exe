@@ -820,9 +820,7 @@ h3 {
   overflow: hidden;
   border: 1px solid var(--line-strong);
   border-radius: 2px;
-  background:
-    radial-gradient(circle at 70% 42%, rgba(255, 42, 10, 0.14), transparent 22rem),
-    var(--surface-raised);
+  background: var(--surface-raised);
   box-shadow: 6px 6px 0 var(--line-strong);
 }
 
@@ -1389,4 +1387,23 @@ dd {
 
 .apply-surface-button {
   flex: 1 1 100%;
+}
+
+.surface-status-line {
+  display: block;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.surface-status-line.applied {
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.surface-status-line.blocked {
+  color: var(--warning);
+  background: var(--warning-soft);
 }

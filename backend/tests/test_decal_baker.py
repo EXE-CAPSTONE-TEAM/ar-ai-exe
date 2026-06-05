@@ -27,6 +27,7 @@ def test_prepare_stickers_decodes_svg_data_uri_and_normalizes_legacy_fields(tmp_
                 "position": [1, 2, 3],
                 "rotation": [0, 1.57, 0],
                 "normal": [10, 0, 0],
+                "targetMeshName": "upper_panel",
                 "scale": 0.35,
             }
         ]
@@ -79,6 +80,7 @@ def test_prepare_stickers_resolves_uploaded_asset_id(tmp_path: Path) -> None:
                 "assetId": "asset_001",
                 "position": [0, 0, 0],
                 "rotation": [0, 0, 0],
+                "targetMeshName": "upper_panel",
                 "scale": 0.2,
             }
         ]
@@ -127,6 +129,7 @@ def test_prepare_decals_includes_text_svg_and_preserves_transform(tmp_path: Path
                 "position": [1, 2, 3],
                 "rotation": [0.1, 0.2, 0.3],
                 "normal": [0, 0, -2],
+                "targetMeshName": "tongue_panel",
                 "scale": 0.4,
             }
         ]
@@ -160,6 +163,7 @@ def test_prepare_decals_uses_render_asset_for_text_layer(tmp_path: Path) -> None
                 "renderAssetId": "asset_text",
                 "position": [1, 2, 3],
                 "rotation": [0.1, 0.2, 0.3],
+                "targetMeshName": "tongue_panel",
                 "scale": 0.4,
             }
         ]
@@ -185,6 +189,7 @@ def test_prepare_decals_limits_combined_sticker_and_text_count(tmp_path: Path) -
                 "imageUrl": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22/%3E",
                 "position": [0, 0, 0],
                 "rotation": [0, 0, 0],
+                "targetMeshName": "upper_panel",
                 "scale": 0.2,
             }
         ],
@@ -194,6 +199,7 @@ def test_prepare_decals_limits_combined_sticker_and_text_count(tmp_path: Path) -
                 "value": "TAK",
                 "position": [0, 0, 0],
                 "rotation": [0, 0, 0],
+                "targetMeshName": "upper_panel",
                 "scale": 0.2,
             }
             for index in range(MAX_STICKERS)
@@ -267,11 +273,25 @@ def test_blender_script_uses_explicit_projection_and_miss_guard(tmp_path: Path) 
     assert "three_euler_xyz_matrix(value)" in script
     assert "def apply_design_material" in script
     assert "def apply_material_settings" in script
+    assert "def load_decal_image" in script
+    assert 'set_image_colorspace(image, "sRGB")' in script
+    assert 'set_optional(image, "alpha_mode", "STRAIGHT")' in script
+    assert 'material.blend_method = "BLEND"' in script
+    assert 'material_factor(material_config, "roughness", 1.0)' in script
+    assert 'material_factor(material_config, "metallic", 0.0)' in script
+    assert "def srgb_channel_to_linear" in script
+    assert "srgb_channel_to_linear(red)" in script
+    assert "def configure_decal_material" in script
+    assert "texture_node.extension = \"CLIP\"" in script
+    assert "def base_mesh_candidates" in script
+    assert "def target_mesh_candidates" in script
+    assert "def is_customizable_mesh_object" in script
     assert "not base_color.links" in script
     assert "target.data.materials.clear()" not in script
     assert "polygon.material_index = 0" in script
-    assert "apply_design_material(manifest.get(\"material\", {}))" in script
-    assert script.index("apply_design_material(manifest.get(\"material\", {}))") < script.index(
+    assert "for target in base_mesh_candidates()" in script
+    assert "apply_design_material(material_config)" in script
+    assert script.index("apply_design_material(material_config)") < script.index(
         "for decal in manifest.get"
     )
     assert 'Matrix.Rotation(1.5707963267948966, 4, "X")' in script
@@ -279,8 +299,9 @@ def test_blender_script_uses_explicit_projection_and_miss_guard(tmp_path: Path) 
     assert "def orient_surface_normal(surface_normal, outward_normal)" in script
     assert "def effective_projection_depth" in script
     assert "def effective_surface_offset" in script
+    assert "Decal target mesh is required for strict customization areas" in script
+    assert "was not found in customizable shoe areas" in script
     assert "find_nearest" in script
-    assert "return candidates" in script
     assert "def apply_shrinkwrap" not in script
     assert "distance=float(limit)" in script
     assert "decal_size * 2.0" not in script
@@ -292,6 +313,8 @@ def test_blender_script_uses_explicit_projection_and_miss_guard(tmp_path: Path) 
     assert "material.use_backface_culling = False" in script
     assert "missed the shoe surface" in script
     assert "hit_ratio < 0.25" in script
+    assert "material_config = manifest.get(\"material\", {})" in script
+    assert "create_decal(decal, material_config)" in script
 
 
 def test_blender_script_assigns_text_material_after_mesh_conversion(tmp_path: Path) -> None:
@@ -301,6 +324,8 @@ def test_blender_script_assigns_text_material_after_mesh_conversion(tmp_path: Pa
     service._write_blender_script(script_path)
     script = script_path.read_text(encoding="utf-8")
     convert_index = script.index('bpy.ops.object.convert(target="MESH")', script.index("def create_text_object"))
-    material_index = script.index("converted.data.materials.append(create_solid_material(decal))")
+    material_index = script.index(
+        "converted.data.materials.append(create_solid_material(decal, material_config))"
+    )
 
     assert convert_index < material_index
