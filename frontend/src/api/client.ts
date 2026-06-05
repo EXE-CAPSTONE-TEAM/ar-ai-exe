@@ -59,6 +59,18 @@ function storeToken(accessToken: string): void {
   localStorage.setItem(TOKEN_STORAGE_KEY, accessToken);
 }
 
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export const api = {
   baseUrl: API_BASE_URL,
 
@@ -223,12 +235,7 @@ export const api = {
       throw new ApiError(await errorMessage(response), response.status);
     }
 
-    const url = URL.createObjectURL(await response.blob());
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${exportPackage.id}.zip`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(await response.blob(), `${exportPackage.id}.zip`);
   },
 
   async downloadModelFile(urlPath: string, filename: string): Promise<void> {
@@ -239,12 +246,7 @@ export const api = {
       throw new ApiError(await errorMessage(response), response.status);
     }
 
-    const url = URL.createObjectURL(await response.blob());
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(await response.blob(), filename);
   },
 };
 

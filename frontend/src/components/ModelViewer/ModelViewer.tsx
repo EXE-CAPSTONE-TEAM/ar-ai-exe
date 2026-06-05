@@ -1,5 +1,6 @@
-import { Grid, OrbitControls, TransformControls, useGLTF, useTexture } from "@react-three/drei";
+import { ContactShadows, Grid, OrbitControls, TransformControls, useGLTF, useTexture } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
+import { Box, Search, Upload } from "lucide-react";
 import { Fragment, Suspense, useEffect, useMemo, useRef } from "react";
 import type { RefObject } from "react";
 import * as THREE from "three";
@@ -43,10 +44,43 @@ export function ModelViewer({
     <div className="viewer-surface">
       {modelUrl ? (
         <>
-          <Canvas camera={{ position: [3, 2, 3], fov: 45 }} shadows>
-            <color attach="background" args={["#f8fafc"]} />
-            <ambientLight intensity={0.8} />
-            <directionalLight position={[3, 4, 5]} intensity={1.3} castShadow />
+          <Canvas
+            camera={{ position: [3.2, 2.1, 3.4], fov: 38, near: 0.1, far: 100 }}
+            dpr={[1, 2]}
+            gl={{ antialias: true, powerPreference: "high-performance" }}
+            shadows
+            onCreated={({ gl }) => {
+              gl.outputColorSpace = THREE.SRGBColorSpace;
+              gl.toneMapping = THREE.ACESFilmicToneMapping;
+              gl.toneMappingExposure = 1.08;
+              gl.shadowMap.type = THREE.PCFSoftShadowMap;
+            }}
+          >
+            <color attach="background" args={["#fff6f2"]} />
+            <fog attach="fog" args={["#fff6f2", 5.5, 11]} />
+            <hemisphereLight args={["#ffffff", "#f1d7cc", 0.72]} />
+            <ambientLight intensity={0.34} />
+            <directionalLight
+              position={[4.5, 5.2, 4]}
+              intensity={2.15}
+              castShadow
+              shadow-mapSize={[2048, 2048]}
+              shadow-camera-near={0.1}
+              shadow-camera-far={14}
+              shadow-camera-left={-5}
+              shadow-camera-right={5}
+              shadow-camera-top={5}
+              shadow-camera-bottom={-5}
+            />
+            <directionalLight position={[-4, 2.2, -2.6]} intensity={0.52} color="#ffe0d4" />
+            <spotLight
+              position={[-3, 4.5, 3]}
+              angle={0.42}
+              penumbra={0.72}
+              intensity={0.95}
+              color="#ffffff"
+              castShadow
+            />
             <ErrorBoundary fallbackMessage="Failed to load 3D model. The file might be invalid or corrupted.">
               <Suspense fallback={null}>
                 <ShoeModel
@@ -67,10 +101,22 @@ export function ModelViewer({
             <Grid
               args={[5, 5]}
               cellSize={0.5}
-              cellThickness={0.5}
+              cellThickness={0.35}
               sectionSize={1}
-              sectionThickness={0.8}
+              sectionThickness={0.58}
               position={[0, -0.02, 0]}
+              fadeDistance={4.2}
+              fadeStrength={1.2}
+              infiniteGrid
+            />
+            <ContactShadows
+              position={[0, -1.28, 0]}
+              opacity={0.34}
+              scale={5.5}
+              blur={2.35}
+              far={2.8}
+              resolution={1024}
+              color="#6d5046"
             />
             <OrbitControls makeDefault enablePan enableZoom enableRotate />
           </Canvas>
@@ -89,8 +135,23 @@ export function ModelViewer({
         </>
       ) : (
         <div className="viewer-empty">
-          <BoxIcon />
-          <span>Load a completed scan or imported model.</span>
+          <div className="viewer-empty-icon">
+            <Box size={42} aria-hidden="true" />
+          </div>
+          <div className="viewer-empty-copy">
+            <strong>Waiting for a shoe model</strong>
+            <span>Load a completed scan or import a GLB/OBJ model to open the editor.</span>
+          </div>
+          <div className="viewer-empty-actions" aria-label="Available starting points">
+            <span>
+              <Search size={14} aria-hidden="true" />
+              Load scan
+            </span>
+            <span>
+              <Upload size={14} aria-hidden="true" />
+              Import model
+            </span>
+          </div>
         </div>
       )}
     </div>
@@ -177,7 +238,9 @@ function ShoeModel({
               m.color = new THREE.Color(config?.baseColor ?? "#ffffff");
               m.roughness = config?.material.roughness ?? 1;
               m.metalness = config?.material.metallic ?? 0;
+              configureMaterialTextures(m);
             }
+            m.needsUpdate = true;
             return m;
           };
 
@@ -519,6 +582,29 @@ function vectorToTuple(vector: THREE.Vector3): [number, number, number] {
   return [vector.x, vector.y, vector.z];
 }
 
+function configureTexture(texture: THREE.Texture | null | undefined, srgb = false): void {
+  if (!texture) {
+    return;
+  }
+  if (srgb) {
+    texture.colorSpace = THREE.SRGBColorSpace;
+  }
+  texture.anisotropy = Math.max(texture.anisotropy ?? 1, 8);
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+}
+
+function configureMaterialTextures(material: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial): void {
+  configureTexture(material.map, true);
+  configureTexture(material.emissiveMap, true);
+  configureTexture(material.roughnessMap);
+  configureTexture(material.metalnessMap);
+  configureTexture(material.normalMap);
+  configureTexture(material.aoMap);
+}
+
 function StickerPlane({
   sticker,
   modelCenter,
@@ -536,7 +622,7 @@ function StickerPlane({
 }) {
   const texture = useTexture(stickerTextureUrl(sticker));
   const ref = useRef<THREE.Mesh>(null);
-  texture.colorSpace = THREE.SRGBColorSpace;
+  configureTexture(texture, true);
 
   const position = useMemo(() => new THREE.Vector3(...sticker.position).sub(modelCenter), [modelCenter, sticker.position]);
   const rotation = useMemo(() => new THREE.Euler(...sticker.rotation), [sticker.rotation]);
@@ -603,7 +689,7 @@ function TextPlane({
   const textureUrl = useMemo(() => textSvgDataUri(layer), [layer]);
   const texture = useTexture(textureUrl);
   const ref = useRef<THREE.Mesh>(null);
-  texture.colorSpace = THREE.SRGBColorSpace;
+  configureTexture(texture, true);
 
   const position = useMemo(() => new THREE.Vector3(...layer.position).sub(modelCenter), [layer.position, modelCenter]);
   const rotation = useMemo(() => new THREE.Euler(...layer.rotation), [layer.rotation]);
@@ -684,15 +770,4 @@ function escapeXml(value: string): string {
 
 function escapeAttribute(value: string): string {
   return escapeXml(value).replace(/"/g, "&quot;");
-}
-
-function BoxIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" width="48" height="48">
-      <path
-        fill="currentColor"
-        d="M12 2 3 6.5v11L12 22l9-4.5v-11L12 2Zm0 2.24 5.7 2.85L12 9.94 6.3 7.09 12 4.24ZM5 8.62l6 3v7.76l-6-3V8.62Zm8 10.76v-7.76l6-3v7.76l-6 3Z"
-      />
-    </svg>
-  );
 }

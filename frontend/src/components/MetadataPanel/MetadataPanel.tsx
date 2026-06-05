@@ -1,3 +1,4 @@
+import { Activity, Info } from "lucide-react";
 import type { ModelAsset, ScanSession } from "../../types";
 
 type MetadataPanelProps = {
@@ -12,7 +13,13 @@ export function MetadataPanel({ scanSession, modelAsset }: MetadataPanelProps) {
   return (
     <aside className="metadata-panel">
       <section className="panel-section">
-        <h2>{isImport ? "Import" : "Scan"}</h2>
+        <div className="section-heading">
+          <Info size={18} aria-hidden="true" />
+          <div>
+            <h2>{isImport ? "Import" : "Scan"}</h2>
+            <p className="muted">{scanSession ? "Source and processing status." : "Load a scan to see source details."}</p>
+          </div>
+        </div>
         {scanSession ? (
           <dl>
             <dt>Session</dt>
@@ -45,12 +52,22 @@ export function MetadataPanel({ scanSession, modelAsset }: MetadataPanelProps) {
             ) : null}
           </dl>
         ) : (
-          <p className="muted">No scan loaded.</p>
+          <div className="empty-layer-state">
+            <Info size={18} aria-hidden="true" />
+            <strong>No scan loaded</strong>
+            <span>Load a scan ID or import a model to fill this panel.</span>
+          </div>
         )}
       </section>
 
       <section className="panel-section">
-        <h2>Quality</h2>
+        <div className="section-heading">
+          <Activity size={18} aria-hidden="true" />
+          <div>
+            <h2>Quality</h2>
+            <p className="muted">Scores appear after processing finishes.</p>
+          </div>
+        </div>
         {qualityReport ? (
           <div className="quality-stack">
             <dl className="quality-summary">

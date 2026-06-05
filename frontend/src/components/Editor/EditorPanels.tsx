@@ -33,6 +33,8 @@ type EditorPanelsProps = {
   modelAsset: ModelAsset | null;
   designName: string;
   isSaving: boolean;
+  isExporting: boolean;
+  exportMessage: string | null;
   exportPackage: ExportPackage | null;
   activeLayerId: string | null;
   meshBounds: { center: [number, number, number]; size: [number, number, number] } | null;
@@ -57,6 +59,8 @@ export function EditorPanels({
   modelAsset,
   designName,
   isSaving,
+  isExporting,
+  exportMessage,
   exportPackage,
   activeLayerId,
   meshBounds,
@@ -81,8 +85,15 @@ export function EditorPanels({
   if (!config) {
     return (
       <aside className="editor-panel">
-        <h2>Design Tools</h2>
-        <p className="muted">Tools unlock after a completed scan model is loaded.</p>
+        <section className="panel-section">
+          <div className="empty-panel-callout">
+            <ImagePlus size={22} aria-hidden="true" />
+            <div>
+              <h2>Design tools are locked</h2>
+              <p>Load a completed scan or import a model to start adding artwork.</p>
+            </div>
+          </div>
+        </section>
       </aside>
     );
   }
@@ -92,7 +103,8 @@ export function EditorPanels({
   const activeSticker = config.stickers.find((s) => s.id === activeLayerId);
   const activeText = config.texts.find((t) => t.id === activeLayerId);
   const activeLayer = activeSticker || activeText;
-  const isArtworkBusy = isSaving || isUploadingArtwork;
+  const isDesignBusy = isSaving || isExporting;
+  const isArtworkBusy = isDesignBusy || isUploadingArtwork;
 
   function updateLayer(id: string, patch: any) {
     if (activeSticker) {
@@ -145,7 +157,13 @@ export function EditorPanels({
   return (
     <aside className="editor-panel">
       <section className="panel-section">
-        <h2>Design Tools</h2>
+        <div className="section-heading">
+          <PenLine size={18} aria-hidden="true" />
+          <div>
+            <h2>Design Tools</h2>
+            <p className="muted">Name the draft before saving it.</p>
+          </div>
+        </div>
         <label>
           Draft name
           <input value={designName} onChange={(event) => onNameChange(event.target.value)} />
@@ -153,13 +171,23 @@ export function EditorPanels({
       </section>
 
       <section className="panel-section">
-        <h3>Decals & Text</h3>
+        <div className="section-heading">
+          <ImagePlus size={18} aria-hidden="true" />
+          <div>
+            <h3>Decals & Text</h3>
+            <p className="muted">Add the artwork first, then place it on the model.</p>
+          </div>
+        </div>
         <div className="decal-guidance">
           <ImagePlus size={18} aria-hidden="true" />
-          <p>Thêm sticker hoặc text, kéo sát bề mặt giày nhất có thể, rồi bấm Save Draft để áp ảnh vào giày.</p>
+          <ol className="mini-guide-list">
+            <li>Add text, upload an image, draw artwork, or choose a preset.</li>
+            <li>Select the layer, adjust it in the viewer, then apply it to the shoe surface.</li>
+            <li>Use Save Draft to bake the preview before exporting.</li>
+          </ol>
         </div>
         <div className="button-row">
-          <button type="button" disabled={isSaving} onClick={() => {
+          <button type="button" disabled={isDesignBusy} onClick={() => {
             const newConfig = addText(config, meshBounds);
             onConfigChange(newConfig);
             onActiveLayerChange(newConfig.texts[newConfig.texts.length - 1].id);
@@ -188,7 +216,7 @@ export function EditorPanels({
           <button
             type="button"
             className={isArtworkEditorOpen ? "active" : ""}
-            disabled={isSaving}
+            disabled={isDesignBusy}
             onClick={() => setIsArtworkEditorOpen((value) => !value)}
           >
             <PenLine size={16} aria-hidden="true" />
@@ -204,11 +232,11 @@ export function EditorPanels({
         ) : null}
         <div className="sticker-gallery-container">
           <div className="category-tabs">
-            <button className={activeCategory === "all" ? "active" : ""} onClick={() => setActiveCategory("all")}>All</button>
-            <button className={activeCategory === "popular" ? "active" : ""} onClick={() => setActiveCategory("popular")}>Popular</button>
-            <button className={activeCategory === "symbols" ? "active" : ""} onClick={() => setActiveCategory("symbols")}>Symbols</button>
-            <button className={activeCategory === "nature" ? "active" : ""} onClick={() => setActiveCategory("nature")}>Nature</button>
-            <button className={activeCategory === "sport" ? "active" : ""} onClick={() => setActiveCategory("sport")}>Sport</button>
+            <button type="button" className={activeCategory === "all" ? "active" : ""} onClick={() => setActiveCategory("all")}>All</button>
+            <button type="button" className={activeCategory === "popular" ? "active" : ""} onClick={() => setActiveCategory("popular")}>Popular</button>
+            <button type="button" className={activeCategory === "symbols" ? "active" : ""} onClick={() => setActiveCategory("symbols")}>Symbols</button>
+            <button type="button" className={activeCategory === "nature" ? "active" : ""} onClick={() => setActiveCategory("nature")}>Nature</button>
+            <button type="button" className={activeCategory === "sport" ? "active" : ""} onClick={() => setActiveCategory("sport")}>Sport</button>
           </div>
           <div className="sticker-gallery">
             {stickerPresets
@@ -218,7 +246,7 @@ export function EditorPanels({
                   key={preset.id}
                   className="sticker-card"
                   title={preset.label}
-                  disabled={isSaving}
+                  disabled={isDesignBusy}
                   onClick={() => {
                     const newConfig = addSticker(config, preset, meshBounds);
                     onConfigChange(newConfig);
@@ -233,7 +261,13 @@ export function EditorPanels({
       </section>
 
       <section className="panel-section">
-        <h3>Layers</h3>
+        <div className="section-heading">
+          <Type size={18} aria-hidden="true" />
+          <div>
+            <h3>Layers</h3>
+            <p className="muted">Select a layer to edit its placement and style.</p>
+          </div>
+        </div>
         <div className="layer-list" onClick={(e) => {
           if (e.target === e.currentTarget) onActiveLayerChange(null);
         }}>
@@ -241,7 +275,15 @@ export function EditorPanels({
             <div
               className={`layer-row ${activeLayerId === sticker.id ? "active" : ""}`}
               key={sticker.id}
+              role="button"
+              tabIndex={0}
               onClick={() => onActiveLayerChange(sticker.id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onActiveLayerChange(sticker.id);
+                }
+              }}
             >
               <div className="layer-info">
                 {stickerThumbUrl(sticker) ? (
@@ -251,7 +293,7 @@ export function EditorPanels({
                 )}
                 <span>{stickerLayerLabel(sticker)}</span>
               </div>
-              <button type="button" className="delete-btn" title="Delete layer" disabled={isSaving} onClick={(e) => { e.stopPropagation(); removeLayer(sticker.id); }}>
+              <button type="button" className="delete-btn" title="Delete layer" disabled={isDesignBusy} onClick={(e) => { e.stopPropagation(); removeLayer(sticker.id); }}>
                 <Trash2 size={14} aria-hidden="true" />
               </button>
             </div>
@@ -260,31 +302,51 @@ export function EditorPanels({
             <div
               className={`layer-row ${activeLayerId === textLayer.id ? "active" : ""}`}
               key={textLayer.id}
+              role="button"
+              tabIndex={0}
               onClick={() => onActiveLayerChange(textLayer.id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onActiveLayerChange(textLayer.id);
+                }
+              }}
             >
               <div className="layer-info">
                 <div className="color-swatch" style={{ backgroundColor: textLayer.color }} />
                 <span>{textLayer.value}</span>
               </div>
-              <button type="button" className="delete-btn" title="Delete layer" disabled={isSaving} onClick={(e) => { e.stopPropagation(); removeLayer(textLayer.id); }}>
+              <button type="button" className="delete-btn" title="Delete layer" disabled={isDesignBusy} onClick={(e) => { e.stopPropagation(); removeLayer(textLayer.id); }}>
                 <Trash2 size={14} aria-hidden="true" />
               </button>
             </div>
           ))}
           {config.stickers.length === 0 && config.texts.length === 0 ? (
-            <p className="muted">No decal layers yet.</p>
+            <div className="empty-layer-state">
+              <ImagePlus size={18} aria-hidden="true" />
+              <strong>No layers yet</strong>
+              <span>Add text or artwork. New layers appear here.</span>
+            </div>
           ) : null}
         </div>
       </section>
 
       {activeLayer && (
         <section className="panel-section highlight">
-          <h3>Layer Properties</h3>
+          <div className="section-heading">
+            <Crosshair size={18} aria-hidden="true" />
+            <div>
+              <h3>Layer Properties</h3>
+              <p className="muted">Use the familiar move, rotate, and scale order.</p>
+            </div>
+          </div>
           <div className="button-row gizmo-toolbar">
             <button
               type="button"
               className={gizmoMode === "translate" ? "active" : ""}
-              disabled={isSaving}
+              aria-label="Move selected layer"
+              aria-pressed={gizmoMode === "translate"}
+              disabled={isDesignBusy}
               onClick={() => onGizmoModeChange("translate")}
               title="Move (3D)"
             >
@@ -293,7 +355,9 @@ export function EditorPanels({
             <button
               type="button"
               className={gizmoMode === "rotate" ? "active" : ""}
-              disabled={isSaving}
+              aria-label="Rotate selected layer"
+              aria-pressed={gizmoMode === "rotate"}
+              disabled={isDesignBusy}
               onClick={() => onGizmoModeChange("rotate")}
               title="Rotate (3D)"
             >
@@ -302,7 +366,9 @@ export function EditorPanels({
             <button
               type="button"
               className={gizmoMode === "scale" ? "active" : ""}
-              disabled={isSaving}
+              aria-label="Scale selected layer"
+              aria-pressed={gizmoMode === "scale"}
+              disabled={isDesignBusy}
               onClick={() => onGizmoModeChange("scale")}
               title="Scale (3D)"
             >
@@ -311,7 +377,8 @@ export function EditorPanels({
             <button
               type="button"
               className="apply-surface-button"
-              disabled={isSaving}
+              aria-label="Apply selected layer to the shoe surface"
+              disabled={isDesignBusy}
               onClick={onApplyActiveLayerToSurface}
               title="Apply to surface"
             >
@@ -325,7 +392,7 @@ export function EditorPanels({
                 Text
                 <input
                   value={activeText.value}
-                  disabled={isSaving}
+                  disabled={isDesignBusy}
                   maxLength={80}
                   onChange={(e) =>
                     updateLayer(activeLayer.id, {
@@ -340,7 +407,7 @@ export function EditorPanels({
                 Font
                 <select
                   value={activeText.font}
-                  disabled={isSaving}
+                  disabled={isDesignBusy}
                   onChange={(e) => updateLayer(activeLayer.id, { font: e.target.value, renderAssetId: undefined })}
                 >
                   {fontOptions.map((font) => (
@@ -356,7 +423,7 @@ export function EditorPanels({
                   <input
                     type="color"
                     value={activeText.color}
-                    disabled={isSaving}
+                    disabled={isDesignBusy}
                     onChange={(e) => updateLayer(activeLayer.id, { color: e.target.value, renderAssetId: undefined })}
                   />
                   <span>{activeText.color.toUpperCase()}</span>
@@ -372,7 +439,7 @@ export function EditorPanels({
               max="2"
               step="0.05"
               value={activeLayer.scale}
-              disabled={isSaving}
+              disabled={isDesignBusy}
               onChange={(e) => {
                 const scale = Number(e.target.value);
                 updateLayer(
@@ -402,7 +469,7 @@ export function EditorPanels({
               max="3.14"
               step="0.05"
               value={activeLayer.rotation[2]}
-              disabled={isSaving}
+              disabled={isDesignBusy}
               onChange={(e) => {
                 const rot = [...activeLayer.rotation];
                 rot[2] = Number(e.target.value);
@@ -413,26 +480,44 @@ export function EditorPanels({
         </section>
       )}
 
-      <section className="panel-section">
-        <button className="primary-button" type="button" disabled={isSaving} onClick={onSave}>
+      <section className="panel-section action-stack" id="export-tools">
+        <div className="section-heading">
+          <Save size={18} aria-hidden="true" />
+          <div>
+            <h3>Save & Export</h3>
+            <p className="muted">Export creates the ZIP and starts the download automatically.</p>
+          </div>
+        </div>
+        <button className="primary-button" type="button" disabled={isDesignBusy} onClick={onSave}>
           <Save size={16} aria-hidden="true" />
           {isSaving ? "Applying..." : "Save Draft"}
         </button>
-        <button type="button" disabled={isSaving} onClick={onExport}>
+        <button type="button" disabled={isDesignBusy} onClick={onExport}>
           <Download size={16} aria-hidden="true" />
-          Export Package
+          {isExporting ? "Creating ZIP..." : "Export & Download ZIP"}
         </button>
         {exportPackage ? (
-          <button type="button" onClick={onDownload}>
+          <button type="button" disabled={isDesignBusy} onClick={onDownload}>
             <Download size={16} aria-hidden="true" />
-            Download ZIP
+            Download ZIP again
           </button>
+        ) : null}
+        {exportMessage ? (
+          <span className="export-status-line" role="status" aria-live="polite">
+            {exportMessage}
+          </span>
         ) : null}
       </section>
 
       {modelAsset ? (
         <section className="panel-section">
-          <h3>Reconstruction Files</h3>
+          <div className="section-heading">
+            <Download size={18} aria-hidden="true" />
+            <div>
+              <h3>Reconstruction Files</h3>
+              <p className="muted">Download source model files when needed.</p>
+            </div>
+          </div>
           <div className="download-grid">
             <button
               type="button"

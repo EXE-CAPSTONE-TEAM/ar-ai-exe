@@ -1,4 +1,17 @@
-import { AlertTriangle, CheckCircle2, Cpu, HardDrive, LogIn, RefreshCw, Search, UserPlus, Wrench } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Cpu,
+  HardDrive,
+  ImagePlus,
+  LogIn,
+  MousePointer2,
+  RefreshCw,
+  Save,
+  Search,
+  UserPlus,
+  Wrench,
+} from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, ApiError, designStorageKey } from "./api/client";
@@ -37,6 +50,8 @@ export function App() {
   const [readiness, setReadiness] = useState<ReconstructionReadiness | null>(null);
   const [statusMessage, setStatusMessage] = useState("Ready");
   const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authName, setAuthName] = useState("");
@@ -183,6 +198,7 @@ export function App() {
     setDesign(null);
     setConfig(null);
     setExportPackage(null);
+    setExportMessage(null);
     setActiveLayerId(null);
     setMeshBounds(null);
     setStatusMessage("Signed out");
@@ -199,6 +215,7 @@ export function App() {
     clearAssetPreviewUrls();
     clearSavedDesignState();
     setExportPackage(null);
+    setExportMessage(null);
 
     try {
       const loadedScan = await api.getScanSession(scanId.trim());
@@ -231,6 +248,7 @@ export function App() {
     setDesign(null);
     setConfig(null);
     setExportPackage(null);
+    setExportMessage(null);
     setActiveLayerId(null);
     setMeshBounds(null);
 
@@ -364,6 +382,8 @@ export function App() {
       clearBakedPreview();
     }
     setPreviewErrorMessage(null);
+    setExportPackage(null);
+    setExportMessage(null);
     setConfig(nextConfig);
   }
 
@@ -382,32 +402,57 @@ export function App() {
   }
 
   async function exportDesign() {
-    const hasUnsavedConfig = config ? configFingerprint(config) !== savedConfigFingerprint : false;
-    const savedDesign = !design || hasUnsavedConfig ? await saveDesign() : design;
-    const activeDesignId = savedDesign?.id ?? (modelAsset && localStorage.getItem(designStorageKey(modelAsset.id)));
-    if (!activeDesignId) {
-      setStatusMessage("Save the draft before exporting.");
+    if (isSaving || isExporting) {
       return;
     }
 
+    setIsExporting(true);
+    setExportMessage("Preparing export package...");
+    setStatusMessage("Preparing export package");
     try {
+      const hasUnsavedConfig = config ? configFingerprint(config) !== savedConfigFingerprint : false;
+      const savedDesign = !design || hasUnsavedConfig ? await saveDesign() : design;
+      const activeDesignId = savedDesign?.id ?? (modelAsset && localStorage.getItem(designStorageKey(modelAsset.id)));
+      if (!activeDesignId) {
+        setExportMessage("Save the draft before exporting.");
+        setStatusMessage("Save the draft before exporting.");
+        return;
+      }
+
+      setExportMessage("Creating ZIP package...");
       setStatusMessage("Creating export package");
       const createdExport = await api.exportDesign(activeDesignId);
       setExportPackage(createdExport);
-      setStatusMessage("Export package ready");
+      setExportMessage("ZIP package ready. Download starting...");
+      setStatusMessage("Export package ready. Download starting.");
+      await api.downloadExport(createdExport);
+      setExportMessage("Download started. Use Download ZIP again if the browser blocked it.");
+      setStatusMessage("Export package downloaded");
     } catch (error) {
-      setStatusMessage(messageFromError(error));
+      const message = messageFromError(error);
+      setExportMessage(message);
+      setStatusMessage(message);
+    } finally {
+      setIsExporting(false);
     }
   }
 
   async function downloadExport() {
-    if (!exportPackage) {
+    if (!exportPackage || isExporting) {
       return;
     }
+    setIsExporting(true);
+    setExportMessage("Downloading ZIP...");
     try {
       await api.downloadExport(exportPackage);
+      setExportMessage("Download started.");
+      setStatusMessage("Export package downloaded");
     } catch (error) {
-      setStatusMessage(messageFromError(error));
+      const message = messageFromError(error);
+      setExportMessage(message);
+      setStatusMessage(message);
+    } finally {
+      setIsExporting(false);
     }
   }
 
@@ -420,8 +465,8 @@ export function App() {
   }
 
   return (
-    <AppShell user={user}>
-      <main className="workspace">
+    <AppShell user={user} onLogout={logout}>
+      <main className="workspace" id="main-workspace">
         {!user ? (
           <AuthPanel
             mode={authMode}
@@ -441,6 +486,16 @@ export function App() {
           <>
             <section className="toolbar-band">
               <div className="toolbar-stack">
+                <div className="studio-command-header">
+                  <span className="studio-eyebrow">
+                    <Cpu size={14} aria-hidden="true" />
+                    AI + 3D Sneaker Studio
+                  </span>
+                  <div>
+                    <h2>Kus Studio workspace</h2>
+                    <p>Load a scan or import a model, then customize the shoe in the 3D stage.</p>
+                  </div>
+                </div>
                 <div className="scan-loader">
                   <label>
                     Scan session ID
@@ -458,9 +513,6 @@ export function App() {
                     <RefreshCw size={16} aria-hidden="true" />
                     Refresh
                   </button>
-                  <button type="button" onClick={logout}>
-                    Sign out
-                  </button>
                 </div>
                 <ModelImportPanel isBusy={isImporting} onImport={importModel} />
               </div>
@@ -468,6 +520,14 @@ export function App() {
             </section>
 
             <ReadinessBanner readiness={readiness} onRefresh={loadReadiness} />
+
+            <WorkflowGuide
+              hasModel={Boolean(modelAsset && activeModelUrl)}
+              layerCount={(config?.stickers.length ?? 0) + (config?.texts.length ?? 0)}
+              hasActiveLayer={Boolean(activeLayerId)}
+              isSaved={Boolean(config && savedConfigFingerprint && configFingerprint(config) === savedConfigFingerprint)}
+              hasExportPackage={Boolean(exportPackage)}
+            />
 
             <section className="main-grid">
               <MetadataPanel scanSession={scanSession} modelAsset={modelAsset} />
@@ -490,6 +550,8 @@ export function App() {
                 modelAsset={modelAsset}
                 designName={designName}
                 isSaving={isSaving}
+                isExporting={isExporting}
+                exportMessage={exportMessage}
                 exportPackage={exportPackage}
                 activeLayerId={activeLayerId}
                 meshBounds={meshBounds}
@@ -510,6 +572,88 @@ export function App() {
         )}
       </main>
     </AppShell>
+  );
+}
+
+type WorkflowGuideProps = {
+  hasModel: boolean;
+  layerCount: number;
+  hasActiveLayer: boolean;
+  isSaved: boolean;
+  hasExportPackage: boolean;
+};
+
+type WorkflowStepState = "complete" | "current" | "upcoming";
+
+function WorkflowGuide({
+  hasModel,
+  layerCount,
+  hasActiveLayer,
+  isSaved,
+  hasExportPackage,
+}: WorkflowGuideProps) {
+  const hasLayers = layerCount > 0;
+  const placementState: WorkflowStepState = !hasLayers ? "upcoming" : isSaved ? "complete" : "current";
+  const exportState: WorkflowStepState = hasExportPackage ? "complete" : isSaved ? "current" : "upcoming";
+
+  const steps: Array<{
+    icon: typeof Search;
+    title: string;
+    detail: string;
+    state: WorkflowStepState;
+  }> = [
+    {
+      icon: Search,
+      title: "Load or import",
+      detail: hasModel ? "Model is ready in the viewer." : "Paste a scan ID or import a GLB/OBJ model.",
+      state: hasModel ? "complete" : "current",
+    },
+    {
+      icon: ImagePlus,
+      title: "Add artwork",
+      detail: hasLayers ? `${layerCount} layer${layerCount === 1 ? "" : "s"} added.` : "Use text, upload, draw, or preset stickers.",
+      state: !hasModel ? "upcoming" : hasLayers ? "complete" : "current",
+    },
+    {
+      icon: MousePointer2,
+      title: "Place on shoe",
+      detail: hasActiveLayer ? "Use move, rotate, scale, then apply to surface." : "Select a layer before adjusting placement.",
+      state: placementState,
+    },
+    {
+      icon: Save,
+      title: "Save and export",
+      detail: hasExportPackage ? "ZIP package is ready to download." : "Save Draft bakes the preview before export.",
+      state: exportState,
+    },
+  ];
+
+  return (
+    <section className="workflow-guide" id="workflow-guide" aria-label="Editor workflow">
+      <div className="workflow-guide-header">
+        <div>
+          <h2>Editor flow</h2>
+          <p>Follow the same left-to-right order used by most creation tools.</p>
+        </div>
+      </div>
+      <ol className="workflow-steps">
+        {steps.map((step, index) => {
+          const Icon = step.icon;
+          return (
+            <li className={`workflow-step ${step.state}`} key={step.title}>
+              <span className="workflow-step-index">{index + 1}</span>
+              <span className="workflow-step-icon">
+                <Icon size={18} aria-hidden="true" />
+              </span>
+              <span className="workflow-step-copy">
+                <strong>{step.title}</strong>
+                <span>{step.detail}</span>
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }
 
@@ -647,6 +791,7 @@ function AuthPanel({
 
         <div className="button-row">
           <button type="submit" className="primary-button" disabled={isBusy}>
+            {mode === "login" ? <LogIn size={16} aria-hidden="true" /> : <UserPlus size={16} aria-hidden="true" />}
             {mode === "login" ? "Login" : "Create account"}
           </button>
           <button type="button" disabled={isBusy} onClick={onDemoAuth}>
