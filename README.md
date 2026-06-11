@@ -1,82 +1,112 @@
 # Shoe Visual Customizer
 
-Prototype MVP for a shoe-only video-to-3D reconstruction and visual customization workflow.
+Prototype MVP for a shoe-only video-to-3D reconstruction and web visual customization workflow.
 
-The system is intentionally split into three apps:
+The system is split into three applications:
 
-- `backend/`: Python FastAPI API, local storage, Neon Postgres persistence, reconstruction worker.
-- `mobile/`: Flutter scanner app. Mobile captures two guided shoe videos and metadata only.
-- `frontend/`: Vite + React web editor. Web loads GLB models and creates visual designs.
-- `docs/`: Architecture, API contract, scan guidelines, and demo notes.
+- **`backend/`**: Python FastAPI API server, SQLAlchemy models, Alembic migrations, local storage, Neon Postgres persistence, and async reconstruction/baking worker.
+- **`mobile/`**: Flutter scanner app. Guided captures for shoe videos and metadata upload.
+- **`frontend/`**: Vite + React web 3D editor. Loads shoe GLB models, offers surface snapping, and creates custom designs.
+- **`docs/`**: Architecture, API contract, scan guidelines, and rollout guides.
 
-The current MVP requires two shoe scan passes: a side orbit and a top-angle orbit. The bottom sole is intentionally out of scope. Backend processing is asynchronous and prioritizes visual similarity and texture quality over industrial measurement accuracy.
+## Local Pipeline Requirements
 
-## Local Pipeline
-
-The real reconstruction worker expects these tools on the backend host:
-
-```text
-ffmpeg
-colmap
-InterfaceCOLMAP
-DensifyPointCloud
-ReconstructMesh
-RefineMesh
-TextureMesh
-blender
-```
+For real 3D reconstruction and decal baking, the backend host requires:
+- `ffmpeg`
+- `colmap`
+- OpenMVS toolchain (`InterfaceCOLMAP`, `DensifyPointCloud`, `ReconstructMesh`, `RefineMesh`, `TextureMesh`)
+- `blender` (v3.6+ or modern LTS recommended)
 
 Configure paths in `backend/.env` with `FFMPEG_BIN`, `COLMAP_BIN`, `OPENMVS_BIN_DIR`, and `BLENDER_BIN`.
-Before a scan starts, the API checks tool availability, available RAM, free storage, and the configured thread limit. The web and mobile apps read:
 
-```text
-GET /api/system/reconstruction-readiness
-```
+## Development Setup
 
-Default safety settings are conservative for a laptop test run:
+### 1. Backend
 
-```text
-RECONSTRUCTION_MAX_THREADS=4
-RECONSTRUCTION_MIN_AVAILABLE_MEMORY_GB=4.0
-RECONSTRUCTION_MIN_FREE_STORAGE_GB=8.0
-```
+The backend uses [uv](https://github.com/astral-sh/uv) for fast Python packaging.
 
-Outputs are stored under `backend/storage/models/{scan_id}/` and served through authenticated API endpoints:
+1. Navigate to the backend directory:
+   ```bash
+   cd backend
+   ```
+2. Copy and configure the environment variables:
+   ```bash
+   cp .env.example .env
+   ```
+   *Note: Ensure `DATABASE_URL` is set to your Neon Postgres database instance.*
+3. Install dependencies and sync virtual environment:
+   ```bash
+   uv sync
+   ```
+4. Run Alembic database migrations:
+   ```bash
+   uv run alembic upgrade head
+   ```
+5. Run the FastAPI development server:
+   ```bash
+   uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+   ```
+6. Verify the server is running:
+   ```bash
+   curl http://localhost:8000/health
+   ```
 
-```text
-shoe_preview.glb
-shoe.obj
-shoe.mtl
-shoe_texture.png
-metadata.json
-quality_report.json
-shoe_obj_package.zip
-```
+### 2. Frontend
 
-## Development
+1. Navigate to the frontend directory:
+   ```bash
+   cd frontend
+   ```
+2. Install npm packages:
+   ```bash
+   npm install
+   ```
+3. Run the Vite development server:
+   ```bash
+   npm run dev -- --host 0.0.0.0 --port 5173
+   ```
+4. Build the production bundle:
+   ```bash
+   npm run build
+   ```
 
-Backend:
+### 3. Mobile
 
-```bash
-cd backend
-uv run alembic upgrade head
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
+1. Navigate to the mobile directory:
+   ```bash
+   cd mobile
+   ```
+2. Run the Flutter app with custom backend endpoint:
+   ```bash
+   flutter run --dart-define=BACKEND_BASE_URL=http://YOUR_BACKEND_HOST:8000
+   ```
 
-Frontend:
+## Key Configuration Variables (`backend/.env`)
 
-```bash
-cd frontend
-npm run dev -- --host 0.0.0.0 --port 5173
-```
+| Variable | Description |
+| --- | --- |
+| `DATABASE_URL` | Neon Postgres connection string. |
+| `DATABASE_AUTO_CREATE_TABLES` | Set `true` to auto-generate missing tables during FastAPI lifespan startup (fallback). |
+| `BLENDER_BIN` | Path to the Blender executable (e.g. `C:\Program Files\Blender Foundation\Blender 3.6\blender.exe`). |
+| `FFMPEG_BIN` | Path to the FFmpeg executable. |
+| `COLMAP_BIN` | Path to the COLMAP executable. |
+| `OPENMVS_BIN_DIR` | Path to the directory containing OpenMVS binaries. |
+| `RECONSTRUCTION_MAX_THREADS` | Thread limit for photogrammetry pipeline (default `4`). |
+| `RECONSTRUCTION_MIN_AVAILABLE_MEMORY_GB` | RAM safety threshold (default `4.0`). |
+| `RECONSTRUCTION_MIN_FREE_STORAGE_GB` | Storage space safety threshold (default `8.0`). |
 
-Mobile:
+## Testing and Quality Checks
 
-```bash
-cd mobile
-flutter run --dart-define=BACKEND_BASE_URL=http://YOUR_BACKEND_HOST:8000
-```
+Run quality checks from the `backend/` directory:
+- Run unit and integration tests:
+  ```bash
+  uv run pytest
+  ```
+- Run code formatting and linting check:
+  ```bash
+  uv run ruff check .
+  ```
 
 ## Deployment
 
-See `docs/vps-android-deployment.md` for Android device usage, Docker Compose VPS deployment, and firewall/networking rules.
+See [docs/vps-android-deployment.md](file:///F:/_FPT/_EXE101/ar-ai-exe/docs/vps-android-deployment.md) for Docker Compose setup, Android debugging instructions, and VPS server configuration.
