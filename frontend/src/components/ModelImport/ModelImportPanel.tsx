@@ -42,7 +42,13 @@ export function ModelImportPanel({ isBusy, onImport }: ModelImportPanelProps) {
   return (
     <form className="model-import-panel" onSubmit={submitImport}>
       <div className="import-title-row">
-        <h2>Import Model</h2>
+        <div className="section-heading">
+          <PackageOpen size={18} aria-hidden="true" />
+          <div>
+            <h2>Import Model</h2>
+            <p className="muted">Start here when you have a local shoe model.</p>
+          </div>
+        </div>
         <div className="format-tabs" role="tablist" aria-label="Model format">
           <button
             type="button"
@@ -59,6 +65,17 @@ export function ModelImportPanel({ isBusy, onImport }: ModelImportPanelProps) {
             OBJ
           </button>
         </div>
+      </div>
+
+      <div className="import-helper">
+        <Upload size={18} aria-hidden="true" />
+        <p>
+          {format === "glb"
+            ? "Choose GLB for a single-file import. It is the fastest path into the editor."
+            : objMode === "zip"
+              ? "Choose OBJ ZIP when the model, MTL, and textures are already packaged together."
+              : "Choose OBJ files when the mesh, material, and texture files are separate."}
+        </p>
       </div>
 
       <div className="import-form-grid">
@@ -210,7 +227,7 @@ export function ModelImportPanel({ isBusy, onImport }: ModelImportPanelProps) {
         ) : (
           <Upload size={16} aria-hidden="true" />
         )}
-        {isBusy ? "Importing" : "Import"}
+        {isBusy ? "Importing" : "Import model"}
       </button>
     </form>
   );

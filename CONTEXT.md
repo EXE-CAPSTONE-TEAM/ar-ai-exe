@@ -20,7 +20,7 @@ flowchart TD
     B --> C["MeshCleanupService"]
     C --> D["Canonical ModelAsset files"]
     D --> E["Web editor manual decal/text placement"]
-    E --> F["Save Draft"]
+    E --> F["Save Draft & Bake Preview"]
     F --> G["DecalBakeService preview GLB"]
     E --> H["Export Package"]
     H --> I["Final GLB/OBJ/MTL/texture + notes"]
@@ -34,15 +34,17 @@ flowchart TD
 - **Model assets**: `ModelAssetService` exposes canonical files for the web editor and download buttons. Expected canonical names include `shoe_preview.glb`, `shoe.obj`, `shoe.mtl`, and `shoe_texture.png`.
 - **Design assets**: `DesignAssetService` stores uploaded/canvas/text-render sticker imagery and resolves payloads during bake/export.
 - **Design drafts**: `DesignService` stores design config JSON and refreshes baked preview GLB when decals exist.
-- **Decal bake/export**: `DecalBakeService` uses Blender background mode to project decal meshes onto the shoe surface and writes `final_shoe.glb`, `final_shoe.obj`, and `final_shoe.mtl`. `ExportPackageService` packages final model files, notes, previews, and config.
+- **Customization target handling**: `customization_zones.py` no longer enforces strict allow/block shoe-zone names. Decal/text target names are accepted when present, missing targets are allowed, and bake falls back to base shoe meshes while still excluding generated decal meshes.
+- **Decal bake/export**: `DecalBakeService` uses Blender background mode (`apply_decals.py`) to project decal meshes onto the shoe surface and writes `final_shoe.glb`, `final_shoe.obj`, and `final_shoe.mtl`. `ExportPackageService` packages final model files, notes, previews, and config.
 
 ## Frontend Domain Map
 
 - **Main app state**: `frontend/src/App.tsx` owns loaded scan/model/design state, saved preview state, fixed material normalization, and save/export workflows.
-- **3D viewer**: `frontend/src/components/ModelViewer/ModelViewer.tsx` loads GLB assets, computes bounds, offers surface snapping, renders transform controls, and hides already baked layers when showing a baked preview GLB.
+- **3D viewer**: `frontend/src/components/ModelViewer/ModelViewer.tsx` loads GLB assets, computes bounds, offers surface snapping across base model meshes, renders transform controls, and hides already baked layers when showing a baked preview GLB.
 - **Editor panels**: `frontend/src/components/Editor/EditorPanels.tsx` owns design controls, layer list, preset/upload/canvas sticker input, save/export actions, and reconstruction file download buttons.
 - **Artwork editor**: `ArtworkCanvasEditor` creates editable sticker artwork before upload/bake.
 - **Sticker presets**: `frontend/src/data/stickerPresets.ts` contains local preset decal metadata.
+- **Customization target filtering**: `frontend/src/utils/customizationZones.ts` excludes generated decal meshes from snapping targets but does not enforce strict shoe-zone allow/block terms.
 
 ## Current Product Decisions
 
@@ -54,13 +56,19 @@ flowchart TD
 
 ## Critical Invariants
 
-- Do not call backend cleanup "sculpting" unless the implementation actually performs sculpting. Current scope is editor-ready mesh cleanup.
-- Do not add AI shoe-type inference unless explicitly requested and planned. Metadata remains user-provided.
-- Do not replace imported shoe materials during decal bake. Preserve existing materials/textures, adjust only safe PBR factors, and create a white material only for meshes that have no material.
-- Do not apply frontend material overrides to baked decal meshes. Decal mesh names use prefixes such as `decal_`, `svg_decal_`, and `text_decal_`.
-- Preview GLB URLs are stable per design, so frontend preview fetches should avoid stale browser cache when a draft is saved again.
-- Keep backend-generated Blender scripts server-authored. Never execute user-provided scripts.
-- Keep scan/import canonical output backward-compatible so existing editor/download code can keep loading GLB/OBJ/MTL/texture files.
+- **Do not call backend cleanup "sculpting"** unless the implementation actually performs sculpting. Current scope is editor-ready mesh cleanup.
+- **Do not add AI shoe-type inference** unless explicitly requested and planned. Metadata remains user-provided.
+- **Preserve original shoe materials/slots during bake**: In `decal_baker.py` / `apply_decals.py`, do not clear, re-create, or replace material slots or texture mappings of base meshes. Only update the PBR properties (`Base Color`, `Roughness`, `Metallic`) of existing materials if they are not texture-linked (i.e. do not have links on their input nodes). Create a new solid color material only for meshes that have no material.
+- **Decal Raycast Hit Ratio Check**: The Blender script projects decal vertices to the target mesh using BVHTree and directional raycasting. At least 25% of the decal vertices must successfully hit/project onto the shoe surface (`hit_ratio >= 0.25`), otherwise the bake fails with a missed surface error. This prevents decals floating in space.
+- **Decal Limits**:
+  - Maximum decal layers per design: 50.
+  - Text length limit: 80 characters.
+  - Custom sticker file size: 5 MB maximum.
+  - Sticker images must be embedded PNG, JPEG, or SVG data URIs, or registered design assets (via `assetId`). Local browser blob URLs (`blob:...`) must never be sent to the backend as they are inaccessible.
+- **Do not apply frontend material overrides to baked decal meshes**: Decal mesh names use prefixes such as `decal_`, `svg_decal_`, and `text_decal_` to distinguish them from customizable shoe meshes.
+- **Preview GLB URLs must avoid browser cache**: Preview URLs are stable per design, so frontend preview fetches should use cache-busting queries when a draft is saved again.
+- **Keep backend-generated Blender scripts server-authored**: Never execute user-provided scripts.
+- **Keep scan/import canonical output backward-compatible** so existing editor/download code can keep loading GLB/OBJ/MTL/texture files.
 
 ## Verification Commands
 

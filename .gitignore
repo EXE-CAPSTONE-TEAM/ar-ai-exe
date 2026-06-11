@@ -127,3 +127,7 @@ mobile/android/app/release/
 # Deployment secrets
 deploy/.env
 deploy/backend.env
+
+# Local analysis drafts not intended for this PR
+docs/kusshoes-api-contract.md
+docs/project-analysis-and-dataflow.md
