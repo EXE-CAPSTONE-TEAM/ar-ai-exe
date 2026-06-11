@@ -1,0 +1,65 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [ main, master, dev ]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+  pull_request:
+    branches: [ main, master, dev ]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+
+jobs:
+  test:
+    name: Backend Lint and Test
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout Code with Full History
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Git Whitespace Check
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch origin ${{ github.base_ref }}
+            git diff --check origin/${{ github.base_ref }}...HEAD
+          else
+            if [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ] && [ -n "${{ github.event.before }}" ]; then
+              git diff --check ${{ github.event.before }}...${{ github.event.after }}
+            else
+              echo "New branch or initial push - skipping diff check"
+            fi
+          fi
+        working-directory: .
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          version: "latest"
+
+      - name: Install Dependencies
+        run: |
+          uv sync --frozen --group dev
+
+      - name: Run Ruff Lint Check
+        run: |
+          uv run ruff check .
+
+      - name: Run Pytest
+        run: |
+          uv run pytest
