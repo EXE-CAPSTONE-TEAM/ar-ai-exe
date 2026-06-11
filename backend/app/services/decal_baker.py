@@ -506,36 +506,6 @@ def mesh_objects():
     return [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
 
 
-CUSTOMIZABLE_ALLOW_TERMS = (
-    "upper",
-    "vamp",
-    "quarter",
-    "toe",
-    "toe_box",
-    "heel",
-    "counter",
-    "tongue",
-    "side",
-    "panel",
-    "body",
-)
-CUSTOMIZABLE_BLOCK_TERMS = (
-    "sole",
-    "outsole",
-    "midsole",
-    "lace",
-    "laces",
-    "eyelet",
-    "hardware",
-    "zipper",
-    "logo",
-    "decal",
-    "text_decal",
-    "svg_decal",
-    "ground",
-)
-
-
 def normalize_mesh_name(value):
     return "".join(char if char.isalnum() else "_" for char in str(value or "").lower())
 
@@ -560,43 +530,12 @@ def base_mesh_candidates():
     return candidates
 
 
-def is_customizable_mesh_object(obj):
-    names = [obj.name, getattr(obj.data, "name", "")]
-    normalized_names = [normalize_mesh_name(name) for name in names if str(name or "").strip()]
-    if not normalized_names:
-        return False
-    if any(matches_any_term(name, CUSTOMIZABLE_BLOCK_TERMS) for name in normalized_names):
-        return False
-    return any(matches_any_term(name, CUSTOMIZABLE_ALLOW_TERMS) for name in normalized_names)
-
-
-def is_customizable_mesh_name(name):
-    normalized = normalize_mesh_name(name)
-    if not normalized:
-        return False
-    if matches_any_term(normalized, CUSTOMIZABLE_BLOCK_TERMS):
-        return False
-    return matches_any_term(normalized, CUSTOMIZABLE_ALLOW_TERMS)
-
-
-def target_mesh_candidates():
-    candidates = [obj for obj in base_mesh_candidates() if is_customizable_mesh_object(obj)]
-    if not candidates:
-        raise RuntimeError(
-            "Imported model contains no customizable target mesh. "
-            "Use upper, tongue, heel, or panel mesh names."
-        )
-    return candidates
-
-
 def find_target_meshes(target_name):
     target_name = str(target_name or "").strip()
+    candidates = base_mesh_candidates()
     if not target_name:
-        raise RuntimeError("Decal target mesh is required for strict customization areas.")
-    if not is_customizable_mesh_name(target_name):
-        raise RuntimeError(f"Decal target mesh '{target_name}' is not customizable.")
+        return candidates
 
-    candidates = target_mesh_candidates()
     matches = []
     seen = set()
     for obj in candidates:
@@ -612,9 +551,7 @@ def find_target_meshes(target_name):
                 seen.add(key)
                 matches.append(obj)
     if not matches:
-        raise RuntimeError(
-            f"Decal target mesh '{target_name}' was not found in customizable shoe areas."
-        )
+        return candidates
     return matches
 
 

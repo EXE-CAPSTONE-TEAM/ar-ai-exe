@@ -290,14 +290,14 @@ function ShoeModel({
     if (!snappedConfig) {
       const message =
         raycastTargets.length === 0
-          ? "No customizable shoe area detected. Use upper, tongue, heel, or panel mesh names."
-          : "Selected layer is outside the allowed customization area.";
+          ? "No shoe mesh detected for surface snapping."
+          : "Selected layer is outside the shoe surface.";
       onSurfaceApplyResult(message);
       return;
     }
 
     onConfigChange(snappedConfig);
-    onSurfaceApplyResult("Layer applied inside the customization area.");
+    onSurfaceApplyResult("Layer applied to the shoe surface.");
   }, [
     activeLayerId,
     config,
@@ -329,12 +329,12 @@ function ShoeModel({
         stickers: config.stickers.map(s => s.id === id ? { ...s, position: pos, rotation: rot, scale } : s),
         texts: config.texts.map(t => t.id === id ? { ...t, position: pos, rotation: rot, scale } : t)
       });
-      onSurfaceApplyResult("Layer moved outside the allowed customization area.");
+      onSurfaceApplyResult("Layer moved outside the shoe surface.");
       return;
     }
 
     onConfigChange(snappedConfig);
-    onSurfaceApplyResult("Layer kept inside the customization area.");
+    onSurfaceApplyResult("Layer kept on the shoe surface.");
   };
 
   return (
@@ -355,7 +355,7 @@ function ShoeModel({
       />
 
       {config?.stickers
-        .filter((sticker) => !hiddenLayerSet.has(sticker.id) && layerHasCustomizableTarget(sticker))
+        .filter((sticker) => !hiddenLayerSet.has(sticker.id))
         .map((sticker) => (
           <StickerPlane
             key={sticker.id}
@@ -368,7 +368,7 @@ function ShoeModel({
           />
         ))}
       {config?.texts
-        .filter((textLayer) => !hiddenLayerSet.has(textLayer.id) && layerHasCustomizableTarget(textLayer))
+        .filter((textLayer) => !hiddenLayerSet.has(textLayer.id))
         .map((textLayer) => (
           <TextPlane
             key={textLayer.id}
@@ -445,10 +445,6 @@ function createModelRaycastTargets(root: THREE.Object3D, modelCenter: THREE.Vect
 
 function isDecalMeshName(name: string): boolean {
   return name.startsWith("decal_") || name.startsWith("svg_decal_") || name.startsWith("text_decal_");
-}
-
-function layerHasCustomizableTarget(layer: StickerLayer | TextLayer): boolean {
-  return Boolean(layer.targetMeshName && isCustomizableMeshName(layer.targetMeshName));
 }
 
 function updateLayerTransform(

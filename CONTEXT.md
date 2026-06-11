@@ -20,7 +20,7 @@ flowchart TD
     B --> C["MeshCleanupService"]
     C --> D["Canonical ModelAsset files"]
     D --> E["Web editor manual decal/text placement"]
-    E --> F["Save Draft & Validate Customization Zones"]
+    E --> F["Save Draft & Bake Preview"]
     F --> G["DecalBakeService preview GLB"]
     E --> H["Export Package"]
     H --> I["Final GLB/OBJ/MTL/texture + notes"]
@@ -33,18 +33,18 @@ flowchart TD
 - **Mesh cleanup**: `MeshCleanupService` runs a server-generated Blender background script to normalize origin/scale/orientation, remove helper objects, repair basic mesh state, preserve materials/textures, and report editor-readiness. This is editor-ready cleanup, not production retopology or true sculpting.
 - **Model assets**: `ModelAssetService` exposes canonical files for the web editor and download buttons. Expected canonical names include `shoe_preview.glb`, `shoe.obj`, `shoe.mtl`, and `shoe_texture.png`.
 - **Design assets**: `DesignAssetService` stores uploaded/canvas/text-render sticker imagery and resolves payloads during bake/export.
-- **Design drafts**: `DesignService` stores design config JSON, validates customization zones, and refreshes baked preview GLB when decals exist.
-- **Customization Zones (Validation)**: `customization_zones.py` contains strict checks. Decals/texts can only target customizable areas (e.g., `upper`, `vamp`, `quarter`, `toe`, `toe_box`, `heel`, `counter`, `tongue`, `side`, `panel`, `body`) and are blocked on non-customizable areas (e.g., `sole`, `outsole`, `midsole`, `lace`, `laces`, `eyelet`, `hardware`, `zipper`, `logo`, `decal`, `text_decal`, `svg_decal`, `ground`). Violation raises an HTTP 400 Bad Request.
+- **Design drafts**: `DesignService` stores design config JSON and refreshes baked preview GLB when decals exist.
+- **Customization target handling**: `customization_zones.py` no longer enforces strict allow/block shoe-zone names. Decal/text target names are accepted when present, missing targets are allowed, and bake falls back to base shoe meshes while still excluding generated decal meshes.
 - **Decal bake/export**: `DecalBakeService` uses Blender background mode (`apply_decals.py`) to project decal meshes onto the shoe surface and writes `final_shoe.glb`, `final_shoe.obj`, and `final_shoe.mtl`. `ExportPackageService` packages final model files, notes, previews, and config.
 
 ## Frontend Domain Map
 
 - **Main app state**: `frontend/src/App.tsx` owns loaded scan/model/design state, saved preview state, fixed material normalization, and save/export workflows.
-- **3D viewer**: `frontend/src/components/ModelViewer/ModelViewer.tsx` loads GLB assets, computes bounds, offers surface snapping, renders transform controls, and hides already baked layers when showing a baked preview GLB. It restricts raycast snapping target meshes to allowed customization zones.
+- **3D viewer**: `frontend/src/components/ModelViewer/ModelViewer.tsx` loads GLB assets, computes bounds, offers surface snapping across base model meshes, renders transform controls, and hides already baked layers when showing a baked preview GLB.
 - **Editor panels**: `frontend/src/components/Editor/EditorPanels.tsx` owns design controls, layer list, preset/upload/canvas sticker input, save/export actions, and reconstruction file download buttons.
 - **Artwork editor**: `ArtworkCanvasEditor` creates editable sticker artwork before upload/bake.
 - **Sticker presets**: `frontend/src/data/stickerPresets.ts` contains local preset decal metadata.
-- **Customization Zones (Snapping)**: `frontend/src/utils/customizationZones.ts` matches backend's Allow/Block terms to filter mesh targets during snapping and show validation errors.
+- **Customization target filtering**: `frontend/src/utils/customizationZones.ts` excludes generated decal meshes from snapping targets but does not enforce strict shoe-zone allow/block terms.
 
 ## Current Product Decisions
 

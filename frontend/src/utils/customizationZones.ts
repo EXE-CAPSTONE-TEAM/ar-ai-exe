@@ -1,31 +1,7 @@
-const CUSTOMIZABLE_ALLOW_TERMS = [
-  "upper",
-  "vamp",
-  "quarter",
-  "toe",
-  "toe_box",
-  "heel",
-  "counter",
-  "tongue",
-  "side",
-  "panel",
-  "body",
-];
-
-const CUSTOMIZABLE_BLOCK_TERMS = [
-  "sole",
-  "outsole",
-  "midsole",
-  "lace",
-  "laces",
-  "eyelet",
-  "hardware",
-  "zipper",
-  "logo",
+const NON_TARGET_MESH_TERMS = [
   "decal",
   "text_decal",
   "svg_decal",
-  "ground",
 ];
 
 export function isCustomizableMeshName(...names: Array<string | null | undefined>): boolean {
@@ -33,10 +9,7 @@ export function isCustomizableMeshName(...names: Array<string | null | undefined
   if (normalizedNames.length === 0) {
     return false;
   }
-  if (normalizedNames.some((name) => matchesAnyTerm(name, CUSTOMIZABLE_BLOCK_TERMS))) {
-    return false;
-  }
-  return normalizedNames.some((name) => matchesAnyTerm(name, CUSTOMIZABLE_ALLOW_TERMS));
+  return !normalizedNames.some((name) => matchesAnyTerm(name, NON_TARGET_MESH_TERMS));
 }
 
 export function resolveCustomizableMeshName(
@@ -46,10 +19,7 @@ export function resolveCustomizableMeshName(
   if (!isCustomizableMeshName(objectName, geometryName)) {
     return null;
   }
-  if (objectName && matchesAnyTerm(normalizeMeshName(objectName), CUSTOMIZABLE_ALLOW_TERMS)) {
-    return objectName;
-  }
-  return geometryName || objectName || null;
+  return objectName || geometryName || null;
 }
 
 function normalizeMeshName(value: string | null | undefined): string {

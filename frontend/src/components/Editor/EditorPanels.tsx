@@ -16,7 +16,6 @@ import {
 import { stickerPresets } from "../../data/stickerPresets";
 import type { StickerPreset } from "../../data/stickerPresets";
 import type { DesignAssetSource, DesignConfig, ExportPackage, ModelAsset, StickerLayer } from "../../types";
-import { isCustomizableMeshName } from "../../utils/customizationZones";
 import { ArtworkCanvasEditor } from "./ArtworkCanvasEditor";
 
 const MAX_ARTWORK_FILE_BYTES = 5 * 1024 * 1024;
@@ -104,9 +103,7 @@ export function EditorPanels({
   const activeSticker = config.stickers.find((s) => s.id === activeLayerId);
   const activeText = config.texts.find((t) => t.id === activeLayerId);
   const activeLayer = activeSticker || activeText;
-  const activeLayerIsApplied = Boolean(
-    activeLayer?.targetMeshName && isCustomizableMeshName(activeLayer.targetMeshName),
-  );
+  const activeLayerIsApplied = Boolean(activeLayer?.targetMeshName);
   const isDesignBusy = isSaving || isExporting;
   const isArtworkBusy = isDesignBusy || isUploadingArtwork;
 
@@ -186,7 +183,7 @@ export function EditorPanels({
           <ImagePlus size={18} aria-hidden="true" />
           <ol className="mini-guide-list">
             <li>Add text, upload an image, draw artwork, or choose a preset.</li>
-            <li>Select the layer, then apply it to the allowed upper/tongue/heel surface.</li>
+            <li>Select the layer, then apply it to the shoe surface.</li>
             <li>Use Save Draft to bake the preview before exporting.</li>
           </ol>
         </div>
@@ -393,7 +390,7 @@ export function EditorPanels({
           <span className={`surface-status-line ${activeLayerIsApplied ? "applied" : "blocked"}`}>
             {activeLayerIsApplied
               ? `Applied to ${activeLayer?.targetMeshName}`
-              : "Not visible until applied to an allowed customization area."}
+              : "Positioned manually. Apply to surface to snap it onto the shoe."}
           </span>
           {activeText && (
             <>

@@ -94,6 +94,27 @@ def test_prepare_stickers_resolves_uploaded_asset_id(tmp_path: Path) -> None:
     assert Path(stickers[0]["imagePath"]).read_bytes().startswith(b"\x89PNG")
 
 
+def test_prepare_stickers_allows_missing_target_mesh_name(tmp_path: Path) -> None:
+    service = decal_service()
+    config = {
+        "stickers": [
+            {
+                "id": "floating",
+                "type": "image",
+                "imageUrl": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22/%3E",
+                "position": [0, 0, 0],
+                "rotation": [0, 0, 0],
+                "targetMeshName": None,
+                "scale": 0.2,
+            }
+        ]
+    }
+
+    stickers = service._prepare_stickers(tmp_path, config)
+
+    assert stickers[0]["targetMeshName"] == ""
+
+
 def test_prepare_stickers_rejects_asset_id_without_resolver(tmp_path: Path) -> None:
     service = decal_service()
 
@@ -284,8 +305,8 @@ def test_blender_script_uses_explicit_projection_and_miss_guard(tmp_path: Path) 
     assert "def configure_decal_material" in script
     assert "texture_node.extension = \"CLIP\"" in script
     assert "def base_mesh_candidates" in script
-    assert "def target_mesh_candidates" in script
-    assert "def is_customizable_mesh_object" in script
+    assert "def target_mesh_candidates" not in script
+    assert "def is_customizable_mesh_object" not in script
     assert "not base_color.links" in script
     assert "target.data.materials.clear()" not in script
     assert "polygon.material_index = 0" in script
@@ -299,8 +320,10 @@ def test_blender_script_uses_explicit_projection_and_miss_guard(tmp_path: Path) 
     assert "def orient_surface_normal(surface_normal, outward_normal)" in script
     assert "def effective_projection_depth" in script
     assert "def effective_surface_offset" in script
-    assert "Decal target mesh is required for strict customization areas" in script
-    assert "was not found in customizable shoe areas" in script
+    assert "strict customization areas" not in script
+    assert "was not found in customizable shoe areas" not in script
+    assert "if not target_name:" in script
+    assert "return candidates" in script
     assert "find_nearest" in script
     assert "def apply_shrinkwrap" not in script
     assert "distance=float(limit)" in script
