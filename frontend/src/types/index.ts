@@ -136,6 +136,10 @@ export type StickerLayer = {
   offset?: number;
   projectionDepth?: number;
   subdivisions?: number;
+  opacity?: number;
+  roughness?: number;
+  metallic?: number;
+  renderOrder?: number;
 };
 
 export type TextLayer = {
@@ -154,6 +158,10 @@ export type TextLayer = {
   projectionDepth?: number;
   subdivisions?: number;
   targetMeshName?: string | null;
+  opacity?: number;
+  roughness?: number;
+  metallic?: number;
+  renderOrder?: number;
 };
 
 export type DesignConfig = {

@@ -65,17 +65,17 @@ export function ModelViewer({
             <ErrorBoundary fallbackMessage="Failed to load 3D model. The file might be invalid or corrupted.">
               <Suspense fallback={null}>
                 <ShoeModel
-                  url={modelUrl}
-                  config={config}
-                  activeLayerId={activeLayerId}
-                  hiddenLayerIds={hiddenLayerIds}
-                  isSaving={isSaving}
-                  surfaceApplyRequest={surfaceApplyRequest}
-                  gizmoMode={gizmoMode}
-                  onConfigChange={onConfigChange}
-                  onActiveLayerChange={onActiveLayerChange}
-                  onMeshBoundsUpdate={onMeshBoundsUpdate}
-                  onSurfaceApplyResult={onSurfaceApplyResult}
+                   url={modelUrl}
+                   config={config}
+                   activeLayerId={activeLayerId}
+                   hiddenLayerIds={hiddenLayerIds}
+                   isSaving={isSaving}
+                   surfaceApplyRequest={surfaceApplyRequest}
+                   gizmoMode={gizmoMode}
+                   onConfigChange={onConfigChange}
+                   onActiveLayerChange={onActiveLayerChange}
+                   onMeshBoundsUpdate={onMeshBoundsUpdate}
+                   onSurfaceApplyResult={onSurfaceApplyResult}
                 />
               </Suspense>
             </ErrorBoundary>
@@ -220,6 +220,7 @@ function ShoeModel({
         }
 
         if (node.userData.originalMaterial) {
+          const isCustom = isCustomizableMeshName(node.name, node.geometry?.name);
           const applyConfig = (mat: THREE.Material) => {
             const m = mat.clone();
             if (m instanceof THREE.MeshStandardMaterial || m instanceof THREE.MeshPhysicalMaterial) {
@@ -227,6 +228,35 @@ function ShoeModel({
               m.roughness = config?.material.roughness ?? 1;
               m.metalness = config?.material.metallic ?? 0;
               configureMaterialTextures(m);
+
+              if (activeLayerId !== null) {
+                if (isCustom) {
+                  m.emissive = new THREE.Color("#0a1f3d");
+                  m.transparent = mat.transparent;
+                  m.opacity = mat.opacity;
+                } else {
+                  m.transparent = true;
+                  m.opacity = 0.25;
+                  m.emissive = new THREE.Color("#000000");
+                }
+              } else {
+                m.transparent = mat.transparent;
+                m.opacity = mat.opacity;
+                m.emissive = new THREE.Color("#000000");
+              }
+            } else {
+              if (activeLayerId !== null) {
+                if (!isCustom) {
+                  m.transparent = true;
+                  m.opacity = 0.25;
+                } else {
+                  m.transparent = mat.transparent;
+                  m.opacity = mat.opacity;
+                }
+              } else {
+                m.transparent = mat.transparent;
+                m.opacity = mat.opacity;
+              }
             }
             m.needsUpdate = true;
             return m;
@@ -243,7 +273,7 @@ function ShoeModel({
         node.receiveShadow = false;
       }
     });
-  }, [config?.baseColor, config?.material.metallic, config?.material.roughness, gltf.scene]);
+  }, [config?.baseColor, config?.material.metallic, config?.material.roughness, gltf.scene, activeLayerId]);
 
   useEffect(() => {
     if (!surfaceApplyRequest || handledSurfaceApplyRequest.current === surfaceApplyRequest) {
@@ -296,8 +326,8 @@ function ShoeModel({
     if (!snappedConfig) {
       onConfigChange({
         ...config,
-        stickers: [...config.stickers],
-        texts: [...config.texts],
+        stickers: config.stickers.map(s => s.id === id ? { ...s, position: pos, rotation: rot, scale } : s),
+        texts: config.texts.map(t => t.id === id ? { ...t, position: pos, rotation: rot, scale } : t)
       });
       onSurfaceApplyResult("Layer moved outside the allowed customization area.");
       return;
@@ -707,17 +737,19 @@ function StickerPlane({
         position={position}
         rotation={rotation}
         scale={[scale, scale, scale]}
+        renderOrder={sticker.renderOrder ?? 0}
       >
         <planeGeometry args={[1, 1]} />
         <meshStandardMaterial
           map={texture}
-          roughness={1}
-          metalness={0}
+          roughness={sticker.roughness ?? 1}
+          metalness={sticker.metallic ?? 0}
+          opacity={sticker.opacity ?? 1}
           transparent
           side={THREE.DoubleSide}
           depthWrite={false}
           polygonOffset
-          polygonOffsetFactor={-4}
+          polygonOffsetFactor={-4 - (sticker.renderOrder ?? 0)}
         />
       </mesh>
       {isActive && !isSaving ? (
@@ -777,17 +809,19 @@ function TextPlane({
         position={position}
         rotation={rotation}
         scale={[scale, scale, scale]}
+        renderOrder={layer.renderOrder ?? 0}
       >
         <planeGeometry args={[aspect, 1]} />
         <meshStandardMaterial
           map={texture}
-          roughness={1}
-          metalness={0}
+          roughness={layer.roughness ?? 1}
+          metalness={layer.metallic ?? 0}
+          opacity={layer.opacity ?? 1}
           transparent
           side={THREE.DoubleSide}
           depthWrite={false}
           polygonOffset
-          polygonOffsetFactor={-4}
+          polygonOffsetFactor={-4 - (layer.renderOrder ?? 0)}
         />
       </mesh>
       {isActive && !isSaving ? (
@@ -824,6 +858,7 @@ function textAspect(value: string): number {
   return Math.max(value.trim().length * 0.62, 1);
 }
 
+// Custom simple clamp/helper functions
 function gizmoSize(scale: number): number {
   return clamp(scale * 2.25, 0.35, 0.75);
 }
