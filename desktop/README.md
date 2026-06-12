@@ -33,9 +33,10 @@ Copy-Item desktop\frontend.env.desktop.example frontend\.env.desktop
 For local development, keep:
 
 ```env
-VITE_API_BASE_URL=http://127.0.0.1:8000/api
+VITE_API_BASE_URL=http://127.0.0.1:8000
 VITE_MARKETING_LOGIN_URL=http://127.0.0.1:5174/login
 VITE_DESKTOP_SHELL=true
+VITE_DESKTOP_DEMO_PROJECT_ID=proj_desktop_demo
 ```
 
 For staging or production builds, replace `VITE_API_BASE_URL` and
@@ -55,9 +56,29 @@ window with `?desktop=1`. The desktop launcher accepts either:
 
 - a raw project id such as `proj_...`
 - a web editor URL such as `https://app.example.com/editor/proj_...`
+- the configured demo project button when `VITE_DESKTOP_DEMO_PROJECT_ID` is set
 
 After a project is selected, the app loads the same editor context endpoint used
 by the web editor.
+
+## Seed Demo Project
+
+The local desktop demo uses this deterministic project id:
+
+```text
+proj_desktop_demo
+```
+
+Seed it from the bundled sample model:
+
+```powershell
+cd backend
+.\.venv\Scripts\python -m app.scripts.seed_desktop_demo_project --model ..\data\3DModel.glb
+```
+
+Then run the backend and desktop app. In the desktop launcher, click **Open Demo
+Project**. The button logs in with the backend demo account and opens the seeded
+project.
 
 On Windows, if Application Control blocks the generated debug executable after a
 successful compile, unblock the generated file and run it again while the Vite

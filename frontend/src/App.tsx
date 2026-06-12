@@ -40,6 +40,7 @@ import type {
 } from "./types";
 
 const MARKETING_LOGIN_URL = import.meta.env.VITE_MARKETING_LOGIN_URL ?? "https://kusshoes.vn/login";
+const DESKTOP_DEMO_PROJECT_ID = import.meta.env.VITE_DESKTOP_DEMO_PROJECT_ID ?? "proj_desktop_demo";
 const DEFAULT_EDITOR_PERMISSIONS: EditorPermissions = { canEdit: true, canBake: true, canExport: true };
 
 export function App() {
@@ -78,6 +79,7 @@ export function App() {
   const [editorPermissions, setEditorPermissions] = useState<EditorPermissions>(DEFAULT_EDITOR_PERMISSIONS);
   const [desktopProjectInput, setDesktopProjectInput] = useState("");
   const [desktopLaunchError, setDesktopLaunchError] = useState<string | null>(null);
+  const [isDesktopDemoOpening, setIsDesktopDemoOpening] = useState(false);
   const assetPreviewUrlsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -614,11 +616,24 @@ export function App() {
       setDesktopLaunchError("Enter a Project ID or a valid /editor/{projectId} URL.");
       return;
     }
-    const url = new URL(window.location.href);
-    url.searchParams.set("desktop", "1");
-    url.searchParams.set("projectId", projectId);
-    url.hash = "";
-    window.location.assign(url.toString());
+    openDesktopProjectId(projectId);
+  }
+
+  async function openDesktopDemoProject() {
+    const projectId = sanitizeProjectId(DESKTOP_DEMO_PROJECT_ID);
+    if (!projectId) {
+      setDesktopLaunchError("Desktop demo project is not configured.");
+      return;
+    }
+    setIsDesktopDemoOpening(true);
+    setDesktopLaunchError(null);
+    try {
+      await api.demoLogin();
+      openDesktopProjectId(projectId);
+    } catch (error) {
+      setDesktopLaunchError(messageFromError(error));
+      setIsDesktopDemoOpening(false);
+    }
   }
 
   return (
@@ -628,11 +643,14 @@ export function App() {
           <DesktopProjectLauncher
             value={desktopProjectInput}
             errorMessage={desktopLaunchError}
+            demoProjectId={DESKTOP_DEMO_PROJECT_ID}
+            isDemoOpening={isDesktopDemoOpening}
             onValueChange={(value) => {
               setDesktopProjectInput(value);
               setDesktopLaunchError(null);
             }}
             onSubmit={openDesktopProject}
+            onOpenDemo={openDesktopDemoProject}
           />
         ) : isProjectEditor && !user ? (
           <EditorRouteState
@@ -818,11 +836,24 @@ function ProjectRouteSummary({
 type DesktopProjectLauncherProps = {
   value: string;
   errorMessage: string | null;
+  demoProjectId: string;
+  isDemoOpening: boolean;
   onValueChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onOpenDemo: () => void;
 };
 
-function DesktopProjectLauncher({ value, errorMessage, onValueChange, onSubmit }: DesktopProjectLauncherProps) {
+function DesktopProjectLauncher({
+  value,
+  errorMessage,
+  demoProjectId,
+  isDemoOpening,
+  onValueChange,
+  onSubmit,
+  onOpenDemo,
+}: DesktopProjectLauncherProps) {
+  const hasDemoProject = Boolean(sanitizeProjectId(demoProjectId));
+
   return (
     <section className="auth-panel">
       <form className="auth-form desktop-launcher" onSubmit={onSubmit}>
@@ -848,6 +879,12 @@ function DesktopProjectLauncher({ value, errorMessage, onValueChange, onSubmit }
           <Monitor size={16} aria-hidden="true" />
           Open Editor
         </button>
+        {hasDemoProject ? (
+          <button type="button" disabled={isDemoOpening} onClick={onOpenDemo}>
+            <LogIn size={16} aria-hidden="true" />
+            {isDemoOpening ? "Opening Demo" : "Open Demo Project"}
+          </button>
+        ) : null}
         {errorMessage ? <span className="status-line danger-text">{errorMessage}</span> : null}
       </form>
     </section>
@@ -1348,6 +1385,14 @@ function projectIdFromEditorInput(value: string): string | null {
     return sanitizeProjectId(routeProjectId);
   }
   return sanitizeProjectId(trimmed);
+}
+
+function openDesktopProjectId(projectId: string): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set("desktop", "1");
+  url.searchParams.set("projectId", projectId);
+  url.hash = "";
+  window.location.assign(url.toString());
 }
 
 function sanitizeProjectId(value: string): string | null {
