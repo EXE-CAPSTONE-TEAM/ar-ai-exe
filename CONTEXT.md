@@ -8,6 +8,7 @@ This file is the first project context AI agents should read before touching cod
 
 - **`backend/`**: FastAPI API server, SQLAlchemy models, Alembic migrations, storage services, reconstruction/import pipelines, mesh cleanup, design assets, decal baking, and export package generation.
 - **`frontend/`**: React/Vite/TypeScript web editor for loading model assets, placing sticker/text layers, saving draft previews, and downloading reconstruction/export files.
+- **`desktop/`**: Tauri desktop shell that builds and packages the existing `frontend/` editor. It must not fork editor business logic; desktop-specific behavior should stay limited to packaging, launch routing, and native shell integration.
 - **`mobile/`**: Mobile capture/import entry point. Keep mobile scan metadata and upload concerns isolated from the web editor.
 - **`docs/`**: Agent, issue tracker, ADR, and domain documentation.
 - **`.agents/skills/`**: Local workflow instructions agents should follow for planning, testing, security review, and handoff.
@@ -50,6 +51,7 @@ flowchart TD
 - **Artwork editor**: `ArtworkCanvasEditor` creates editable sticker artwork before upload/bake.
 - **Sticker presets**: `frontend/src/data/stickerPresets.ts` contains local preset decal metadata.
 - **Customization target filtering**: `frontend/src/utils/customizationZones.ts` excludes generated decal meshes from snapping targets but does not enforce strict shoe-zone allow/block terms.
+- **Desktop launcher**: The desktop shell opens the same editor code with `?desktop=1`; the lightweight launcher accepts a Project ID or web editor URL and then loads the existing project editor context.
 
 ## Current Product Decisions
 
@@ -82,6 +84,8 @@ Run these from the indicated directories when touching the related subsystem:
 - Backend tests: `cd backend; .\.venv\Scripts\python -m pytest`
 - Backend lint: `cd backend; .\.venv\Scripts\python -m ruff check .`
 - Frontend build: `cd frontend; npm run build`
+- Desktop frontend build: `cd frontend; npm run build -- --mode desktop`
+- Desktop package build: `cd desktop; npm install; npm run build` (requires Rust/Cargo and Tauri platform prerequisites)
 - Whitespace check: `git diff --check`
 
 Blender-dependent bake/reconstruction smoke tests require `blender` to be available in PATH or configured through `BLENDER_BIN`.

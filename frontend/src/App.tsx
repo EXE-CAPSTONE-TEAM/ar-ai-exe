@@ -5,6 +5,7 @@ import {
   HardDrive,
   ImagePlus,
   LogIn,
+  Monitor,
   MousePointer2,
   RefreshCw,
   Save,
@@ -42,7 +43,8 @@ const MARKETING_LOGIN_URL = import.meta.env.VITE_MARKETING_LOGIN_URL ?? "https:/
 const DEFAULT_EDITOR_PERMISSIONS: EditorPermissions = { canEdit: true, canBake: true, canExport: true };
 
 export function App() {
-  const editorProjectId = useMemo(() => projectIdFromEditorPath(window.location.pathname), []);
+  const isDesktopShell = useMemo(() => isDesktopShellLocation(), []);
+  const editorProjectId = useMemo(() => editorProjectIdFromLocation(isDesktopShell), [isDesktopShell]);
   const isProjectEditor = Boolean(editorProjectId);
   const editorContext = useEditorContext(editorProjectId);
   const [user, setUser] = useState<User | null>(null);
@@ -74,6 +76,8 @@ export function App() {
   const [gizmoMode, setGizmoMode] = useState<"translate" | "rotate" | "scale">("translate");
   const [surfaceApplyRequest, setSurfaceApplyRequest] = useState(0);
   const [editorPermissions, setEditorPermissions] = useState<EditorPermissions>(DEFAULT_EDITOR_PERMISSIONS);
+  const [desktopProjectInput, setDesktopProjectInput] = useState("");
+  const [desktopLaunchError, setDesktopLaunchError] = useState<string | null>(null);
   const assetPreviewUrlsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -603,10 +607,34 @@ export function App() {
     }
   }
 
+  function openDesktopProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const projectId = projectIdFromEditorInput(desktopProjectInput);
+    if (!projectId) {
+      setDesktopLaunchError("Enter a Project ID or a valid /editor/{projectId} URL.");
+      return;
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.set("desktop", "1");
+    url.searchParams.set("projectId", projectId);
+    url.hash = "";
+    window.location.assign(url.toString());
+  }
+
   return (
     <AppShell user={user} onLogout={logout}>
       <main className="workspace" id="main-workspace">
-        {isProjectEditor && !user ? (
+        {isDesktopShell && !isProjectEditor ? (
+          <DesktopProjectLauncher
+            value={desktopProjectInput}
+            errorMessage={desktopLaunchError}
+            onValueChange={(value) => {
+              setDesktopProjectInput(value);
+              setDesktopLaunchError(null);
+            }}
+            onSubmit={openDesktopProject}
+          />
+        ) : isProjectEditor && !user ? (
           <EditorRouteState
             state={editorContext.state}
             message={editorContext.errorMessage ?? "Redirecting to login."}
@@ -784,6 +812,45 @@ function ProjectRouteSummary({
         {canEdit ? "Edit" : "View"} / {canBake ? "Bake" : "No bake"} / {canExport ? "Export" : "No export"}
       </span>
     </div>
+  );
+}
+
+type DesktopProjectLauncherProps = {
+  value: string;
+  errorMessage: string | null;
+  onValueChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+};
+
+function DesktopProjectLauncher({ value, errorMessage, onValueChange, onSubmit }: DesktopProjectLauncherProps) {
+  return (
+    <section className="auth-panel">
+      <form className="auth-form desktop-launcher" onSubmit={onSubmit}>
+        <div className="desktop-launcher-title">
+          <span className="desktop-launcher-icon">
+            <Monitor size={22} aria-hidden="true" />
+          </span>
+          <div>
+            <h2>KusShoes Desktop Editor</h2>
+            <p>Open a backend project with the same editor used by the web route.</p>
+          </div>
+        </div>
+        <label>
+          Project ID or editor URL
+          <input
+            value={value}
+            onChange={(event) => onValueChange(event.target.value)}
+            placeholder="proj_... or https://.../editor/proj_..."
+            autoFocus
+          />
+        </label>
+        <button type="submit" className="primary-button">
+          <Monitor size={16} aria-hidden="true" />
+          Open Editor
+        </button>
+        {errorMessage ? <span className="status-line danger-text">{errorMessage}</span> : null}
+      </form>
+    </section>
   );
 }
 
@@ -1237,6 +1304,55 @@ function setScanIdInUrl(scanSessionId: string) {
 function projectIdFromEditorPath(pathname: string): string | null {
   const match = pathname.match(/^\/editor\/([^/?#]+)/);
   return match ? decodeURIComponent(match[1]) : null;
+}
+
+function editorProjectIdFromLocation(isDesktopShell: boolean): string | null {
+  const pathProjectId = projectIdFromEditorPath(window.location.pathname);
+  if (pathProjectId) {
+    return pathProjectId;
+  }
+  if (!isDesktopShell) {
+    return null;
+  }
+  const queryProjectId = new URLSearchParams(window.location.search).get("projectId");
+  return queryProjectId ? sanitizeProjectId(queryProjectId) : null;
+}
+
+function isDesktopShellLocation(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("desktop") === "1" || import.meta.env.VITE_DESKTOP_SHELL === "true";
+}
+
+function projectIdFromEditorInput(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(trimmed);
+    const routeProjectId = projectIdFromEditorPath(parsedUrl.pathname);
+    if (routeProjectId) {
+      return sanitizeProjectId(routeProjectId);
+    }
+    const customProtocolProjectId = projectIdFromEditorPath(`/${parsedUrl.host}${parsedUrl.pathname}`);
+    if (customProtocolProjectId) {
+      return sanitizeProjectId(customProtocolProjectId);
+    }
+  } catch {
+    // Treat non-URL input as either a route fragment or a raw project id.
+  }
+
+  const routeProjectId = projectIdFromEditorPath(trimmed.startsWith("/") ? trimmed : `/${trimmed}`);
+  if (routeProjectId) {
+    return sanitizeProjectId(routeProjectId);
+  }
+  return sanitizeProjectId(trimmed);
+}
+
+function sanitizeProjectId(value: string): string | null {
+  const projectId = value.trim();
+  return /^[A-Za-z0-9_-]{3,120}$/.test(projectId) ? projectId : null;
 }
 
 function loginRedirectUrl(): string {

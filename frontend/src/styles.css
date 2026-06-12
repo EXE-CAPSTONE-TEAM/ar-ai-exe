@@ -1175,6 +1175,45 @@ dd {
   background: var(--accent);
 }
 
+.desktop-launcher {
+  width: min(100%, 560px);
+}
+
+.desktop-launcher-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.desktop-launcher-title h2 {
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.desktop-launcher-title p {
+  margin-top: 5px;
+  color: var(--app-muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.desktop-launcher-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  color: var(--accent);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-small);
+}
+
+.danger-text {
+  color: var(--danger);
+}
+
 /* Sticker Gallery & Layer Row Enhancements */
 
 .sticker-gallery-container {
