@@ -6,6 +6,7 @@ FastAPI backend for the Shoe Visual Customizer MVP.
 
 - Python 3.11+
 - `uv`
+- Redis 7+ for queued bake jobs
 
 Install `uv` if needed:
 
@@ -29,6 +30,12 @@ uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+Run a worker in a second terminal when testing queued preview bakes:
+
+```powershell
+uv run python -m app.workers.rq_worker
+```
+
 Health check:
 
 ```powershell
@@ -47,7 +54,7 @@ Expected response:
 
 ## Demo Auth
 
-The local MVP uses a bearer token so protected endpoints already run with an explicit user identity.
+The API supports HTTP-only auth cookies for web/editor clients and bearer tokens for mobile/local compatibility.
 
 ```powershell
 Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/auth/demo-login
@@ -58,6 +65,8 @@ Use the returned `accessToken` as:
 ```text
 Authorization: Bearer local-demo-token-change-me
 ```
+
+Browser clients may instead rely on the `kusshoes_access_token` cookie. Mutating cookie-auth requests must send `X-CSRF-Token` with the value from the `kusshoes_csrf_token` cookie.
 
 The demo token is for local MVP use only. Replace `DEMO_ACCESS_TOKEN` and disable demo-login before deploying beyond local development.
 
@@ -76,6 +85,8 @@ Current backend support includes:
 - GLB, OBJ, MTL, texture, metadata, quality report, and OBJ ZIP package outputs.
 - Model metadata and file download endpoints.
 - Design draft save/reload/update.
+- Project-based editor context at `/api/projects/{project_id}/editor-context`.
+- Redis RQ preview bake jobs at `/api/designs/{design_id}/bake` and `/api/jobs/{job_id}`.
 - Visual design package export as a ZIP.
 
 ## Configuration
@@ -88,6 +99,16 @@ Important values:
 STORAGE_ROOT=storage
 DATABASE_URL=sqlite:///./storage/app.db
 DATABASE_AUTO_CREATE_TABLES=true
+MARKETING_LOGIN_URL=https://kusshoes.vn/login
+AUTH_COOKIE_NAME=kusshoes_access_token
+AUTH_COOKIE_DOMAIN=.kusshoes.vn
+AUTH_COOKIE_SECURE=true
+AUTH_COOKIE_SAMESITE=lax
+CSRF_COOKIE_NAME=kusshoes_csrf_token
+CSRF_HEADER_NAME=x-csrf-token
+REDIS_URL=redis://redis:6379/0
+RQ_QUEUE_NAME=kusshoes-jobs
+RQ_JOB_TIMEOUT_SECONDS=7200
 ENABLE_REAL_RECONSTRUCTION=true
 COLMAP_BIN=colmap
 OPENMVS_BIN_DIR=/opt/openmvs/bin

@@ -16,16 +16,21 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, ApiError, designStorageKey } from "./api/client";
 import type { ModelImportPayload } from "./api/client";
+import { editorClient } from "./api/editorClient";
 import { EditorPanels } from "./components/Editor/EditorPanels";
 import { AppShell } from "./components/Layout/AppShell";
 import { MetadataPanel } from "./components/MetadataPanel/MetadataPanel";
 import { ModelImportPanel } from "./components/ModelImport/ModelImportPanel";
 import { ModelViewer } from "./components/ModelViewer/ModelViewer";
+import { useEditorContext } from "./hooks/useEditorContext";
 import type {
   Design,
   DesignAssetSource,
   DesignConfig,
+  EditorContext,
+  EditorPermissions,
   ExportPackage,
+  Job,
   ModelAsset,
   ReconstructionReadiness,
   ScanSession,
@@ -33,7 +38,13 @@ import type {
   User,
 } from "./types";
 
+const MARKETING_LOGIN_URL = import.meta.env.VITE_MARKETING_LOGIN_URL ?? "https://kusshoes.vn/login";
+const DEFAULT_EDITOR_PERMISSIONS: EditorPermissions = { canEdit: true, canBake: true, canExport: true };
+
 export function App() {
+  const editorProjectId = useMemo(() => projectIdFromEditorPath(window.location.pathname), []);
+  const isProjectEditor = Boolean(editorProjectId);
+  const editorContext = useEditorContext(editorProjectId);
   const [user, setUser] = useState<User | null>(null);
   const [scanId, setScanId] = useState(() => new URLSearchParams(window.location.search).get("scanId") ?? "");
   const [scanSession, setScanSession] = useState<ScanSession | null>(null);
@@ -62,10 +73,14 @@ export function App() {
   const [meshBounds, setMeshBounds] = useState<{ center: [number, number, number]; size: [number, number, number] } | null>(null);
   const [gizmoMode, setGizmoMode] = useState<"translate" | "rotate" | "scale">("translate");
   const [surfaceApplyRequest, setSurfaceApplyRequest] = useState(0);
+  const [editorPermissions, setEditorPermissions] = useState<EditorPermissions>(DEFAULT_EDITOR_PERMISSIONS);
   const assetPreviewUrlsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     void loadReadiness();
+    if (isProjectEditor) {
+      return;
+    }
     if (!api.hasToken()) {
       setStatusMessage("Sign in to open scan designs.");
       return;
@@ -76,8 +91,31 @@ export function App() {
       .catch(() => {
         api.logout();
         setStatusMessage("Session expired. Sign in again.");
-      });
-  }, []);
+    });
+  }, [isProjectEditor]);
+
+  useEffect(() => {
+    if (!isProjectEditor) {
+      return;
+    }
+    if (editorContext.user) {
+      setUser(editorContext.user);
+    }
+  }, [editorContext.user, isProjectEditor]);
+
+  useEffect(() => {
+    if (!isProjectEditor || editorContext.state !== "UNAUTHENTICATED") {
+      return;
+    }
+    window.location.assign(loginRedirectUrl());
+  }, [editorContext.state, isProjectEditor]);
+
+  useEffect(() => {
+    if (!isProjectEditor || !editorContext.context) {
+      return;
+    }
+    void loadProjectEditorContext(editorContext.context);
+  }, [editorContext.context, isProjectEditor]);
 
   useEffect(() => {
     if (user && scanId.trim()) {
@@ -238,6 +276,67 @@ export function App() {
     }
   }
 
+  async function loadProjectEditorContext(context: EditorContext) {
+    setStatusMessage("Loading project");
+    setEditorPermissions(context.permissions);
+    setScanSession(null);
+    setModelAsset(null);
+    setModelUrl(null);
+    clearAssetPreviewUrls();
+    clearSavedDesignState();
+    setExportPackage(null);
+    setExportMessage(null);
+    setActiveLayerId(null);
+    setMeshBounds(null);
+
+    const loadedModel = context.modelAsset;
+    if (!loadedModel) {
+      setDesign(context.latestDesign);
+      setConfig(null);
+      setDesignName(context.latestDesign?.name ?? context.project.name);
+      setStatusMessage("MODEL_PROCESSING: Project model is not ready yet.");
+      return;
+    }
+    if (loadedModel.status === "failed") {
+      setConfig(null);
+      setStatusMessage("MODEL_PROCESSING: Project model processing failed.");
+      return;
+    }
+    if (loadedModel.status !== "ready") {
+      setConfig(null);
+      setStatusMessage("MODEL_PROCESSING: Project model is still processing.");
+      return;
+    }
+
+    try {
+      setModelAsset(loadedModel);
+      setModelUrl(await api.fetchModelBlobUrl(loadedModel));
+      if (context.latestDesign) {
+        setDesign(context.latestDesign);
+        setDesignName(context.latestDesign.name);
+        const hydratedConfig = normalizeFixedMaterial(
+          await hydrateDesignAssetPreviewUrls(context.latestDesign.designConfig),
+        );
+        setConfig(hydratedConfig);
+        setSavedConfigFingerprint(configFingerprint(context.latestDesign.designConfig));
+        setPreviewErrorMessage(
+          context.latestDesign.previewStatus === "failed"
+            ? context.latestDesign.previewErrorMessage
+            : null,
+        );
+        await loadBakedPreview(context.latestDesign);
+      } else {
+        setDesign(null);
+        setDesignName(context.project.name);
+        setConfig(createDefaultConfig(loadedModel.id));
+        setSavedConfigFingerprint(null);
+      }
+      setStatusMessage(context.latestDesign?.previewGlbUrl ? "PREVIEW_READY" : "EDITOR_READY");
+    } catch (error) {
+      setStatusMessage(messageFromError(error));
+    }
+  }
+
   async function importModel(payload: ModelImportPayload) {
     setIsImporting(true);
     setStatusMessage("Importing model");
@@ -347,28 +446,52 @@ export function App() {
     if (!modelAsset || !config) {
       return;
     }
+    if (isProjectEditor && (!editorPermissions.canEdit || !editorPermissions.canBake)) {
+      setStatusMessage("FORBIDDEN: You do not have permission to save or bake this design.");
+      return null;
+    }
 
     setIsSaving(true);
-    setStatusMessage("Đang áp sticker/text vào giày...");
+    setStatusMessage("SAVING_DRAFT");
     try {
-      const bakeConfig = await prepareBakeConfig(config);
-      const savedDesign = design
-        ? await api.updateDesign(design.id, designName, bakeConfig)
-        : await api.createDesign(modelAsset.id, designName, bakeConfig);
-      setDesign(savedDesign);
-      setDesignName(savedDesign.name);
-      setConfig(await hydrateDesignAssetPreviewUrls(savedDesign.designConfig));
-      setSavedConfigFingerprint(configFingerprint(savedDesign.designConfig));
-      localStorage.setItem(designStorageKey(modelAsset.id), savedDesign.id);
-      const hasPreview = await loadBakedPreview(savedDesign);
-      if (savedDesign.previewStatus === "failed") {
-        setPreviewErrorMessage(savedDesign.previewErrorMessage ?? "Move the sticker/text closer to the shoe and save again.");
-        setStatusMessage(savedDesign.previewErrorMessage ?? "Draft saved, but preview bake failed.");
+      const bakeConfig = withEditorMetadata(await prepareBakeConfig(config));
+      const savedDesign =
+        isProjectEditor && editorProjectId
+          ? await editorClient.saveDesign(editorProjectId, bakeConfig, designName)
+          : design
+            ? await api.updateDesign(design.id, designName, bakeConfig)
+            : await api.createDesign(modelAsset.id, designName, bakeConfig);
+      const job = isProjectEditor
+        ? await editorClient.bakeDesign(savedDesign.id)
+        : await api.bakeDesign(savedDesign.id);
+      setStatusMessage("BAKING");
+      const completedJob = isProjectEditor
+        ? await waitForBakeJob(job.id, editorClient.getJob)
+        : await waitForBakeJob(job.id, api.getJob);
+      const refreshedDesign = isProjectEditor
+        ? await editorClient.getDesign(savedDesign.id)
+        : await api.getDesign(savedDesign.id);
+
+      setDesign(refreshedDesign);
+      setDesignName(refreshedDesign.name);
+      setConfig(await hydrateDesignAssetPreviewUrls(refreshedDesign.designConfig));
+      setSavedConfigFingerprint(configFingerprint(refreshedDesign.designConfig));
+      if (!isProjectEditor) {
+        localStorage.setItem(designStorageKey(modelAsset.id), refreshedDesign.id);
+      }
+      const hasPreview = await loadBakedPreview(refreshedDesign);
+      if (completedJob.status === "failed" || refreshedDesign.previewStatus === "failed") {
+        const message =
+          completedJob.errorMessage ??
+          refreshedDesign.previewErrorMessage ??
+          "Move the sticker/text closer to the shoe and save again.";
+        setPreviewErrorMessage(message);
+        setStatusMessage(message);
       } else {
         setPreviewErrorMessage(null);
-        setStatusMessage(hasPreview ? "Draft saved and applied to shoe" : "Design saved");
+        setStatusMessage(hasPreview ? "PREVIEW_READY" : "EDITOR_READY");
       }
-      return savedDesign;
+      return refreshedDesign;
     } catch (error) {
       setStatusMessage(messageFromError(error));
       return null;
@@ -378,6 +501,10 @@ export function App() {
   }
 
   function handleConfigChange(nextConfig: DesignConfig) {
+    if (isProjectEditor && !editorPermissions.canEdit) {
+      setStatusMessage("FORBIDDEN: You do not have permission to edit this design.");
+      return;
+    }
     if (previewModelUrl && config && !canKeepBakedPreview(config, nextConfig, bakedLayerIds)) {
       clearBakedPreview();
     }
@@ -392,6 +519,9 @@ export function App() {
   }
 
   async function uploadDesignAssetWithPreview(file: File, sourceType: Extract<DesignAssetSource, "upload" | "canvas">) {
+    if (isProjectEditor && !editorPermissions.canEdit) {
+      throw new Error("You do not have permission to edit this design.");
+    }
     const asset = await api.uploadDesignAsset(file, sourceType);
     return {
       assetId: asset.id,
@@ -405,14 +535,21 @@ export function App() {
     if (isSaving || isExporting) {
       return;
     }
+    if (isProjectEditor && !editorPermissions.canExport) {
+      setExportMessage("You do not have permission to export this design.");
+      setStatusMessage("FORBIDDEN: You do not have permission to export this design.");
+      return;
+    }
 
     setIsExporting(true);
-    setExportMessage("Preparing export package...");
-    setStatusMessage("Preparing export package");
+    setExportMessage("EXPORTING");
+    setStatusMessage("EXPORTING");
     try {
       const hasUnsavedConfig = config ? configFingerprint(config) !== savedConfigFingerprint : false;
       const savedDesign = !design || hasUnsavedConfig ? await saveDesign() : design;
-      const activeDesignId = savedDesign?.id ?? (modelAsset && localStorage.getItem(designStorageKey(modelAsset.id)));
+      const activeDesignId =
+        savedDesign?.id ??
+        (isProjectEditor ? design?.id : modelAsset && localStorage.getItem(designStorageKey(modelAsset.id)));
       if (!activeDesignId) {
         setExportMessage("Save the draft before exporting.");
         setStatusMessage("Save the draft before exporting.");
@@ -421,13 +558,15 @@ export function App() {
 
       setExportMessage("Creating ZIP package...");
       setStatusMessage("Creating export package");
-      const createdExport = await api.exportDesign(activeDesignId);
+      const createdExport = isProjectEditor
+        ? await editorClient.exportDesign(activeDesignId)
+        : await api.exportDesign(activeDesignId);
       setExportPackage(createdExport);
       setExportMessage("ZIP package ready. Download starting...");
-      setStatusMessage("Export package ready. Download starting.");
+      setStatusMessage("EXPORT_READY");
       await api.downloadExport(createdExport);
       setExportMessage("Download started. Use Download ZIP again if the browser blocked it.");
-      setStatusMessage("Export package downloaded");
+      setStatusMessage("EXPORT_READY");
     } catch (error) {
       const message = messageFromError(error);
       setExportMessage(message);
@@ -467,7 +606,12 @@ export function App() {
   return (
     <AppShell user={user} onLogout={logout}>
       <main className="workspace" id="main-workspace">
-        {!user ? (
+        {isProjectEditor && !user ? (
+          <EditorRouteState
+            state={editorContext.state}
+            message={editorContext.errorMessage ?? "Redirecting to login."}
+          />
+        ) : !user ? (
           <AuthPanel
             mode={authMode}
             name={authName}
@@ -492,29 +636,45 @@ export function App() {
                     AI + 3D Sneaker Studio
                   </span>
                   <div>
-                    <h2>Kus Studio workspace</h2>
-                    <p>Load a scan or import a model, then customize the shoe in the 3D stage.</p>
+                    <h2>{isProjectEditor ? editorContext.context?.project.name ?? "Kus Studio workspace" : "Kus Studio workspace"}</h2>
+                    <p>
+                      {isProjectEditor
+                        ? "Customize the project model, save a backend draft, bake preview, then export."
+                        : "Load a scan or import a model, then customize the shoe in the 3D stage."}
+                    </p>
                   </div>
                 </div>
-                <div className="scan-loader">
-                  <label>
-                    Scan session ID
-                    <input
-                      value={scanId}
-                      onChange={(event) => setScanId(event.target.value)}
-                      placeholder="scan_..."
-                    />
-                  </label>
-                  <button type="button" disabled={!canLoad} onClick={loadScan}>
-                    <Search size={16} aria-hidden="true" />
-                    Load
-                  </button>
-                  <button type="button" disabled={!scanSession} onClick={loadScan}>
-                    <RefreshCw size={16} aria-hidden="true" />
-                    Refresh
-                  </button>
-                </div>
-                <ModelImportPanel isBusy={isImporting} onImport={importModel} />
+                {isProjectEditor ? (
+                  <ProjectRouteSummary
+                    projectId={editorProjectId ?? ""}
+                    state={editorContext.state}
+                    canEdit={editorPermissions.canEdit}
+                    canBake={editorPermissions.canBake}
+                    canExport={editorPermissions.canExport}
+                  />
+                ) : (
+                  <>
+                    <div className="scan-loader">
+                      <label>
+                        Scan session ID
+                        <input
+                          value={scanId}
+                          onChange={(event) => setScanId(event.target.value)}
+                          placeholder="scan_..."
+                        />
+                      </label>
+                      <button type="button" disabled={!canLoad} onClick={loadScan}>
+                        <Search size={16} aria-hidden="true" />
+                        Load
+                      </button>
+                      <button type="button" disabled={!scanSession} onClick={loadScan}>
+                        <RefreshCw size={16} aria-hidden="true" />
+                        Refresh
+                      </button>
+                    </div>
+                    <ModelImportPanel isBusy={isImporting} onImport={importModel} />
+                  </>
+                )}
               </div>
               <span className="status-line">{statusMessage}</span>
             </section>
@@ -551,6 +711,9 @@ export function App() {
                 designName={designName}
                 isSaving={isSaving}
                 isExporting={isExporting}
+                canEdit={!isProjectEditor || editorPermissions.canEdit}
+                canBake={!isProjectEditor || editorPermissions.canBake}
+                canExport={!isProjectEditor || editorPermissions.canExport}
                 exportMessage={exportMessage}
                 exportPackage={exportPackage}
                 activeLayerId={activeLayerId}
@@ -582,6 +745,47 @@ type WorkflowGuideProps = {
   isSaved: boolean;
   hasExportPackage: boolean;
 };
+
+function EditorRouteState({ state, message }: { state: string; message: string }) {
+  return (
+    <section className="auth-panel">
+      <div className="empty-panel-callout">
+        <RefreshCw size={22} aria-hidden="true" />
+        <div>
+          <h2>{state}</h2>
+          <p>{message}</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ProjectRouteSummary({
+  projectId,
+  state,
+  canEdit,
+  canBake,
+  canExport,
+}: {
+  projectId: string;
+  state: string;
+  canEdit: boolean;
+  canBake: boolean;
+  canExport: boolean;
+}) {
+  return (
+    <div className="scan-loader">
+      <label>
+        Project ID
+        <input value={projectId} readOnly />
+      </label>
+      <span className="status-line">{state}</span>
+      <span className="status-line">
+        {canEdit ? "Edit" : "View"} / {canBake ? "Bake" : "No bake"} / {canExport ? "Export" : "No export"}
+      </span>
+    </div>
+  );
+}
 
 type WorkflowStepState = "complete" | "current" | "upcoming";
 
@@ -993,6 +1197,20 @@ function createDefaultConfig(modelAssetId: string): DesignConfig {
     },
     stickers: [],
     texts: [],
+    camera: {},
+    metadata: {
+      editorVersion: "1.0.0",
+    },
+  };
+}
+
+function withEditorMetadata(config: DesignConfig): DesignConfig {
+  return {
+    ...config,
+    metadata: {
+      ...(config.metadata ?? {}),
+      editorVersion: "1.0.0",
+    },
   };
 }
 
@@ -1014,6 +1232,32 @@ function setScanIdInUrl(scanSessionId: string) {
   const url = new URL(window.location.href);
   url.searchParams.set("scanId", scanSessionId);
   window.history.replaceState({}, "", url);
+}
+
+function projectIdFromEditorPath(pathname: string): string | null {
+  const match = pathname.match(/^\/editor\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function loginRedirectUrl(): string {
+  const url = new URL(MARKETING_LOGIN_URL);
+  url.searchParams.set("redirect", window.location.href);
+  return url.toString();
+}
+
+async function waitForBakeJob(jobId: string, getJob: (jobId: string) => Promise<Job>): Promise<Job> {
+  for (let attempt = 0; attempt < 180; attempt += 1) {
+    const job = await getJob(jobId);
+    if (job.status === "completed" || job.status === "failed") {
+      return job;
+    }
+    await delay(2000);
+  }
+  throw new Error("Bake job timed out.");
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
 function scanStatusLabel(status: string): string {

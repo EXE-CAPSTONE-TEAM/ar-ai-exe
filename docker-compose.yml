@@ -1,4 +1,17 @@
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - app_internal
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ./backend
@@ -8,6 +21,9 @@ services:
     restart: unless-stopped
     env_file:
       - ./deploy/backend.env
+    depends_on:
+      redis:
+        condition: service_healthy
     volumes:
       - backend_storage:/app/storage
     networks:
@@ -21,12 +37,33 @@ services:
       retries: 3
       start_period: 120s
 
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        OPENMVS_REF: v2.4.0
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.rq_worker"]
+    env_file:
+      - ./deploy/backend.env
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - backend_storage:/app/storage
+    networks:
+      - app_internal
+
   web:
     build:
       context: .
       dockerfile: frontend/Dockerfile
       args:
         VITE_API_BASE_URL: ""
+        VITE_MARKETING_LOGIN_URL: ${MARKETING_LOGIN_URL:-https://kusshoes.vn/login}
     restart: unless-stopped
     environment:
       APP_DOMAIN: ${APP_DOMAIN:-:80}

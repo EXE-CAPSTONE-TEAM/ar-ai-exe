@@ -1,10 +1,12 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, design_assets, designs, exports, models, scan_sessions, system
+from app.api import auth, design_assets, designs, exports, jobs, models, projects, scan_sessions, system
 from app.core.config import get_settings
+from app.core.errors import http_exception_handler, validation_exception_handler
 from app.core.storage import ensure_storage_directories
 from app.db.database import Base, engine
 from app import models as _models  # noqa: F401
@@ -36,12 +38,16 @@ app.add_middleware(
 )
 
 app.include_router(auth.router, prefix=settings.api_prefix)
+app.include_router(projects.router, prefix=settings.api_prefix)
 app.include_router(scan_sessions.router, prefix=settings.api_prefix)
 app.include_router(models.router, prefix=settings.api_prefix)
 app.include_router(design_assets.router, prefix=settings.api_prefix)
 app.include_router(designs.router, prefix=settings.api_prefix)
 app.include_router(exports.router, prefix=settings.api_prefix)
+app.include_router(jobs.router, prefix=settings.api_prefix)
 app.include_router(system.router, prefix=settings.api_prefix)
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
 
 
 @app.get("/health", tags=["system"])

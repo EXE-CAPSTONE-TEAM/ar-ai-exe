@@ -34,18 +34,57 @@ class ScanSource:
     IMPORT = "import"
 
 
+class ProjectStatus:
+    DRAFT = "draft"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+    ARCHIVED = "archived"
+
+
+class ProjectSourceType:
+    SCAN = "scan"
+    UPLOADED_GLB = "uploaded_glb"
+    UPLOADED_OBJ = "uploaded_obj"
+    TEMPLATE = "template"
+
+
+class AssetStatus:
+    UPLOADED = "uploaded"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+
+
 class DesignStatus:
     DRAFT = "draft"
+    PUBLISHED = "published"
+    ARCHIVED = "archived"
     EXPORTED = "exported"
 
 
 class DesignPreviewStatus:
     NONE = "none"
+    PENDING = "pending"
+    PROCESSING = "processing"
     READY = "ready"
     FAILED = "failed"
 
 
 class ExportStatus:
+    PROCESSING = "processing"
+    READY = "ready"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class JobType:
+    BAKE = "bake"
+
+
+class JobStatus:
+    QUEUED = "queued"
+    PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -62,8 +101,28 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow)
 
     scan_sessions: Mapped[list["ScanSession"]] = relationship(back_populates="user")
+    projects: Mapped[list["Project"]] = relationship(back_populates="user")
     designs: Mapped[list["Design"]] = relationship(back_populates="user")
     design_assets: Mapped[list["DesignAsset"]] = relationship(back_populates="user")
+    jobs: Mapped[list["Job"]] = relationship(back_populates="user")
+
+
+class Project(Base):
+    __tablename__ = "projects"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("proj"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    status: Mapped[str] = mapped_column(String(32), default=ProjectStatus.DRAFT, index=True)
+    source_type: Mapped[str] = mapped_column(String(32), default=ProjectSourceType.SCAN, index=True)
+    thumbnail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user: Mapped[User] = relationship(back_populates="projects")
+    scan_sessions: Mapped[list["ScanSession"]] = relationship(back_populates="project")
+    designs: Mapped[list["Design"]] = relationship(back_populates="project")
+    jobs: Mapped[list["Job"]] = relationship(back_populates="project")
 
 
 class ScanSession(Base):
@@ -71,6 +130,7 @@ class ScanSession(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("scan"))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(32), default=ScanStatus.CREATED, index=True)
     source_type: Mapped[str] = mapped_column(String(32), default=ScanSource.SCAN, index=True)
     import_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
@@ -96,6 +156,7 @@ class ScanSession(Base):
     updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user: Mapped[User] = relationship(back_populates="scan_sessions")
+    project: Mapped[Project | None] = relationship(back_populates="scan_sessions")
     model_asset: Mapped["ModelAsset | None"] = relationship(
         back_populates="scan_session",
         cascade="all, delete-orphan",
@@ -116,6 +177,8 @@ class ModelAsset(Base):
     obj_path: Mapped[str] = mapped_column(Text)
     mtl_path: Mapped[str] = mapped_column(Text)
     texture_path: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), default=AssetStatus.READY, index=True)
+    source_type: Mapped[str] = mapped_column(String(32), default=ProjectSourceType.SCAN, index=True)
     metadata_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     quality_report_path: Mapped[str] = mapped_column(Text)
     obj_package_zip_path: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -151,6 +214,7 @@ class Design(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("design"))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
     model_asset_id: Mapped[str] = mapped_column(ForeignKey("model_assets.id"), index=True)
     name: Mapped[str] = mapped_column(String(160))
     design_config_path: Mapped[str] = mapped_column(Text)
@@ -166,6 +230,7 @@ class Design(Base):
     updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user: Mapped[User] = relationship(back_populates="designs")
+    project: Mapped[Project | None] = relationship(back_populates="designs")
     model_asset: Mapped[ModelAsset] = relationship(back_populates="designs")
     export_packages: Mapped[list["ExportPackage"]] = relationship(back_populates="design")
 
@@ -191,7 +256,7 @@ class ExportPackage(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("export"))
     design_id: Mapped[str] = mapped_column(ForeignKey("designs.id"), index=True)
-    status: Mapped[str] = mapped_column(String(32), default=ExportStatus.COMPLETED)
+    status: Mapped[str] = mapped_column(String(32), default=ExportStatus.READY)
     glb_path: Mapped[str] = mapped_column(Text)
     obj_path: Mapped[str] = mapped_column(Text)
     mtl_path: Mapped[str] = mapped_column(Text)
@@ -205,3 +270,23 @@ class ExportPackage(Base):
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     design: Mapped[Design] = relationship(back_populates="export_packages")
+
+
+class Job(Base):
+    __tablename__ = "jobs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("job"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
+    design_id: Mapped[str | None] = mapped_column(ForeignKey("designs.id"), nullable=True, index=True)
+    type: Mapped[str] = mapped_column(String(32), index=True)
+    status: Mapped[str] = mapped_column(String(32), default=JobStatus.QUEUED, index=True)
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rq_job_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user: Mapped[User] = relationship(back_populates="jobs")
+    project: Mapped[Project | None] = relationship(back_populates="jobs")
+    design: Mapped[Design | None] = relationship()

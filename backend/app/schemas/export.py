@@ -10,5 +10,6 @@ class ExportPackageResponse(CamelModel):
     design_id: str = Field(alias="designId")
     status: str
     download_url: str = Field(alias="downloadUrl")
+    zip_url: str | None = Field(default=None, alias="zipUrl")
     files: list[str]
     created_at: datetime = Field(alias="createdAt")

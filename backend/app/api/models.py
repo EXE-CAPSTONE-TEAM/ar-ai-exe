@@ -59,6 +59,7 @@ async def import_model(
     mtl: Annotated[UploadFile | None, File()] = None,
     texture: Annotated[UploadFile | None, File()] = None,
     package: Annotated[UploadFile | None, File()] = None,
+    project_id: Annotated[str | None, Form(alias="projectId")] = None,
 ) -> ModelImportResponse:
     parsed_metadata = parse_scan_metadata(metadata)
     asset = ModelImportService(db).import_model(
@@ -70,6 +71,7 @@ async def import_model(
         mtl_file=await uploaded_file(mtl),
         texture_file=await uploaded_file(texture),
         package_file=await uploaded_file(package),
+        project_id=project_id,
     )
     model_service = ModelAssetService(db)
     return ModelImportResponse(

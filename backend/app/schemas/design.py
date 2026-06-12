@@ -17,6 +17,8 @@ class DesignConfig(CamelModel):
     material: MaterialConfig = Field(default_factory=MaterialConfig)
     stickers: list[dict[str, Any]] = Field(default_factory=list)
     texts: list[dict[str, Any]] = Field(default_factory=list)
+    camera: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class DesignCreate(CamelModel):
@@ -33,12 +35,16 @@ class DesignUpdate(CamelModel):
 class DesignResponse(CamelModel):
     id: str
     user_id: str = Field(alias="userId")
+    project_id: str | None = Field(default=None, alias="projectId")
     model_asset_id: str = Field(alias="modelAssetId")
     name: str
     status: str
     design_config: dict[str, Any] = Field(alias="designConfig")
     preview_glb_url: str | None = Field(default=None, alias="previewGlbUrl")
-    preview_status: Literal["none", "ready", "failed"] = Field(default="none", alias="previewStatus")
+    preview_status: Literal["none", "pending", "processing", "ready", "failed"] = Field(
+        default="pending",
+        alias="previewStatus",
+    )
     preview_error_message: str | None = Field(default=None, alias="previewErrorMessage")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")

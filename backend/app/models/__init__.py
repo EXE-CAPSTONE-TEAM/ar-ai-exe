@@ -1,13 +1,20 @@
 """SQLAlchemy model modules."""
 
 from app.models.entities import (
+    AssetStatus,
     Design,
     DesignAsset,
     DesignPreviewStatus,
     DesignStatus,
     ExportPackage,
     ExportStatus,
+    Job,
+    JobStatus,
+    JobType,
     ModelAsset,
+    Project,
+    ProjectSourceType,
+    ProjectStatus,
     ScanSession,
     ScanSource,
     ScanStatus,
@@ -15,13 +22,20 @@ from app.models.entities import (
 )
 
 __all__ = [
+    "AssetStatus",
     "Design",
     "DesignAsset",
     "DesignPreviewStatus",
     "DesignStatus",
     "ExportPackage",
     "ExportStatus",
+    "Job",
+    "JobStatus",
+    "JobType",
     "ModelAsset",
+    "Project",
+    "ProjectSourceType",
+    "ProjectStatus",
     "ScanSession",
     "ScanSource",
     "ScanStatus",

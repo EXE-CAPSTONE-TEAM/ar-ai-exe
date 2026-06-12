@@ -8,8 +8,10 @@ from app.db.database import get_db
 from app.models import User
 from app.schemas.design import DesignCreate, DesignResponse, DesignUpdate
 from app.schemas.export import ExportPackageResponse
+from app.schemas.job import JobResponse
 from app.services.designs import DesignService
 from app.services.export_packages import ExportPackageService
+from app.services.jobs import JobService
 
 
 router = APIRouter(prefix="/designs", tags=["designs"])
@@ -57,6 +59,18 @@ def update_design(
     service = DesignService(db)
     design = service.get_for_user(design_id, current_user)
     return service.response(service.update(design, payload.name, payload.config))
+
+
+@router.post("/{design_id}/bake", response_model=JobResponse)
+def bake_design(
+    design_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> JobResponse:
+    design_service = DesignService(db)
+    design = design_service.get_for_user(design_id, current_user)
+    job_service = JobService(db)
+    return job_service.response(job_service.enqueue_bake(design, current_user))
 
 
 @router.post("/{design_id}/export", response_model=ExportPackageResponse)

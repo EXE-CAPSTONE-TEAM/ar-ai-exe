@@ -7,9 +7,26 @@ export type User = {
   updatedAt?: string | null;
 };
 
+export type ProjectStatus = "draft" | "processing" | "ready" | "failed" | "archived";
+export type AssetStatus = "uploaded" | "processing" | "ready" | "failed";
+export type DesignStatus = "draft" | "published" | "archived" | "exported";
+export type PreviewStatus = "none" | "pending" | "processing" | "ready" | "failed";
+export type JobStatus = "queued" | "processing" | "completed" | "failed";
+
+export type Project = {
+  id: string;
+  name: string;
+  status: ProjectStatus;
+  thumbnailUrl?: string | null;
+  sourceType: "scan" | "uploaded_glb" | "uploaded_obj" | "template";
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ScanSession = {
   id: string;
   userId: string;
+  projectId?: string | null;
   status: string;
   sourceType: "scan" | "import";
   importName: string | null;
@@ -24,6 +41,7 @@ export type ScanSession = {
 
 export type ScanStatus = {
   id: string;
+  projectId?: string | null;
   status: string;
   sourceType: "scan" | "import";
   importName: string | null;
@@ -84,10 +102,15 @@ export type ReconstructionReadiness = {
 export type ModelAsset = {
   id: string;
   scanSessionId: string;
+  projectId?: string | null;
+  status?: AssetStatus;
+  sourceType?: "scan" | "uploaded_glb" | "uploaded_obj" | "template";
   glbUrl: string;
+  canonicalGlbUrl?: string | null;
   objUrl: string;
   mtlUrl: string;
   textureUrl: string;
+  textureUrls?: string[];
   metadataUrl: string;
   qualityReportUrl: string;
   objPackageZipUrl: string;
@@ -170,17 +193,20 @@ export type DesignConfig = {
   material: MaterialConfig;
   stickers: StickerLayer[];
   texts: TextLayer[];
+  camera?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 };
 
 export type Design = {
   id: string;
   userId: string;
+  projectId?: string | null;
   modelAssetId: string;
   name: string;
-  status: string;
+  status: DesignStatus | string;
   designConfig: DesignConfig;
   previewGlbUrl: string | null;
-  previewStatus: "none" | "ready" | "failed";
+  previewStatus: PreviewStatus;
   previewErrorMessage: string | null;
   createdAt: string;
   updatedAt: string;
@@ -191,7 +217,33 @@ export type ExportPackage = {
   designId: string;
   status: string;
   downloadUrl: string;
+  zipUrl?: string | null;
   files: string[];
   createdAt: string;
   updatedAt?: string | null;
+};
+
+export type EditorPermissions = {
+  canEdit: boolean;
+  canBake: boolean;
+  canExport: boolean;
+};
+
+export type EditorContext = {
+  project: Project;
+  modelAsset: ModelAsset | null;
+  latestDesign: Design | null;
+  permissions: EditorPermissions;
+};
+
+export type Job = {
+  id: string;
+  type: "bake";
+  status: JobStatus;
+  progress: number;
+  errorMessage: string | null;
+  designId?: string | null;
+  projectId?: string | null;
+  createdAt: string;
+  updatedAt: string;
 };

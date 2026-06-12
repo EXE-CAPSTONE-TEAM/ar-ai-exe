@@ -4,6 +4,7 @@ import type {
   DesignAssetSource,
   DesignConfig,
   ExportPackage,
+  Job,
   ModelAsset,
   ModelImportResponse,
   ReconstructionReadiness,
@@ -14,6 +15,7 @@ import type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 const TOKEN_STORAGE_KEY = "shoe-customizer-token";
+const CSRF_COOKIE_NAME = "kusshoes_csrf_token";
 
 export class ApiError extends Error {
   constructor(
@@ -25,11 +27,13 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(apiUrl(path), {
     ...options,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...authHeader(),
+      ...csrfHeader(options.method),
       ...options.headers,
     },
   });
@@ -44,15 +48,37 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 async function errorMessage(response: Response): Promise<string> {
   try {
     const payload = await response.json();
+    if (payload?.error?.message) {
+      return String(payload.error.message);
+    }
     return typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
   } catch {
     return response.statusText;
   }
 }
 
+function apiUrl(pathOrUrl: string): string {
+  if (/^https?:\/\//i.test(pathOrUrl)) {
+    return pathOrUrl;
+  }
+  return `${API_BASE_URL}${pathOrUrl}`;
+}
+
 function authHeader(): Record<string, string> {
   const token = localStorage.getItem(TOKEN_STORAGE_KEY);
   return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function csrfHeader(method: string | undefined): Record<string, string> {
+  const normalizedMethod = (method ?? "GET").toUpperCase();
+  if (!["POST", "PUT", "PATCH", "DELETE"].includes(normalizedMethod)) {
+    return {};
+  }
+  const csrfToken = document.cookie
+    .split("; ")
+    .find((value) => value.startsWith(`${CSRF_COOKIE_NAME}=`))
+    ?.split("=")[1];
+  return csrfToken ? { "X-CSRF-Token": decodeURIComponent(csrfToken) } : {};
 }
 
 function storeToken(accessToken: string): void {
@@ -80,6 +106,11 @@ export const api = {
 
   logout(): void {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
+    void fetch(apiUrl("/api/auth/logout"), {
+      method: "POST",
+      credentials: "include",
+      headers: csrfHeader("POST"),
+    });
   },
 
   async register(name: string, email: string, password: string): Promise<User> {
@@ -129,6 +160,9 @@ export const api = {
     form.append("name", payload.name);
     form.append("format", payload.format);
     form.append("metadata", JSON.stringify(payload.metadata));
+    if (payload.projectId) {
+      form.append("projectId", payload.projectId);
+    }
     if (payload.model) {
       form.append("model", payload.model);
     }
@@ -144,7 +178,8 @@ export const api = {
 
     const response = await fetch(`${API_BASE_URL}/api/models/import`, {
       method: "POST",
-      headers: authHeader(),
+      credentials: "include",
+      headers: { ...authHeader(), ...csrfHeader("POST") },
       body: form,
     });
     if (!response.ok) {
@@ -158,9 +193,10 @@ export const api = {
     form.append("file", file);
     form.append("sourceType", sourceType);
 
-    const response = await fetch(`${API_BASE_URL}/api/design-assets`, {
+    const response = await fetch(apiUrl("/api/design-assets"), {
       method: "POST",
-      headers: authHeader(),
+      credentials: "include",
+      headers: { ...authHeader(), ...csrfHeader("POST") },
       body: form,
     });
     if (!response.ok) {
@@ -170,7 +206,8 @@ export const api = {
   },
 
   async fetchDesignAssetBlobUrl(assetId: string): Promise<string> {
-    const response = await fetch(`${API_BASE_URL}/api/design-assets/${assetId}/download`, {
+    const response = await fetch(apiUrl(`/api/design-assets/${assetId}/download`), {
+      credentials: "include",
       headers: authHeader(),
     });
     if (!response.ok) {
@@ -180,7 +217,8 @@ export const api = {
   },
 
   async fetchModelBlobUrl(modelAsset: ModelAsset): Promise<string> {
-    const response = await fetch(`${API_BASE_URL}${modelAsset.glbUrl}`, {
+    const response = await fetch(apiUrl(modelAsset.canonicalGlbUrl ?? modelAsset.glbUrl), {
+      credentials: "include",
       headers: authHeader(),
     });
     if (!response.ok) {
@@ -193,7 +231,9 @@ export const api = {
     if (!design.previewGlbUrl) {
       return null;
     }
-    const response = await fetch(`${API_BASE_URL}${design.previewGlbUrl}`, {
+    const separator = design.previewGlbUrl.includes("?") ? "&" : "?";
+    const response = await fetch(apiUrl(`${design.previewGlbUrl}${separator}t=${Date.now()}`), {
+      credentials: "include",
       headers: authHeader(),
       cache: "no-store",
     });
@@ -227,8 +267,19 @@ export const api = {
     });
   },
 
+  async bakeDesign(designId: string): Promise<Job> {
+    return request<Job>(`/api/designs/${designId}/bake`, {
+      method: "POST",
+    });
+  },
+
+  async getJob(jobId: string): Promise<Job> {
+    return request<Job>(`/api/jobs/${jobId}`);
+  },
+
   async downloadExport(exportPackage: ExportPackage): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}${exportPackage.downloadUrl}`, {
+    const response = await fetch(apiUrl(exportPackage.zipUrl ?? exportPackage.downloadUrl), {
+      credentials: "include",
       headers: authHeader(),
     });
     if (!response.ok) {
@@ -239,7 +290,8 @@ export const api = {
   },
 
   async downloadModelFile(urlPath: string, filename: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}${urlPath}`, {
+    const response = await fetch(apiUrl(urlPath), {
+      credentials: "include",
       headers: authHeader(),
     });
     if (!response.ok) {
@@ -254,6 +306,7 @@ export type ModelImportPayload = {
   name: string;
   format: "glb" | "obj";
   metadata: ScanMetadata;
+  projectId?: string | null;
   model?: File | null;
   mtl?: File | null;
   texture?: File | null;
