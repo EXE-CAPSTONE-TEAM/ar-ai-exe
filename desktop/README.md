@@ -59,6 +59,15 @@ window with `?desktop=1`. The desktop launcher accepts either:
 After a project is selected, the app loads the same editor context endpoint used
 by the web editor.
 
+On Windows, if Application Control blocks the generated debug executable after a
+successful compile, unblock the generated file and run it again while the Vite
+server is still running:
+
+```powershell
+Unblock-File .\src-tauri\target\debug\kusshoes-editor-desktop.exe
+.\src-tauri\target\debug\kusshoes-editor-desktop.exe
+```
+
 ## Build
 
 ```powershell
