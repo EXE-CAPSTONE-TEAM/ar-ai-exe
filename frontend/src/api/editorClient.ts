@@ -1,6 +1,6 @@
 import type { Design, DesignConfig, EditorContext, ExportPackage, Job, User } from "../types";
+import { apiUrl } from "./runtimeConfig";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 const TOKEN_STORAGE_KEY = "shoe-customizer-token";
 const CSRF_COOKIE_NAME = "kusshoes_csrf_token";
 
@@ -94,13 +94,6 @@ async function readError(response: Response): Promise<{ code: string; message: s
     // Fall through to statusText.
   }
   return { code: "API_ERROR", message: response.statusText };
-}
-
-function apiUrl(pathOrUrl: string): string {
-  if (/^https?:\/\//i.test(pathOrUrl)) {
-    return pathOrUrl;
-  }
-  return `${API_BASE_URL}${pathOrUrl}`;
 }
 
 function authHeader(): Record<string, string> {

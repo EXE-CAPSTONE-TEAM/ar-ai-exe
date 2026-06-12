@@ -99,6 +99,40 @@ export type ReconstructionReadiness = {
   blockingReasons: string[];
 };
 
+export type EditorReadiness = {
+  ready: boolean;
+  message: string;
+  previewRenderer: {
+    status: "installed" | "missing" | "failed" | string;
+    available: boolean;
+    path: string | null;
+    message: string;
+  };
+  settings: Record<string, string | boolean>;
+};
+
+export type DesktopRuntime = {
+  apiBaseUrl: string;
+  backendStatus: "starting" | "ready" | "failed" | string;
+  blenderStatus: "missing" | "downloading" | "installed" | "failed" | string;
+  demoProjectStatus: "missing" | "ready" | "repairing" | "failed" | string;
+  diagnosticSummary: string;
+  backendPort: number;
+  storagePath: string;
+  blenderPath: string;
+  logsPath: string;
+  appVersion: string;
+  lastError?: string | null;
+};
+
+export type InstallProgress = {
+  name: string;
+  status: "missing" | "downloading" | "installed" | "failed" | string;
+  message: string;
+  percent: number;
+  path?: string | null;
+};
+
 export type ModelAsset = {
   id: string;
   scanSessionId: string;

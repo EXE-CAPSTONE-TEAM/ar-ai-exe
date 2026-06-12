@@ -19,7 +19,7 @@ from app.models import (
     ScanSession,
     User,
 )
-from app.services.jobs import run_job
+from app.services.jobs import JobService, run_job
 from app.services.projects import ProjectService
 
 
@@ -150,3 +150,46 @@ def test_run_job_marks_bake_job_completed(monkeypatch) -> None:
     assert updated_job is not None
     assert updated_job.status == JobStatus.COMPLETED
     assert updated_job.progress == 100
+
+
+def test_enqueue_bake_uses_inline_fallback_when_queue_is_unavailable(monkeypatch) -> None:
+    db = make_session()
+    user = User(id="user_001", name="Demo", email="demo@example.com")
+    design = Design(
+        id="design_001",
+        user_id=user.id,
+        project_id="proj_001",
+        model_asset_id="model_001",
+        name="Draft",
+        design_config_path="designs/design_001/design_config.json",
+        status="draft",
+        preview_status=DesignPreviewStatus.PENDING,
+    )
+    db.add_all([user, design])
+    db.commit()
+
+    def fail_enqueue(_job_id: str) -> str:
+        raise RuntimeError("redis unavailable")
+
+    def complete_inline(job_id: str) -> None:
+        inline_job = db.get(Job, job_id)
+        assert inline_job is not None
+        inline_design = db.get(Design, inline_job.design_id)
+        assert inline_design is not None
+        inline_job.status = JobStatus.COMPLETED
+        inline_job.progress = 100
+        inline_job.error_message = None
+        inline_design.preview_status = DesignPreviewStatus.READY
+        inline_design.preview_error_message = None
+        db.commit()
+
+    monkeypatch.setattr("app.services.jobs.enqueue_job", fail_enqueue)
+    monkeypatch.setattr("app.services.jobs.run_job", complete_inline)
+
+    job = JobService(db).enqueue_bake(design, user)
+    updated_design = db.get(Design, design.id)
+
+    assert job.status == JobStatus.COMPLETED
+    assert job.progress == 100
+    assert updated_design is not None
+    assert updated_design.preview_status == DesignPreviewStatus.READY

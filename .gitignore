@@ -80,6 +80,7 @@ backend/storage/raw-scans/*/
 backend/storage/frames/*/
 backend/storage/models/*/
 backend/storage/designs/*/
+backend/storage/design_previews/*/
 backend/storage/exports/*/
 !backend/storage/raw-scans/.gitkeep
 !backend/storage/frames/.gitkeep
