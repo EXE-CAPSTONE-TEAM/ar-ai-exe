@@ -13,6 +13,10 @@ from app.schemas.job import JobResponse
 from app.services.designs import DesignService
 
 
+INLINE_BAKE_FALLBACK_ENVIRONMENTS = {"local", "dev", "development", "demo", "desktop", "test"}
+INLINE_BAKE_FAILURE_MESSAGE = "Preview bake failed. The draft was saved and can be retried."
+
+
 class JobService:
     def __init__(self, db: Session):
         self.db = db
@@ -37,21 +41,56 @@ class JobService:
         try:
             rq_job_id = enqueue_job(job.id)
         except Exception as exc:
+            if _should_run_inline_bake_fallback():
+                return self._run_inline_bake_fallback(job, design)
+
             job.status = JobStatus.FAILED
-            job.error_message = "Job queue is unavailable."
+            job.error_message = "Preview processing is temporarily unavailable."
             job.updated_at = datetime.utcnow()
             design.preview_status = DesignPreviewStatus.FAILED
-            design.preview_error_message = "Preview bake could not be queued."
+            design.preview_error_message = "Preview processing is temporarily unavailable."
             self.db.commit()
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Job queue is unavailable.",
+                detail="Preview processing is temporarily unavailable.",
             ) from exc
 
         job.rq_job_id = rq_job_id
         self.db.commit()
         self.db.refresh(job)
         return job
+
+    def _run_inline_bake_fallback(self, job: Job, design: Design) -> Job:
+        job.status = JobStatus.PROCESSING
+        job.progress = 5
+        job.error_message = None
+        job.updated_at = datetime.utcnow()
+        design.preview_status = DesignPreviewStatus.PROCESSING
+        design.preview_error_message = None
+        self.db.commit()
+
+        try:
+            run_job(job.id)
+        except Exception:
+            self.db.rollback()
+            refreshed_job = self.db.get(Job, job.id)
+            refreshed_design = self.db.get(Design, design.id)
+            if refreshed_job:
+                _fail_job(refreshed_job, INLINE_BAKE_FAILURE_MESSAGE)
+            if refreshed_design:
+                refreshed_design.preview_status = DesignPreviewStatus.FAILED
+                refreshed_design.preview_error_message = INLINE_BAKE_FAILURE_MESSAGE
+                refreshed_design.preview_updated_at = datetime.utcnow()
+            self.db.commit()
+
+        self.db.expire_all()
+        refreshed_job = self.db.get(Job, job.id)
+        if not refreshed_job:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Preview processing could not be completed.",
+            )
+        return refreshed_job
 
     def get_for_user(self, job_id: str, user: User) -> Job:
         job = self.db.get(Job, job_id)
@@ -85,6 +124,12 @@ def enqueue_job(job_id: str) -> str:
         job_timeout=settings.rq_job_timeout_seconds,
     )
     return rq_job.id
+
+
+def _should_run_inline_bake_fallback() -> bool:
+    settings = get_settings()
+    environment = settings.environment.strip().lower()
+    return settings.enable_inline_bake_fallback or environment in INLINE_BAKE_FALLBACK_ENVIRONMENTS
 
 
 def run_job(job_id: str) -> None:

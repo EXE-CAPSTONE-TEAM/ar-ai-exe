@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     rq_queue_name: str = "kusshoes-jobs"
     rq_job_timeout_seconds: int = 7200
+    enable_inline_bake_fallback: bool = False
 
     enable_real_reconstruction: bool = True
     colmap_bin: str = "colmap"

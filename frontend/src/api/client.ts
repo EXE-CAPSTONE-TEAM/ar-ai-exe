@@ -3,6 +3,7 @@ import type {
   DesignAsset,
   DesignAssetSource,
   DesignConfig,
+  EditorReadiness,
   ExportPackage,
   Job,
   ModelAsset,
@@ -12,8 +13,8 @@ import type {
   ScanSession,
   User,
 } from "../types";
+import { apiUrl, getApiBaseUrl } from "./runtimeConfig";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 const TOKEN_STORAGE_KEY = "shoe-customizer-token";
 const CSRF_COOKIE_NAME = "kusshoes_csrf_token";
 
@@ -57,13 +58,6 @@ async function errorMessage(response: Response): Promise<string> {
   }
 }
 
-function apiUrl(pathOrUrl: string): string {
-  if (/^https?:\/\//i.test(pathOrUrl)) {
-    return pathOrUrl;
-  }
-  return `${API_BASE_URL}${pathOrUrl}`;
-}
-
 function authHeader(): Record<string, string> {
   const token = localStorage.getItem(TOKEN_STORAGE_KEY);
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -98,7 +92,9 @@ function downloadBlob(blob: Blob, filename: string): void {
 }
 
 export const api = {
-  baseUrl: API_BASE_URL,
+  get baseUrl(): string {
+    return getApiBaseUrl();
+  },
 
   hasToken(): boolean {
     return Boolean(localStorage.getItem(TOKEN_STORAGE_KEY));
@@ -147,6 +143,10 @@ export const api = {
     return request<ReconstructionReadiness>("/api/system/reconstruction-readiness");
   },
 
+  async getEditorReadiness(): Promise<EditorReadiness> {
+    return request<EditorReadiness>("/api/system/editor-readiness");
+  },
+
   async getScanSession(scanSessionId: string): Promise<ScanSession> {
     return request<ScanSession>(`/api/scan-sessions/${scanSessionId}`);
   },
@@ -176,7 +176,7 @@ export const api = {
       form.append("package", payload.package);
     }
 
-    const response = await fetch(`${API_BASE_URL}/api/models/import`, {
+    const response = await fetch(apiUrl("/api/models/import"), {
       method: "POST",
       credentials: "include",
       headers: { ...authHeader(), ...csrfHeader("POST") },

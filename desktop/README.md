@@ -1,49 +1,63 @@
 # KusShoes Desktop Editor
 
-This folder contains the Tauri desktop shell for the existing KusShoes web editor.
-The desktop app does not fork editor logic; it builds and packages `../frontend`.
+This folder contains the Windows-first Tauri beta shell for the existing
+KusShoes web editor. The desktop app does not fork editor logic; it packages
+`../frontend` and starts a local FastAPI backend sidecar.
 
-## Architecture
+## Beta Scope
+
+- External tester flow: install, open app, open demo project, edit stickers/text,
+  save draft, bake preview, export.
+- No Docker, Redis, terminal, COLMAP, OpenMVS, or scan-video reconstruction in
+  the desktop beta.
+- Blender is the only heavyweight runtime dependency. It is used for import
+  cleanup, preview bake, and export.
 
 ```mermaid
 flowchart TD
-    A["desktop/src-tauri"] --> B["Tauri app shell"]
-    B --> C["Dev: Vite at 127.0.0.1:5173"]
-    B --> D["Build: ../frontend/dist"]
-    C --> E["React editor"]
-    D --> E
-    E --> F["Backend API via VITE_API_BASE_URL"]
+    A["KusShoes Desktop"] --> B["Tauri runtime manager"]
+    B --> C["Local FastAPI sidecar"]
+    C --> D["SQLite + storage under Windows app data"]
+    C --> E["Seed demo from data/3DModel.glb"]
+    B --> F["Preview renderer status"]
+    F --> G["Portable Blender under app data"]
+    B --> H["React editor with desktop runtime API base URL"]
 ```
 
-## Prerequisites
+## Runtime Data
+
+Desktop runtime data is outside the repo:
+
+```text
+%LOCALAPPDATA%\KusShoes Editor\
+  runtime\logs\
+  runtime\tools\blender\
+  storage\app.db
+  storage\models\
+  storage\designs\
+  storage\exports\
+```
+
+The backend sidecar sets desktop defaults:
+
+```env
+ENVIRONMENT=desktop
+DATABASE_AUTO_CREATE_TABLES=true
+ENABLE_INLINE_BAKE_FALLBACK=true
+ENABLE_REAL_RECONSTRUCTION=false
+AUTH_COOKIE_SECURE=false
+```
+
+## Development
+
+Prerequisites for developers:
 
 - Node.js 20 or newer.
 - Rust stable toolchain.
-- Platform WebView runtime. Windows uses Microsoft Edge WebView2.
-- Backend API, Redis, and worker running when save/bake/export is needed.
+- Python backend `.venv` already set up.
+- Microsoft Edge WebView2 runtime on Windows.
 
-## Environment
-
-Create `frontend/.env.desktop` from the example in this folder:
-
-```powershell
-Copy-Item desktop\frontend.env.desktop.example frontend\.env.desktop
-```
-
-For local development, keep:
-
-```env
-VITE_API_BASE_URL=http://127.0.0.1:8000
-VITE_MARKETING_LOGIN_URL=http://127.0.0.1:5174/login
-VITE_DESKTOP_SHELL=true
-VITE_DESKTOP_DEMO_PROJECT_ID=proj_desktop_demo
-```
-
-For staging or production builds, replace `VITE_API_BASE_URL` and
-`VITE_MARKETING_LOGIN_URL` with the target environment URLs before packaging.
-Do not put secrets in these files; Vite variables are bundled into the app.
-
-## Development
+Run the desktop shell:
 
 ```powershell
 cd desktop
@@ -51,45 +65,52 @@ npm install
 npm run dev
 ```
 
-`npm run dev` starts the existing frontend Vite server and launches the Tauri
-window with `?desktop=1`. The desktop launcher accepts either:
+In development, if no packaged sidecar exists, the Tauri runtime manager starts:
 
-- a raw project id such as `proj_...`
-- a web editor URL such as `https://app.example.com/editor/proj_...`
-- the configured demo project button when `VITE_DESKTOP_DEMO_PROJECT_ID` is set
-
-After a project is selected, the app loads the same editor context endpoint used
-by the web editor.
-
-## Seed Demo Project
-
-The local desktop demo uses this deterministic project id:
-
-```text
-proj_desktop_demo
+```powershell
+backend\.venv\Scripts\python.exe -m app.desktop_entrypoint
 ```
 
-Seed it from the bundled sample model:
+The first screen opens with `?desktop=1`, starts the local backend, seeds
+`proj_desktop_demo` from `data/3DModel.glb`, and shows:
+
+- Open demo project
+- Open project URL / project id
+- Import GLB/OBJ
+- Diagnostics actions
+
+## Preview Renderer Manifest
+
+The dependency manifest lives at:
+
+```text
+desktop/dependencies/blender.windows.json
+```
+
+Before a release build, replace the placeholder `sha256` with the official
+checksum for the configured Blender archive. The installer refuses to download
+when the checksum is missing; this is intentional fail-safe behavior.
+
+## Build Backend Sidecar
+
+Build the Windows sidecar executable into `desktop/sidecars/`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\desktop\scripts\build-backend-sidecar.ps1
+```
+
+The script expects PyInstaller to be available in `backend\.venv`. If it is not
+installed, install it in the backend virtual environment first:
 
 ```powershell
 cd backend
-.\.venv\Scripts\python -m app.scripts.seed_desktop_demo_project --model ..\data\3DModel.glb
+.\.venv\Scripts\python -m pip install pyinstaller
 ```
 
-Then run the backend and desktop app. In the desktop launcher, click **Open Demo
-Project**. The button logs in with the backend demo account and opens the seeded
-project.
+Generated sidecar binaries are ignored by git. Tauri bundles
+`desktop/sidecars/*` when files are present.
 
-On Windows, if Application Control blocks the generated debug executable after a
-successful compile, unblock the generated file and run it again while the Vite
-server is still running:
-
-```powershell
-Unblock-File .\src-tauri\target\debug\kusshoes-editor-desktop.exe
-.\src-tauri\target\debug\kusshoes-editor-desktop.exe
-```
-
-## Build
+## Build Desktop App
 
 ```powershell
 cd desktop
@@ -97,28 +118,28 @@ npm install
 npm run build
 ```
 
-The build command runs the frontend build in desktop mode and packages
-`frontend/dist` through Tauri.
+The Tauri build packages `frontend/dist`, `desktop/dependencies/*`,
+`desktop/sidecars/*`, and `data/3DModel.glb`.
 
-## Auth Notes
+## Diagnostics
 
-The desktop app keeps the current backend contract:
+The app exposes runtime commands for:
 
-- Cookie auth works when the marketing login flow can redirect back to the
-  desktop WebView URL.
-- Bearer fallback still works for mobile/demo flows because the shared frontend
-  API client has not been forked.
-- Marketing should allow desktop redirect URLs before production desktop login
-  is enabled.
+- backend status and selected local port
+- Blender install status and path
+- storage/log paths
+- copy diagnostics
+- open logs folder
+- restart backend
 
-## Current Scope
+Primary UI messages stay user-friendly. Technical command output is written to
+runtime logs for testers to send to the team.
 
-This is a packaging shell for the existing editor. It intentionally does not add:
+## Current Limitations
 
-- offline backend behavior
-- local project database
-- native file import/export dialogs
-- custom deep links such as `kusshoes://editor/{projectId}`
-
-Those should be planned separately because they affect auth, permissions, and
-desktop operating-system integration.
+- The first-run Blender download is disabled until the release manifest has a
+  real SHA-256 checksum.
+- Import GLB/OBJ requires the Preview renderer because the backend normalizes
+  imported models through Blender.
+- The beta is Windows-first. macOS/Linux packaging should be planned
+  separately.

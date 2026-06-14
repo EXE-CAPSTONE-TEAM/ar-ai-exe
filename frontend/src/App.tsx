@@ -4,6 +4,8 @@ import {
   Cpu,
   HardDrive,
   ImagePlus,
+  Info,
+  Loader2,
   LogIn,
   Monitor,
   MousePointer2,
@@ -15,9 +17,16 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
-import { api, ApiError, designStorageKey } from "./api/client";
+import { api, designStorageKey } from "./api/client";
+import {
+  getDesktopRuntime,
+  installDesktopDependency,
+  openDiagnosticsFolder,
+  restartDesktopBackend,
+} from "./api/desktopRuntime";
 import type { ModelImportPayload } from "./api/client";
 import { editorClient } from "./api/editorClient";
+import { setApiBaseUrl } from "./api/runtimeConfig";
 import { EditorPanels } from "./components/Editor/EditorPanels";
 import { AppShell } from "./components/Layout/AppShell";
 import { MetadataPanel } from "./components/MetadataPanel/MetadataPanel";
@@ -28,9 +37,12 @@ import type {
   Design,
   DesignAssetSource,
   DesignConfig,
+  DesktopRuntime,
   EditorContext,
   EditorPermissions,
+  EditorReadiness,
   ExportPackage,
+  InstallProgress,
   Job,
   ModelAsset,
   ReconstructionReadiness,
@@ -38,6 +50,12 @@ import type {
   TextLayer,
   User,
 } from "./types";
+import {
+  editorRouteStateLabel,
+  friendlyInlineMessage,
+  messageFromError,
+  noticeFromStatus,
+} from "./utils/editorMessages";
 
 const MARKETING_LOGIN_URL = import.meta.env.VITE_MARKETING_LOGIN_URL ?? "https://kusshoes.vn/login";
 const DESKTOP_DEMO_PROJECT_ID = import.meta.env.VITE_DESKTOP_DEMO_PROJECT_ID ?? "proj_desktop_demo";
@@ -47,7 +65,13 @@ export function App() {
   const isDesktopShell = useMemo(() => isDesktopShellLocation(), []);
   const editorProjectId = useMemo(() => editorProjectIdFromLocation(isDesktopShell), [isDesktopShell]);
   const isProjectEditor = Boolean(editorProjectId);
-  const editorContext = useEditorContext(editorProjectId);
+  const [desktopRuntime, setDesktopRuntime] = useState<DesktopRuntime | null>(null);
+  const [desktopRuntimeError, setDesktopRuntimeError] = useState<string | null>(null);
+  const [isDesktopRuntimeLoading, setIsDesktopRuntimeLoading] = useState(isDesktopShell);
+  const [editorReadiness, setEditorReadiness] = useState<EditorReadiness | null>(null);
+  const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
+  const desktopRuntimeReady = !isDesktopShell || desktopRuntime?.backendStatus === "ready";
+  const editorContext = useEditorContext(desktopRuntimeReady ? editorProjectId : null);
   const [user, setUser] = useState<User | null>(null);
   const [scanId, setScanId] = useState(() => new URLSearchParams(window.location.search).get("scanId") ?? "");
   const [scanSession, setScanSession] = useState<ScanSession | null>(null);
@@ -80,11 +104,21 @@ export function App() {
   const [desktopProjectInput, setDesktopProjectInput] = useState("");
   const [desktopLaunchError, setDesktopLaunchError] = useState<string | null>(null);
   const [isDesktopDemoOpening, setIsDesktopDemoOpening] = useState(false);
+  const [isDesktopImportOpen, setIsDesktopImportOpen] = useState(false);
   const assetPreviewUrlsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    void loadReadiness();
-    if (isProjectEditor) {
+    if (!isDesktopShell) {
+      return;
+    }
+    void refreshDesktopRuntime();
+  }, [isDesktopShell]);
+
+  useEffect(() => {
+    if (!isProjectEditor && !isDesktopShell) {
+      void loadReadiness();
+    }
+    if (isProjectEditor || isDesktopShell) {
       return;
     }
     if (!api.hasToken()) {
@@ -98,7 +132,7 @@ export function App() {
         api.logout();
         setStatusMessage("Session expired. Sign in again.");
     });
-  }, [isProjectEditor]);
+  }, [isDesktopShell, isProjectEditor]);
 
   useEffect(() => {
     if (!isProjectEditor) {
@@ -165,6 +199,19 @@ export function App() {
   const canLoad = useMemo(() => scanId.trim().length > 0 && Boolean(user), [scanId, user]);
   const activeModelUrl = previewModelUrl ?? modelUrl;
   const hiddenLayerIds = previewModelUrl ? bakedLayerIds : [];
+  const canUsePreviewRenderer =
+    !isDesktopShell ||
+    editorReadiness?.previewRenderer.available === true ||
+    desktopRuntime?.blenderStatus === "installed";
+  const isEditorBusy =
+    isSaving ||
+    isExporting ||
+    isImporting ||
+    isDesktopRuntimeLoading ||
+    editorContext.state === "AUTH_CHECKING" ||
+    editorContext.state === "PROJECT_LOADING";
+  const friendlyPreviewErrorMessage = previewErrorMessage ? friendlyInlineMessage(previewErrorMessage) : null;
+  const friendlyExportMessage = exportMessage ? friendlyInlineMessage(exportMessage) : null;
 
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -203,6 +250,104 @@ export function App() {
     } catch (error) {
       setReadiness(null);
       setStatusMessage(messageFromError(error));
+    }
+  }
+
+  async function loadEditorReadiness() {
+    try {
+      setEditorReadiness(await api.getEditorReadiness());
+    } catch {
+      setEditorReadiness(null);
+    }
+  }
+
+  async function refreshDesktopRuntime() {
+    setIsDesktopRuntimeLoading(true);
+    setDesktopRuntimeError(null);
+    try {
+      const runtime = await getDesktopRuntime();
+      setApiBaseUrl(runtime.apiBaseUrl);
+      setDesktopRuntime(runtime);
+      setStatusMessage(
+        runtime.backendStatus === "ready"
+          ? "EDITOR_READY"
+          : "Ứng dụng chưa khởi động được backend local. Vui lòng mở Diagnostics hoặc thử Restart.",
+      );
+      if (runtime.backendStatus === "ready") {
+        await loadEditorReadiness();
+      }
+    } catch (error) {
+      const message = messageFromError(error);
+      setDesktopRuntimeError(message);
+      setStatusMessage(message);
+    } finally {
+      setIsDesktopRuntimeLoading(false);
+    }
+  }
+
+  async function restartDesktopRuntimeBackend() {
+    setIsDesktopRuntimeLoading(true);
+    setDesktopRuntimeError(null);
+    try {
+      const runtime = await restartDesktopBackend();
+      setApiBaseUrl(runtime.apiBaseUrl);
+      setDesktopRuntime(runtime);
+      setStatusMessage(runtime.backendStatus === "ready" ? "EDITOR_READY" : "Ứng dụng chưa khởi động được backend local.");
+      if (runtime.backendStatus === "ready") {
+        await loadEditorReadiness();
+      }
+    } catch (error) {
+      const message = messageFromError(error);
+      setDesktopRuntimeError(message);
+      setStatusMessage(message);
+    } finally {
+      setIsDesktopRuntimeLoading(false);
+    }
+  }
+
+  async function installPreviewRenderer() {
+    setInstallProgress({
+      name: "blender",
+      status: "downloading",
+      message: "Ứng dụng đang chuẩn bị cài Preview renderer.",
+      percent: 5,
+    });
+    try {
+      const progress = await installDesktopDependency("blender");
+      setInstallProgress(progress);
+      await refreshDesktopRuntime();
+      if (progress.status === "installed") {
+        setStatusMessage("Preview renderer đã sẵn sàng.");
+      } else {
+        setStatusMessage("Preview renderer cần được cấu hình trước khi cài đặt.");
+      }
+    } catch (error) {
+      const message = messageFromError(error);
+      setInstallProgress({
+        name: "blender",
+        status: "failed",
+        message,
+        percent: 0,
+      });
+      setStatusMessage(message);
+    }
+  }
+
+  async function openDesktopDiagnostics() {
+    try {
+      await openDiagnosticsFolder();
+    } catch (error) {
+      setStatusMessage(messageFromError(error));
+    }
+  }
+
+  async function copyDesktopDiagnostics() {
+    const summary = desktopRuntime?.diagnosticSummary ?? desktopRuntimeError ?? "Desktop diagnostics are not available.";
+    try {
+      await navigator.clipboard.writeText(summary);
+      setStatusMessage("Đã copy thông tin diagnostics.");
+    } catch {
+      setStatusMessage("Ứng dụng chưa copy được diagnostics. Vui lòng mở Logs để xem chi tiết.");
     }
   }
 
@@ -636,26 +781,91 @@ export function App() {
     }
   }
 
+  async function importDesktopModel(payload: ModelImportPayload) {
+    setIsImporting(true);
+    setDesktopLaunchError(null);
+    setStatusMessage("Đang import model vào desktop project.");
+    try {
+      await api.demoLogin();
+      const imported = await api.importModel(payload);
+      const projectId = sanitizeProjectId(imported.scanSession.projectId ?? "");
+      if (!projectId) {
+        throw new Error("Ứng dụng chưa tạo được project từ model vừa import. Vui lòng thử lại.");
+      }
+      openDesktopProjectId(projectId);
+    } catch (error) {
+      const message = friendlyInlineMessage(messageFromError(error));
+      setDesktopLaunchError(message);
+      setStatusMessage(message);
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
   return (
     <AppShell user={user} onLogout={logout}>
       <main className="workspace" id="main-workspace">
         {isDesktopShell && !isProjectEditor ? (
-          <DesktopProjectLauncher
-            value={desktopProjectInput}
-            errorMessage={desktopLaunchError}
-            demoProjectId={DESKTOP_DEMO_PROJECT_ID}
-            isDemoOpening={isDesktopDemoOpening}
-            onValueChange={(value) => {
-              setDesktopProjectInput(value);
-              setDesktopLaunchError(null);
-            }}
-            onSubmit={openDesktopProject}
-            onOpenDemo={openDesktopDemoProject}
-          />
+          <div className="desktop-launcher-layout">
+            <DesktopRuntimePanel
+              runtime={desktopRuntime}
+              editorReadiness={editorReadiness}
+              installProgress={installProgress}
+              isLoading={isDesktopRuntimeLoading}
+              errorMessage={desktopRuntimeError}
+              onRefresh={refreshDesktopRuntime}
+              onRestartBackend={restartDesktopRuntimeBackend}
+              onInstallRenderer={installPreviewRenderer}
+              onOpenDiagnostics={openDesktopDiagnostics}
+              onCopyDiagnostics={copyDesktopDiagnostics}
+            />
+            <div className="desktop-launcher-stack">
+              <DesktopProjectLauncher
+                value={desktopProjectInput}
+                errorMessage={desktopLaunchError}
+                demoProjectId={DESKTOP_DEMO_PROJECT_ID}
+                isDemoOpening={isDesktopDemoOpening}
+                isImportOpen={isDesktopImportOpen}
+                backendReady={desktopRuntimeReady}
+                onValueChange={(value) => {
+                  setDesktopProjectInput(value);
+                  setDesktopLaunchError(null);
+                }}
+                onSubmit={openDesktopProject}
+                onOpenDemo={openDesktopDemoProject}
+                onToggleImport={() => setIsDesktopImportOpen((current) => !current)}
+              />
+              {isDesktopImportOpen ? (
+                <section className="desktop-import-card">
+                  {canUsePreviewRenderer ? (
+                    <ModelImportPanel
+                      isBusy={isImporting || !desktopRuntimeReady}
+                      onImport={importDesktopModel}
+                    />
+                  ) : (
+                    <div className="desktop-import-blocked">
+                      <Wrench size={20} aria-hidden="true" />
+                      <div>
+                        <h2>Preview renderer cần cài đặt</h2>
+                        <p>
+                          Import GLB/OBJ cần renderer local để chuẩn hóa model trước khi mở trong editor.
+                          Bạn vẫn có thể mở demo project để review giao diện trước.
+                        </p>
+                      </div>
+                      <button type="button" className="primary-button" onClick={installPreviewRenderer}>
+                        <Wrench size={16} aria-hidden="true" />
+                        Cài Preview renderer
+                      </button>
+                    </div>
+                  )}
+                </section>
+              ) : null}
+            </div>
+          </div>
         ) : isProjectEditor && !user ? (
           <EditorRouteState
             state={editorContext.state}
-            message={editorContext.errorMessage ?? "Redirecting to login."}
+            message={friendlyInlineMessage(editorContext.errorMessage ?? "Redirecting to login.")}
           />
         ) : !user ? (
           <AuthPanel
@@ -664,7 +874,7 @@ export function App() {
             email={authEmail}
             password={authPassword}
             isBusy={isAuthBusy}
-            statusMessage={statusMessage}
+            statusMessage={friendlyInlineMessage(statusMessage)}
             onModeChange={setAuthMode}
             onNameChange={setAuthName}
             onEmailChange={setAuthEmail}
@@ -722,10 +932,26 @@ export function App() {
                   </>
                 )}
               </div>
-              <span className="status-line">{statusMessage}</span>
             </section>
 
-            <ReadinessBanner readiness={readiness} onRefresh={loadReadiness} />
+            <EditorStatusNotice message={statusMessage} isBusy={isEditorBusy} />
+
+            {isDesktopShell ? (
+              <DesktopRuntimePanel
+                runtime={desktopRuntime}
+                editorReadiness={editorReadiness}
+                installProgress={installProgress}
+                isLoading={isDesktopRuntimeLoading}
+                errorMessage={desktopRuntimeError}
+                onRefresh={refreshDesktopRuntime}
+                onRestartBackend={restartDesktopRuntimeBackend}
+                onInstallRenderer={installPreviewRenderer}
+                onOpenDiagnostics={openDesktopDiagnostics}
+                onCopyDiagnostics={copyDesktopDiagnostics}
+              />
+            ) : (
+              <ReadinessBanner readiness={readiness} onRefresh={loadReadiness} />
+            )}
 
             <WorkflowGuide
               hasModel={Boolean(modelAsset && activeModelUrl)}
@@ -744,7 +970,7 @@ export function App() {
                 gizmoMode={gizmoMode}
                 hiddenLayerIds={hiddenLayerIds}
                 isSaving={isSaving}
-                previewErrorMessage={previewErrorMessage}
+                previewErrorMessage={friendlyPreviewErrorMessage}
                 surfaceApplyRequest={surfaceApplyRequest}
                 onConfigChange={handleConfigChange}
                 onActiveLayerChange={setActiveLayerId}
@@ -758,9 +984,9 @@ export function App() {
                 isSaving={isSaving}
                 isExporting={isExporting}
                 canEdit={!isProjectEditor || editorPermissions.canEdit}
-                canBake={!isProjectEditor || editorPermissions.canBake}
-                canExport={!isProjectEditor || editorPermissions.canExport}
-                exportMessage={exportMessage}
+                canBake={(!isProjectEditor || editorPermissions.canBake) && canUsePreviewRenderer}
+                canExport={(!isProjectEditor || editorPermissions.canExport) && canUsePreviewRenderer}
+                exportMessage={friendlyExportMessage}
                 exportPackage={exportPackage}
                 activeLayerId={activeLayerId}
                 meshBounds={meshBounds}
@@ -798,9 +1024,35 @@ function EditorRouteState({ state, message }: { state: string; message: string }
       <div className="empty-panel-callout">
         <RefreshCw size={22} aria-hidden="true" />
         <div>
-          <h2>{state}</h2>
+          <h2>{editorRouteStateLabel(state)}</h2>
           <p>{message}</p>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function EditorStatusNotice({ message, isBusy }: { message: string; isBusy: boolean }) {
+  const notice = noticeFromStatus(message, isBusy);
+  const role = notice.tone === "error" ? "alert" : "status";
+  const ariaLive = notice.tone === "error" ? "assertive" : "polite";
+
+  return (
+    <section className={`editor-status-notice ${notice.tone}`} role={role} aria-live={ariaLive}>
+      <span className="editor-status-icon">
+        {notice.tone === "loading" ? (
+          <Loader2 size={20} aria-hidden="true" />
+        ) : notice.tone === "success" ? (
+          <CheckCircle2 size={20} aria-hidden="true" />
+        ) : notice.tone === "warning" || notice.tone === "error" ? (
+          <AlertTriangle size={20} aria-hidden="true" />
+        ) : (
+          <Info size={20} aria-hidden="true" />
+        )}
+      </span>
+      <div className="editor-status-copy">
+        <h2>{notice.title}</h2>
+        <p>{notice.detail}</p>
       </div>
     </section>
   );
@@ -825,10 +1077,148 @@ function ProjectRouteSummary({
         Project ID
         <input value={projectId} readOnly />
       </label>
-      <span className="status-line">{state}</span>
+      <span className="status-line">{editorRouteStateLabel(state)}</span>
       <span className="status-line">
         {canEdit ? "Edit" : "View"} / {canBake ? "Bake" : "No bake"} / {canExport ? "Export" : "No export"}
       </span>
+    </div>
+  );
+}
+
+type DesktopRuntimePanelProps = {
+  runtime: DesktopRuntime | null;
+  editorReadiness: EditorReadiness | null;
+  installProgress: InstallProgress | null;
+  isLoading: boolean;
+  errorMessage: string | null;
+  onRefresh: () => void;
+  onRestartBackend: () => void;
+  onInstallRenderer: () => void;
+  onOpenDiagnostics: () => void;
+  onCopyDiagnostics: () => void;
+};
+
+function DesktopRuntimePanel({
+  runtime,
+  editorReadiness,
+  installProgress,
+  isLoading,
+  errorMessage,
+  onRefresh,
+  onRestartBackend,
+  onInstallRenderer,
+  onOpenDiagnostics,
+  onCopyDiagnostics,
+}: DesktopRuntimePanelProps) {
+  const backendStatus = runtime?.backendStatus ?? (isLoading ? "starting" : "failed");
+  const rendererStatus =
+    editorReadiness?.previewRenderer.available || runtime?.blenderStatus === "installed"
+      ? "installed"
+      : installProgress?.status === "downloading"
+        ? "downloading"
+        : runtime?.blenderStatus ?? "missing";
+  const demoStatus = runtime?.demoProjectStatus ?? "missing";
+  const rendererMessage =
+    installProgress?.message ??
+    friendlyRendererMessage(editorReadiness, runtime);
+
+  return (
+    <section className="desktop-runtime-panel" aria-label="Desktop editor readiness">
+      <div className="desktop-runtime-header">
+        <div>
+          <span className="studio-eyebrow">
+            <Monitor size={14} aria-hidden="true" />
+            Desktop beta runtime
+          </span>
+          <h2>Editor readiness</h2>
+          <p>
+            Desktop beta tập trung vào mở model, đặt sticker/text, bake preview và export.
+            Scan-to-3D không chạy trong bản này.
+          </p>
+        </div>
+        <div className="desktop-runtime-actions">
+          <button type="button" onClick={onRefresh} disabled={isLoading}>
+            <RefreshCw size={16} aria-hidden="true" />
+            Refresh
+          </button>
+          <button type="button" onClick={onOpenDiagnostics}>
+            <Wrench size={16} aria-hidden="true" />
+            Logs
+          </button>
+          <button type="button" onClick={onCopyDiagnostics}>
+            <Info size={16} aria-hidden="true" />
+            Copy diagnostics
+          </button>
+        </div>
+      </div>
+
+      <div className="desktop-runtime-grid">
+        <RuntimeStatusItem
+          title="Local backend"
+          status={backendStatus}
+          detail={
+            backendStatus === "ready"
+              ? `Ready at ${runtime?.apiBaseUrl ?? "local API"}`
+              : errorMessage ?? "Ứng dụng đang khởi động backend local."
+          }
+          actionLabel={backendStatus === "ready" ? undefined : "Restart backend"}
+          onAction={backendStatus === "ready" ? undefined : onRestartBackend}
+        />
+        <RuntimeStatusItem
+          title="Preview renderer"
+          status={rendererStatus}
+          detail={rendererMessage}
+          actionLabel={rendererStatus === "installed" ? undefined : "Install renderer"}
+          onAction={rendererStatus === "installed" ? undefined : onInstallRenderer}
+        />
+        <RuntimeStatusItem
+          title="Demo project"
+          status={demoStatus}
+          detail={
+            demoStatus === "ready"
+              ? "Demo project is ready for review."
+              : "Ứng dụng sẽ seed demo project khi backend local sẵn sàng."
+          }
+        />
+      </div>
+    </section>
+  );
+}
+
+function RuntimeStatusItem({
+  title,
+  status,
+  detail,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  status: string;
+  detail: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  const tone =
+    status === "ready" || status === "installed"
+      ? "ready"
+      : status === "starting" || status === "downloading"
+        ? "working"
+        : "blocked";
+  return (
+    <div className={`runtime-status-item ${tone}`}>
+      <div className="runtime-status-title">
+        {tone === "ready" ? <CheckCircle2 size={18} aria-hidden="true" /> : <AlertTriangle size={18} aria-hidden="true" />}
+        <div>
+          <strong>{title}</strong>
+          <span>{runtimeStatusLabel(status)}</span>
+        </div>
+      </div>
+      <p>{detail}</p>
+      {actionLabel && onAction ? (
+        <button type="button" onClick={onAction}>
+          {actionLabel}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -838,9 +1228,12 @@ type DesktopProjectLauncherProps = {
   errorMessage: string | null;
   demoProjectId: string;
   isDemoOpening: boolean;
+  isImportOpen: boolean;
+  backendReady: boolean;
   onValueChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onOpenDemo: () => void;
+  onToggleImport: () => void;
 };
 
 function DesktopProjectLauncher({
@@ -848,9 +1241,12 @@ function DesktopProjectLauncher({
   errorMessage,
   demoProjectId,
   isDemoOpening,
+  isImportOpen,
+  backendReady,
   onValueChange,
   onSubmit,
   onOpenDemo,
+  onToggleImport,
 }: DesktopProjectLauncherProps) {
   const hasDemoProject = Boolean(sanitizeProjectId(demoProjectId));
 
@@ -863,11 +1259,11 @@ function DesktopProjectLauncher({
           </span>
           <div>
             <h2>KusShoes Desktop Editor</h2>
-            <p>Open a backend project with the same editor used by the web route.</p>
+            <p>Mở demo project hoặc dán project URL. Ứng dụng tự quản lý backend local cho tester beta.</p>
           </div>
         </div>
         <label>
-          Project ID or editor URL
+          Project ID hoặc editor URL
           <input
             value={value}
             onChange={(event) => onValueChange(event.target.value)}
@@ -875,16 +1271,20 @@ function DesktopProjectLauncher({
             autoFocus
           />
         </label>
-        <button type="submit" className="primary-button">
+        <button type="submit" className="primary-button" disabled={!backendReady}>
           <Monitor size={16} aria-hidden="true" />
-          Open Editor
+          Mở editor
         </button>
         {hasDemoProject ? (
-          <button type="button" disabled={isDemoOpening} onClick={onOpenDemo}>
+          <button type="button" disabled={isDemoOpening || !backendReady} onClick={onOpenDemo}>
             <LogIn size={16} aria-hidden="true" />
-            {isDemoOpening ? "Opening Demo" : "Open Demo Project"}
+            {isDemoOpening ? "Đang mở demo" : "Mở demo project"}
           </button>
         ) : null}
+        <button type="button" disabled={!backendReady} onClick={onToggleImport}>
+          <ImagePlus size={16} aria-hidden="true" />
+          {isImportOpen ? "Ẩn import" : "Import GLB/OBJ"}
+        </button>
         {errorMessage ? <span className="status-line danger-text">{errorMessage}</span> : null}
       </form>
     </section>
@@ -1449,12 +1849,25 @@ function formatResource(resource: { available: number | null; required: number; 
   return `${resource.available.toFixed(1)}/${resource.required.toFixed(1)} ${resource.unit}`;
 }
 
-function messageFromError(error: unknown): string {
-  if (error instanceof ApiError) {
-    return `${error.status}: ${error.message}`;
+function friendlyRendererMessage(editorReadiness: EditorReadiness | null, runtime: DesktopRuntime | null): string {
+  if (editorReadiness?.previewRenderer.available || runtime?.blenderStatus === "installed") {
+    return "Preview renderer đã sẵn sàng để bake preview và export.";
   }
-  if (error instanceof Error) {
-    return error.message;
+  if (runtime?.blenderStatus === "failed" || editorReadiness?.previewRenderer.status === "failed") {
+    return "Ứng dụng chưa chuẩn bị được Preview renderer. Vui lòng thử cài lại hoặc mở Logs để gửi diagnostics cho team.";
   }
-  return "Unexpected error";
+  return "Preview renderer cần cài đặt để Save Draft, bake preview và export. Bạn vẫn có thể mở model và xem demo trước.";
+}
+
+function runtimeStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    ready: "Ready",
+    installed: "Installed",
+    starting: "Starting",
+    downloading: "Installing",
+    missing: "Needs setup",
+    failed: "Needs attention",
+    repairing: "Repairing",
+  };
+  return labels[status] ?? status;
 }

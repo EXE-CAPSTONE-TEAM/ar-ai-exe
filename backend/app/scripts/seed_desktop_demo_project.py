@@ -36,7 +36,16 @@ DEMO_DESIGN_ID = "design_desktop_demo"
 
 def main() -> None:
     args = parse_args()
-    model_path = args.model.resolve()
+    result = seed_demo_project(model_path=args.model, name=args.name, force=args.force)
+    print(json.dumps(result, indent=2))
+
+
+def seed_demo_project(
+    model_path: Path,
+    name: str = "KusShoes Desktop Demo",
+    force: bool = False,
+) -> dict[str, str]:
+    model_path = model_path.resolve()
     if not model_path.is_file():
         raise SystemExit(f"Model file not found: {model_path}")
 
@@ -44,12 +53,24 @@ def main() -> None:
     with SessionLocal() as db:
         user = UserService(db).get_or_create_demo_user()
 
-        project = upsert_project(db, user.id, args.name)
-        scan = upsert_scan(db, user.id, project.id, args.name)
+        project = upsert_project(db, user.id, name)
+        scan = upsert_scan(db, user.id, project.id, name)
+        existing_asset = db.scalar(select(ModelAsset).where(ModelAsset.scan_session_id == scan.id))
+        existing_design = db.get(Design, DEMO_DESIGN_ID)
+        if existing_asset and existing_design and not force:
+            return {
+                "projectId": project.id,
+                "scanSessionId": scan.id,
+                "modelAssetId": existing_asset.id,
+                "designId": existing_design.id,
+                "sourceModel": str(model_path),
+                "openUrl": f"/?desktop=1&projectId={project.id}",
+            }
+
         clear_previous_demo_records(db, project.id, scan.id)
 
         with tempfile.TemporaryDirectory() as temp_dir_name:
-            files = create_model_asset_files(Path(temp_dir_name), model_path, args.name)
+            files = create_model_asset_files(Path(temp_dir_name), model_path, name)
             asset = ModelAssetService(db).create_from_files(
                 scan_session_id=scan.id,
                 files=files,
@@ -61,22 +82,17 @@ def main() -> None:
             db.commit()
             db.refresh(asset)
 
-        design = create_demo_design(db, user.id, project.id, asset.id, args.name)
+        design = create_demo_design(db, user.id, project.id, asset.id, name)
         db.commit()
 
-        print(
-            json.dumps(
-                {
-                    "projectId": project.id,
-                    "scanSessionId": scan.id,
-                    "modelAssetId": asset.id,
-                    "designId": design.id,
-                    "sourceModel": str(model_path),
-                    "openUrl": f"/?desktop=1&projectId={project.id}",
-                },
-                indent=2,
-            )
-        )
+        return {
+            "projectId": project.id,
+            "scanSessionId": scan.id,
+            "modelAssetId": asset.id,
+            "designId": design.id,
+            "sourceModel": str(model_path),
+            "openUrl": f"/?desktop=1&projectId={project.id}",
+        }
 
 
 def parse_args() -> argparse.Namespace:
@@ -88,6 +104,7 @@ def parse_args() -> argparse.Namespace:
         help="Path to the GLB file used for the demo project.",
     )
     parser.add_argument("--name", default="KusShoes Desktop Demo", help="Demo project name.")
+    parser.add_argument("--force", action="store_true", help="Reset existing demo project records.")
     return parser.parse_args()
 
 

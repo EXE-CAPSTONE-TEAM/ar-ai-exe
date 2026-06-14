@@ -3,3 +3,5 @@ src-tauri/target/
 src-tauri/gen/
 dist/
 *.log
+sidecars/*
+!sidecars/.gitkeep
