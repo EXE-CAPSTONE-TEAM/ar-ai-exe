@@ -8,9 +8,7 @@ import {
   Loader2,
   LogIn,
   Monitor,
-  MousePointer2,
   RefreshCw,
-  Save,
   Search,
   UserPlus,
   Wrench,
@@ -212,6 +210,7 @@ export function App() {
     editorContext.state === "PROJECT_LOADING";
   const friendlyPreviewErrorMessage = previewErrorMessage ? friendlyInlineMessage(previewErrorMessage) : null;
   const friendlyExportMessage = exportMessage ? friendlyInlineMessage(exportMessage) : null;
+  const isSaved = Boolean(config && savedConfigFingerprint && configFingerprint(config) === savedConfigFingerprint);
 
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -953,16 +952,18 @@ export function App() {
               <ReadinessBanner readiness={readiness} onRefresh={loadReadiness} />
             )}
 
-            <WorkflowGuide
-              hasModel={Boolean(modelAsset && activeModelUrl)}
-              layerCount={(config?.stickers.length ?? 0) + (config?.texts.length ?? 0)}
-              hasActiveLayer={Boolean(activeLayerId)}
-              isSaved={Boolean(config && savedConfigFingerprint && configFingerprint(config) === savedConfigFingerprint)}
-              hasExportPackage={Boolean(exportPackage)}
-            />
-
             <section className="main-grid">
-              <MetadataPanel scanSession={scanSession} modelAsset={modelAsset} />
+              <MetadataPanel
+                scanSession={scanSession}
+                modelAsset={modelAsset}
+                config={config}
+                designName={designName}
+                activeLayerId={activeLayerId}
+                meshBounds={meshBounds}
+                isSaved={isSaved}
+                hasBakedPreview={Boolean(previewModelUrl)}
+                hasExportPackage={Boolean(exportPackage)}
+              />
               <ModelViewer
                 modelUrl={activeModelUrl}
                 config={config}
@@ -1009,14 +1010,6 @@ export function App() {
     </AppShell>
   );
 }
-
-type WorkflowGuideProps = {
-  hasModel: boolean;
-  layerCount: number;
-  hasActiveLayer: boolean;
-  isSaved: boolean;
-  hasExportPackage: boolean;
-};
 
 function EditorRouteState({ state, message }: { state: string; message: string }) {
   return (
@@ -1287,80 +1280,6 @@ function DesktopProjectLauncher({
         </button>
         {errorMessage ? <span className="status-line danger-text">{errorMessage}</span> : null}
       </form>
-    </section>
-  );
-}
-
-type WorkflowStepState = "complete" | "current" | "upcoming";
-
-function WorkflowGuide({
-  hasModel,
-  layerCount,
-  hasActiveLayer,
-  isSaved,
-  hasExportPackage,
-}: WorkflowGuideProps) {
-  const hasLayers = layerCount > 0;
-  const placementState: WorkflowStepState = !hasLayers ? "upcoming" : isSaved ? "complete" : "current";
-  const exportState: WorkflowStepState = hasExportPackage ? "complete" : isSaved ? "current" : "upcoming";
-
-  const steps: Array<{
-    icon: typeof Search;
-    title: string;
-    detail: string;
-    state: WorkflowStepState;
-  }> = [
-    {
-      icon: Search,
-      title: "Load or import",
-      detail: hasModel ? "Model is ready in the viewer." : "Paste a scan ID or import a GLB/OBJ model.",
-      state: hasModel ? "complete" : "current",
-    },
-    {
-      icon: ImagePlus,
-      title: "Add artwork",
-      detail: hasLayers ? `${layerCount} layer${layerCount === 1 ? "" : "s"} added.` : "Use text, upload, draw, or preset stickers.",
-      state: !hasModel ? "upcoming" : hasLayers ? "complete" : "current",
-    },
-    {
-      icon: MousePointer2,
-      title: "Place on shoe",
-      detail: hasActiveLayer ? "Use move, rotate, scale, then apply to surface." : "Select a layer before adjusting placement.",
-      state: placementState,
-    },
-    {
-      icon: Save,
-      title: "Save and export",
-      detail: hasExportPackage ? "ZIP package is ready to download." : "Save Draft bakes the preview before export.",
-      state: exportState,
-    },
-  ];
-
-  return (
-    <section className="workflow-guide" id="workflow-guide" aria-label="Editor workflow">
-      <div className="workflow-guide-header">
-        <div>
-          <h2>Editor flow</h2>
-          <p>Follow the same left-to-right order used by most creation tools.</p>
-        </div>
-      </div>
-      <ol className="workflow-steps">
-        {steps.map((step, index) => {
-          const Icon = step.icon;
-          return (
-            <li className={`workflow-step ${step.state}`} key={step.title}>
-              <span className="workflow-step-index">{index + 1}</span>
-              <span className="workflow-step-icon">
-                <Icon size={18} aria-hidden="true" />
-              </span>
-              <span className="workflow-step-copy">
-                <strong>{step.title}</strong>
-                <span>{step.detail}</span>
-              </span>
-            </li>
-          );
-        })}
-      </ol>
     </section>
   );
 }
