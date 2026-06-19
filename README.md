@@ -91,7 +91,7 @@ The backend uses [uv](https://github.com/astral-sh/uv) for fast Python packaging
 | `FFMPEG_BIN` | Path to the FFmpeg executable. |
 | `COLMAP_BIN` | Path to the COLMAP executable. |
 | `OPENMVS_BIN_DIR` | Path to the directory containing OpenMVS binaries. |
-| `RECONSTRUCTION_MAX_THREADS` | Thread limit for photogrammetry pipeline (default `4`). |
+| `RECONSTRUCTION_MAX_THREADS` | Thread limit for photogrammetry pipeline (default `2` for the 8 GB VPS profile). |
 | `RECONSTRUCTION_MIN_AVAILABLE_MEMORY_GB` | RAM safety threshold (default `4.0`). |
 | `RECONSTRUCTION_MIN_FREE_STORAGE_GB` | Storage space safety threshold (default `8.0`). |
 

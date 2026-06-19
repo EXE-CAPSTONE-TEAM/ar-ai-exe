@@ -1,3 +1,17 @@
+x-backend-build: &backend_build
+  context: ./backend
+  dockerfile: Dockerfile
+  args:
+    OPENMVS_REF: ${OPENMVS_REF:-v2.4.0}
+    OPENMVS_BUILD_JOBS: ${OPENMVS_BUILD_JOBS:-2}
+
+x-3d-runtime-environment: &3d_runtime_environment
+  RECONSTRUCTION_MAX_THREADS: ${APP_RECONSTRUCTION_MAX_THREADS:-2}
+  OMP_NUM_THREADS: ${APP_RECONSTRUCTION_MAX_THREADS:-2}
+  OPENBLAS_NUM_THREADS: ${APP_RECONSTRUCTION_MAX_THREADS:-2}
+  MKL_NUM_THREADS: ${APP_RECONSTRUCTION_MAX_THREADS:-2}
+  NUMEXPR_NUM_THREADS: ${APP_RECONSTRUCTION_MAX_THREADS:-2}
+
 services:
   redis:
     image: redis:7-alpine
@@ -13,14 +27,15 @@ services:
       retries: 5
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-      args:
-        OPENMVS_REF: v2.4.0
+    build: *backend_build
     restart: unless-stopped
     env_file:
       - ./deploy/backend.env
+    environment:
+      <<: *3d_runtime_environment
+    cpus: ${BACKEND_CPUS:-2.0}
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-6g}
+    memswap_limit: ${BACKEND_MEMORY_SWAP_LIMIT:-10g}
     depends_on:
       redis:
         condition: service_healthy
@@ -38,15 +53,16 @@ services:
       start_period: 120s
 
   worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-      args:
-        OPENMVS_REF: v2.4.0
+    build: *backend_build
     restart: unless-stopped
     command: ["python", "-m", "app.workers.rq_worker"]
     env_file:
       - ./deploy/backend.env
+    environment:
+      <<: *3d_runtime_environment
+    cpus: ${WORKER_CPUS:-1.0}
+    mem_limit: ${WORKER_MEMORY_LIMIT:-2g}
+    memswap_limit: ${WORKER_MEMORY_SWAP_LIMIT:-4g}
     depends_on:
       backend:
         condition: service_healthy

@@ -1,18 +1,96 @@
 #!/bin/sh
 
-echo "=== Running Pre-Push Hooks ==="
+# Exit immediately if a command exits with a non-zero status
+set -e
 
-# 1. Backend Checks
-echo "Running backend checks (ruff + pytest)..."
-cd backend
-./.venv/Scripts/python -m ruff check . || { echo "❌ Backend lint failed!"; exit 1; }
-./.venv/Scripts/python -m pytest || { echo "❌ Backend tests failed!"; exit 1; }
-cd ..
+echo "=== Running Pre-Push Hooks (CI Alignment) ==="
 
-# 2. Frontend Checks
-echo "Running frontend checks (build)..."
-cd frontend
-npm run build || { echo "❌ Frontend build failed!"; exit 1; }
-cd ..
+# 1. Determine the files changed in commits that are about to be pushed
+if UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null); then
+  echo "Comparing current branch against remote upstream: $UPSTREAM"
+  CHANGED_FILES=$(git diff --name-only "$UPSTREAM"...HEAD)
+else
+  # New branch with no upstream yet, fallback to origin/dev or commit parent
+  if git rev-parse --verify origin/dev >/dev/null 2>&1; then
+    echo "New branch. Comparing current branch against origin/dev"
+    CHANGED_FILES=$(git diff --name-only origin/dev...HEAD)
+  else
+    echo "New branch. Comparing current branch against HEAD~1"
+    CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+  fi
+fi
 
-echo "✅ All pre-push checks passed successfully! Proceeding with git push..."
+# 2. Git Whitespace Check (Aligned with Backend CI step)
+echo "----------------------------------------"
+echo "🔍 Running Git Whitespace Check..."
+if [ -n "$UPSTREAM" ]; then
+  git diff --check "$UPSTREAM"...HEAD
+else
+  if git rev-parse --verify origin/dev >/dev/null 2>&1; then
+    git diff --check origin/dev...HEAD
+  else
+    git diff --check HEAD~1 HEAD
+  fi
+fi
+echo "✅ Git whitespace check passed."
+
+# 3. Module-specific checks based on changed files
+# 3.1 Backend Checks (Aligned with backend-ci.yml)
+HAS_BACKEND_CHANGES=$(echo "$CHANGED_FILES" | grep -E "^backend/|^.github/workflows/backend-ci.yml" || true)
+if [ -n "$HAS_BACKEND_CHANGES" ]; then
+  echo "----------------------------------------"
+  echo "🐍 Running Backend CI checks..."
+  cd backend
+
+  # Prefer 'uv' if installed locally, matching the CI setup
+  if command -v uv >/dev/null 2>&1; then
+    echo "Using 'uv' to run backend checks..."
+    uv run ruff check .
+    uv run pytest
+  else
+    # Fallback to local python virtualenv
+    PYTHON_BIN="./.venv/Scripts/python"
+    if [ ! -f "$PYTHON_BIN" ]; then
+      PYTHON_BIN="./.venv/bin/python" # Hỗ trợ unix/mac nếu có
+    fi
+
+    if [ -f "$PYTHON_BIN" ] || [ -f "${PYTHON_BIN}.exe" ]; then
+      echo "Using local virtualenv Python ($PYTHON_BIN) to run backend checks..."
+      $PYTHON_BIN -m ruff check .
+      $PYTHON_BIN -m pytest
+    else
+      echo "⚠️ No virtualenv or 'uv' tool found at backend/.venv. Skipping local backend checks."
+    fi
+  fi
+  cd ..
+fi
+
+# 3.2 Frontend Checks (Aligned with frontend-ci.yml)
+HAS_FRONTEND_CHANGES=$(echo "$CHANGED_FILES" | grep -E "^frontend/|^.github/workflows/frontend-ci.yml" || true)
+if [ -n "$HAS_FRONTEND_CHANGES" ]; then
+  echo "----------------------------------------"
+  echo "⚛️ Running Frontend CI checks..."
+  cd frontend
+  npm run build
+  cd ..
+fi
+
+# 3.3 Mobile Checks (Aligned with mobile-ci.yml)
+HAS_MOBILE_CHANGES=$(echo "$CHANGED_FILES" | grep -E "^mobile/|^.github/workflows/mobile-ci.yml" || true)
+if [ -n "$HAS_MOBILE_CHANGES" ]; then
+  echo "----------------------------------------"
+  echo "📱 Running Mobile CI checks..."
+  if command -v flutter >/dev/null 2>&1; then
+    cd mobile
+    flutter pub get
+    flutter analyze
+    flutter test
+    cd ..
+  else
+    echo "⚠️ Flutter CLI is not installed on this system. Skipping mobile checks."
+  fi
+fi
+
+echo "----------------------------------------"
+echo "✅ All pre-push CI checks passed successfully! Proceeding with git push..."
+exit 0

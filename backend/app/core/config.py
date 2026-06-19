@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     reconstruction_min_sharpness: float = 95.0
     reconstruction_duplicate_hamming_threshold: int = 4
     reconstruction_command_timeout_seconds: int = 7200
-    reconstruction_max_threads: int = 4
+    reconstruction_max_threads: int = 2
     reconstruction_min_available_memory_gb: float = 4.0
     reconstruction_min_free_storage_gb: float = 8.0
     mesh_cleanup_target_max_dimension: float = 2.4
