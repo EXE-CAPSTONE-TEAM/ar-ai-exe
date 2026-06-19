@@ -1,108 +1,144 @@
 # Shoe Visual Customizer - Technology Stack Overview
 
-This document provides a comprehensive overview of the tools, dependencies, and technologies used across the Shoe Visual Customizer project. It explains the role and purpose of each component within the system architecture.
+Tài liệu này cung cấp một cái nhìn toàn diện về các công cụ, thư viện và công nghệ được sử dụng trong dự án **Shoe Visual Customizer (ar-ai-exe)**. Nó giải thích vai trò, nhiệm vụ của từng thành phần trong kiến trúc hệ thống thực tế.
 
-## System Architecture
+---
 
-The following Mermaid diagram illustrates the high-level architecture of the project and how the different components interact with each other.
+## Sơ Đồ Kiến Trúc Hệ Thống (System Architecture)
+
+Sơ đồ Mermaid dưới đây mô tả kiến trúc cấp cao của dự án và cách các thành phần tương tác bất đồng bộ qua hàng đợi Redis Queue (RQ) để xử lý các tác vụ 3D nặng:
 
 ```mermaid
-graph TD
-    subgraph Client Apps
-        Web[Web App<br/>React + Three.js]
-        Mobile[Mobile Scanner<br/>Flutter]
+flowchart TD
+    subgraph Clients["Lớp Thiết Bị & Trải Nghiệm (Client Layer)"]
+        Web["Web App<br/>React + Three.js + TS"]
+        Mobile["Mobile Scanner<br/>Flutter / Dart"]
+        Tauri["Desktop App<br/>Tauri / Rust Shell"]
     end
 
-    subgraph Reverse Proxy / Web Server
-        Caddy[Caddy / Nginx<br/>Port 80/443]
+    subgraph Gateway["Lớp Web Server & Gateway"]
+        Caddy["Caddy Server<br/>Port 80/443 (Reverse Proxy & SSL)"]
     end
 
-    subgraph Backend Services
-        API[FastAPI Backend<br/>Python 3.11+]
+    subgraph BackendServices["Lớp Dịch Vụ API & Hàng Đợi"]
+        API["FastAPI Backend<br/>Python 3.11+ / Uvicorn"]
+        Redis["Redis (In-Memory Queue)<br/>Port 6379"]
+        Worker["Redis RQ Worker<br/>Python Processing Node"]
     end
 
-    subgraph Infrastructure & Storage
+    subgraph Lõi3D["3D Toolchains & Processing Core"]
+        Blender["Blender Background Mode<br/>(Decal baking & cleanup)"]
+        COLMAP["COLMAP & OpenMVS<br/>(3D Reconstruction)"]
+        FFmpeg["FFmpeg<br/>(Frame Extraction)"]
+    end
+
+    subgraph Infrastructure["Lớp Lưu Trữ (Storage & DB)"]
         DB[(PostgreSQL)]
         S3[(AWS S3 / Storage<br/>Images & 3D Models)]
     end
 
-    %% Connections
+    %% Giao tiếp
     Web -->|HTTPS / REST API| Caddy
     Mobile -->|HTTPS / REST API| Caddy
+    Tauri -->|REST API| API
     Caddy -->|Reverse Proxy| API
     Caddy -->|Serve Static Files| Web
     API -->|Read/Write| DB
-    API -->|Boto3| S3
+    API -->|Boto3 SDK| S3
+    API -->|Enqueue Jobs| Redis
+    Redis -->|Dispatch Jobs| Worker
+    Worker -->|Execute CLI scripts| Blender
+    Worker -->|Execute CLI scripts| COLMAP
+    Worker -->|Execute CLI scripts| FFmpeg
+    Worker -->|Save baked outputs| S3
 ```
 
 ---
 
-## 1. Backend (Python / FastAPI)
+## 1. Lớp Backend (Python / FastAPI)
 
-The backend is built with Python and serves as the core API for both the Web and Mobile clients.
+Backend được xây dựng bằng Python, đóng vai trò là API trung tâm tiếp nhận yêu cầu từ Web và Mobile clients, đồng thời quản lý các tác vụ xử lý đồ họa 3D.
 
 ### Core Framework & Server
-* **Python (>=3.11)**: The core programming language.
-* **uv**: An extremely fast Python package and project manager (replaces pip/poetry).
-* **FastAPI (`fastapi`)**: A modern, high-performance web framework for building APIs. Used for routing, request validation, and OpenAPI documentation.
-* **Uvicorn (`uvicorn`)**: An ASGI web server implementation for Python. Runs the FastAPI application in production and development.
+* **Python (>=3.11)**: Ngôn ngữ lập trình cốt lõi của backend.
+* **uv**: Trình quản lý package và project Python siêu nhanh (thay thế cho pip/poetry), đồng bộ qua file `uv.lock`.
+* **FastAPI**: Web framework hiện đại, hiệu năng cao để xây dựng API, tự động sinh tài liệu Swagger UI.
+* **Uvicorn**: ASGI web server chạy ứng dụng FastAPI trong môi trường sản xuất và phát triển.
 
 ### Database & ORM
-* **PostgreSQL (via `psycopg`)**: The primary relational database used to store user data, shoe configurations, and metadata.
-* **SQLAlchemy (`sqlalchemy`)**: The SQL toolkit and Object-Relational Mapper (ORM) for Python. Allows interacting with the database using Python objects.
-* **Alembic (`alembic`)**: A lightweight database migration tool for use with SQLAlchemy. Manages schema changes over time.
+* **PostgreSQL (via `psycopg`)**: Cơ sở dữ liệu quan hệ chính lưu trữ thông tin dự án, người dùng, bản phác thảo thiết kế (Design Drafts) và siêu dữ liệu (Metadata).
+* **SQLAlchemy**: Bộ công cụ SQL và Object-Relational Mapper (ORM) giúp tương tác với cơ sở dữ liệu bằng các đối tượng Python.
+* **Alembic**: Công cụ quản lý lịch sử và thực thi migrations cấu trúc cơ sở dữ liệu.
 
-### Security & Authentication
-* **PyJWT (`pyjwt`)**: Used to encode and decode JSON Web Tokens (JWT) for stateless user authentication.
-* **Argon2 (`argon2-cffi`)**: The secure password hashing algorithm used to safely store user passwords.
+### Task Queue & Background Processing
+* **Redis**: Cơ sở dữ liệu in-memory dùng làm hàng đợi thông điệp (message queue).
+* **RQ (Redis Queue)**: Thư viện quản lý hàng đợi giúp FastAPI đẩy các tác vụ nặng (xử lý video, tái tạo 3D, chiếu decal Blender) cho các tiến trình **RQ Worker** chạy bất đồng bộ trong nền, bảo vệ server API khỏi bị quá tải.
 
-### Cloud & Utilities
-* **Boto3 (`boto3`)**: The Amazon Web Services (AWS) SDK for Python. Used to interact with object storage (like AWS S3) for saving and retrieving shoe images and 3D models.
-* **Pydantic Settings (`pydantic-settings`)**: Used for robust environment variable parsing and configuration management.
-* **Python Multipart (`python-multipart`)**: Required by FastAPI to process form data and file uploads (e.g., uploading shoe textures).
+### Cloud Storage & Security
+* **Boto3**: AWS SDK cho Python, được sử dụng để lưu trữ các file mô hình 3D (OBJ, GLB, MTL), hình ảnh decal và video quét thô lên AWS S3 hoặc các dịch vụ lưu trữ tương thích S3.
+* **PyJWT**: Mã hóa và giải mã JSON Web Token (JWT) phục vụ cơ chế xác thực người dùng không trạng thái (stateless).
+* **Argon2 (`argon2-cffi`)**: Giải thuật mã hóa bảo mật mật khẩu người dùng.
 
 ---
 
-## 2. Frontend (Web 3D Customizer)
+## 2. Lớp Bộ Lõi Xử Lý 3D (3D Core Pipelines)
 
-The web frontend is a Single Page Application (SPA) focused on rendering 3D shoe models and allowing users to customize them in real-time.
+Đây là thành phần cốt lõi của dự án nhằm biến dữ liệu quét thô từ thiết bị di động thành các mô hình 3D chuẩn hóa và nướng (bake) thiết kế của người dùng lên giày.
+
+* **Blender (Background Python mode)**:
+  * Worker chạy các script Python do server biên soạn (`apply_decals.py`, `decal_baker.py`) trực tiếp trên Blender không giao diện (headless mode).
+  * Thực hiện chuẩn hóa gốc tọa độ, căn chỉnh kích thước (normalization), tối giản số lượng đa giác (Mesh Decimation) để tăng tốc độ tải trên web.
+  * Thực hiện giải thuật Directional Raycasting (thông qua BVHTree) để chiếu các bản vẽ phẳng decal 2D (sticker/text) lên lưới đa giác 3D của giày và xuất ra file GLB/OBJ/MTL cuối cùng.
+* **COLMAP & OpenMVS (3D Reconstruction)**:
+  * **COLMAP**: Công cụ Structure-from-Motion (SfM) phân tích chuỗi ảnh từ video quét giày để dựng đám mây điểm thưa (sparse point cloud).
+  * **OpenMVS**: Xử lý đám mây điểm chi tiết (dense point cloud), tái tạo lưới đa giác bề mặt (mesh reconstruction) và phủ vật liệu (texturing) để tạo ra file 3D đầu tiên.
+* **FFmpeg**: Trích xuất các khung hình chất lượng cao từ video quét giày dựa trên tần suất cấu hình và các bộ lọc loại bỏ khung hình bị mờ hoặc thiếu sáng.
+
+---
+
+## 3. Lớp Frontend Web & Desktop App
+
+Frontend web là ứng dụng Single Page Application (SPA) chuyên biệt cho việc render 3D thời gian thực và tùy chỉnh decal tương tác trực quan.
 
 ### Core Framework & Build Tool
-* **TypeScript**: Adds static typing to JavaScript, improving code quality and maintainability.
-* **React (`react`, `react-dom`)**: The core UI library used to build the user interface components.
-* **Vite (`vite`)**: A lightning-fast frontend build tool and development server.
+* **TypeScript**: Ràng buộc kiểu dữ liệu tĩnh nâng cao độ tin cậy của mã nguồn.
+* **React**: Thư viện xây dựng giao diện người dùng theo component.
+* **Vite**: Công cụ bundler và dev-server tốc độ cao.
 
-### 3D Rendering Engine
-* **Three.js (`three`)**: A powerful JavaScript 3D library used to render the WebGL graphics.
-* **React Three Fiber (`@react-three/fiber`)**: A React reconciler for Three.js. It allows building 3D scenes using declarative React components instead of imperative vanilla JavaScript.
-* **React Three Drei (`@react-three/drei`)**: A collection of useful, pre-built helpers and abstractions for `@react-three/fiber` (e.g., camera controls, environment lighting, loading models).
+### 3D Rendering Engine (WebGL)
+* **Three.js**: Thư viện đồ họa 3D WebGL cốt lõi.
+* **React Three Fiber (R3F)**: Trình biên dịch declarative React cho Three.js.
+* **React Three Drei**: Bộ công cụ chứa các component trợ năng dựng sẵn cho R3F (Camera controls, lights, model loaders, transform controls).
 
-### UI Utilities
-* **Lucide React (`lucide-react`)**: A beautiful and consistent icon library used for UI elements.
-
----
-
-## 3. Mobile (Scanner MVP)
-
-The mobile app serves as a utility for scanning or capturing shoes, built with cross-platform capabilities.
-
-### Core Framework
-* **Flutter**: Google's UI toolkit for building natively compiled applications for mobile from a single codebase.
-* **Dart**: The programming language used by Flutter.
-
-### Key Dependencies
-* **Dio (`dio`)**: A powerful HTTP client for Dart, used to make API requests to the FastAPI backend.
-* **Camera (`camera`)**: A Flutter plugin for getting access to the device's cameras. Essential for the "Scanner" functionality to capture shoe images.
-* **Flutter Secure Storage (`flutter_secure_storage`)**: Used to securely store sensitive data like JWT authentication tokens in the device's keychain/keystore.
-* **URL Launcher (`url_launcher`)**: Used to launch external URLs or web views if needed.
-* **Path Provider (`path_provider`)**: Finds commonly used locations on the filesystem (e.g., temp or app data directories) for saving captured images before uploading.
+### Desktop App wrapper
+* **Tauri (Rust + Webview)**: Đóng gói mã nguồn React thành ứng dụng Desktop chạy trực tiếp trên máy tính cá nhân của lập trình viên hoặc người vận hành, tối ưu hóa giao tiếp phần cứng cục bộ.
 
 ---
 
-## 4. Deployment & DevOps
+## 4. Lớp Mobile App (Scanner MVP)
 
-The project relies on containerization to ensure consistency across development and production environments.
+Ứng dụng di động đóng vai trò là thiết bị đầu cuối thu thập dữ liệu quét thực tế.
 
-* **Docker & Docker Compose**: Used to containerize the backend and frontend services, making deployment predictable and manageable.
-* **Caddy (via `caddy_data` volumes)**: Acts as the web server and reverse proxy. It automatically handles SSL/TLS certificate provisioning (HTTPS) and routes traffic to the appropriate Docker containers.
-* **UFW (Uncomplicated Firewall)**: Used on the VPS to manage network security, ensuring only necessary ports (like 80 for HTTP, 443 for HTTPS, and SSH) are exposed to the public internet.
+* **Flutter (Dart)**: SDK xây dựng ứng dụng di động đa nền tảng (iOS & Android) từ một mã nguồn duy nhất.
+* **Dio**: HTTP client kết nối và truyền tải tệp tin dung lượng lớn (video scan) lên API FastAPI.
+* **Camera API**: Tích hợp điều khiển phần cứng camera để hướng dẫn người dùng quay quét giày theo đúng góc độ kỹ thuật.
+* **Flutter Secure Storage**: Lưu trữ an toàn các thông tin đăng nhập và token JWT dưới dạng keychain/keystore của hệ điều hành.
+
+---
+
+## 5. Triển Khai & Hạ Tầng (Deployment & DevOps)
+
+* **Docker & Docker Compose**: Đóng gói các dịch vụ thành các container cô lập (`web`, `backend`, `worker`, `redis`) giúp đơn giản hóa việc triển khai trên VPS Linux.
+* **Caddy Server**: Web server hiệu năng cao đóng vai trò reverse proxy định tuyến HTTPS vào backend/frontend và tự động cấp phát, gia hạn chứng chỉ SSL miễn phí thông qua Let's Encrypt / ACME protocol.
+* **UFW (Uncomplicated Firewall)**: Quản lý bảo mật cổng mạng trên VPS, chỉ mở các cổng công khai cần thiết (80, 443) và SSH.
+
+---
+
+## 6. Các Quy Tắc Kỹ Thuật Quan Trọng (Critical Invariants)
+
+* **Bảo toàn vật liệu giày gốc**: Tiến trình Blender bake decal tuyệt đối không xóa hoặc thay thế các slot vật liệu gốc của giày đa nhập khẩu. Chỉ điều chỉnh các thông số PBR cơ bản (`roughness`, `metallic`, `base color`) trên các vật liệu không chứa vân texture liên kết.
+* **Tỷ lệ chiếu decal hợp lệ (Raycast Hit Ratio)**: Khi nướng decal lên lưới giày, ít nhất **25%** số đỉnh của lưới decal phải định vị thành công lên bề mặt giày (`hit_ratio >= 0.25`), ngăn ngừa lỗi decal bay lơ lửng ngoài lưới giày.
+* **Giới hạn MVP**:
+  * Decal tối đa mỗi mẫu giày: **50 layers**.
+  * Độ dài 3D text: **Tối đa 80 ký tự**.
+  * File sticker tải lên: **Tối đa 5 MB**.
