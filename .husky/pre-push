@@ -1,0 +1,18 @@
+#!/bin/sh
+
+echo "=== Running Pre-Push Hooks ==="
+
+# 1. Backend Checks
+echo "Running backend checks (ruff + pytest)..."
+cd backend
+./.venv/Scripts/python -m ruff check . || { echo "❌ Backend lint failed!"; exit 1; }
+./.venv/Scripts/python -m pytest || { echo "❌ Backend tests failed!"; exit 1; }
+cd ..
+
+# 2. Frontend Checks
+echo "Running frontend checks (build)..."
+cd frontend
+npm run build || { echo "❌ Frontend build failed!"; exit 1; }
+cd ..
+
+echo "✅ All pre-push checks passed successfully! Proceeding with git push..."
