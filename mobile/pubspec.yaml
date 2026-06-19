@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   camera: ^0.11.0+2
+  cross_file: ^0.3.4+2
   dio: ^5.7.0
   flutter_secure_storage: ^9.2.2
   url_launcher: ^6.3.1
@@ -18,7 +19,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^5.0.0
+  flutter_lints: ^4.0.0
 
 flutter:
   uses-material-design: true

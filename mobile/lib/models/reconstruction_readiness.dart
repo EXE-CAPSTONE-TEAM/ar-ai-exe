@@ -12,7 +12,8 @@ class ReconstructionReadiness {
   factory ReconstructionReadiness.fromJson(Map<String, dynamic> json) {
     return ReconstructionReadiness(
       ready: json['ready'] as bool? ?? false,
-      message: json['message'] as String? ?? 'Reconstruction readiness is unknown.',
+      message:
+          json['message'] as String? ?? 'Reconstruction readiness is unknown.',
       missingTools: (json['missingTools'] as List<dynamic>? ?? const [])
           .map((value) => value.toString())
           .toList(),
