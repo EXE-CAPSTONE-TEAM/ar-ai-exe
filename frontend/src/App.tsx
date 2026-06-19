@@ -43,7 +43,6 @@ import type {
   InstallProgress,
   Job,
   ModelAsset,
-  ReconstructionReadiness,
   ScanSession,
   TextLayer,
   User,
@@ -83,7 +82,6 @@ export function App() {
   const [designName, setDesignName] = useState("Untitled shoe design");
   const [config, setConfig] = useState<DesignConfig | null>(null);
   const [exportPackage, setExportPackage] = useState<ExportPackage | null>(null);
-  const [readiness, setReadiness] = useState<ReconstructionReadiness | null>(null);
   const [statusMessage, setStatusMessage] = useState("Ready");
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -113,9 +111,6 @@ export function App() {
   }, [isDesktopShell]);
 
   useEffect(() => {
-    if (!isProjectEditor && !isDesktopShell) {
-      void loadReadiness();
-    }
     if (isProjectEditor || isDesktopShell) {
       return;
     }
@@ -243,14 +238,7 @@ export function App() {
     }
   }
 
-  async function loadReadiness() {
-    try {
-      setReadiness(await api.getReconstructionReadiness());
-    } catch (error) {
-      setReadiness(null);
-      setStatusMessage(messageFromError(error));
-    }
-  }
+
 
   async function loadEditorReadiness() {
     try {
@@ -935,7 +923,7 @@ export function App() {
 
             <EditorStatusNotice message={statusMessage} isBusy={isEditorBusy} />
 
-            {isDesktopShell ? (
+            {isDesktopShell && (
               <DesktopRuntimePanel
                 runtime={desktopRuntime}
                 editorReadiness={editorReadiness}
@@ -948,8 +936,6 @@ export function App() {
                 onOpenDiagnostics={openDesktopDiagnostics}
                 onCopyDiagnostics={copyDesktopDiagnostics}
               />
-            ) : (
-              <ReadinessBanner readiness={readiness} onRefresh={loadReadiness} />
             )}
 
             <section className="main-grid">
@@ -1284,68 +1270,6 @@ function DesktopProjectLauncher({
   );
 }
 
-type ReadinessBannerProps = {
-  readiness: ReconstructionReadiness | null;
-  onRefresh: () => void;
-};
-
-function ReadinessBanner({ readiness, onRefresh }: ReadinessBannerProps) {
-  if (!readiness) {
-    return (
-      <section className="readiness-banner warning">
-        <Wrench size={18} aria-hidden="true" />
-        <div>
-          <h2>Reconstruction readiness unknown</h2>
-          <p>Backend readiness could not be loaded.</p>
-        </div>
-        <button type="button" onClick={onRefresh}>
-          <RefreshCw size={16} aria-hidden="true" />
-          Retry
-        </button>
-      </section>
-    );
-  }
-
-  const memory = readiness.resources.find((resource) => resource.name === "available_memory");
-  const storage = readiness.resources.find((resource) => resource.name === "storage_free");
-
-  return (
-    <section className={`readiness-banner ${readiness.ready ? "ready" : "warning"}`}>
-      {readiness.ready ? <CheckCircle2 size={18} aria-hidden="true" /> : <AlertTriangle size={18} aria-hidden="true" />}
-      <div className="readiness-copy">
-        <h2>{readiness.ready ? "Reconstruction ready" : "Reconstruction blocked"}</h2>
-        <p>{readiness.message}</p>
-        <div className="readiness-metrics">
-          <span>
-            <Cpu size={14} aria-hidden="true" />
-            RAM {formatResource(memory)}
-          </span>
-          <span>
-            <HardDrive size={14} aria-hidden="true" />
-            Storage {formatResource(storage)}
-          </span>
-          <span>
-            <Wrench size={14} aria-hidden="true" />
-            Threads {String(readiness.settings.maxThreads ?? "n/a")}
-          </span>
-        </div>
-        {readiness.missingTools.length > 0 ? (
-          <div className="tool-chip-row">
-            {readiness.missingTools.map((tool) => (
-              <span className="tool-chip" key={tool}>
-                {tool}
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </div>
-      <button type="button" onClick={onRefresh}>
-        <RefreshCw size={16} aria-hidden="true" />
-        Refresh
-      </button>
-    </section>
-  );
-}
 
 type AuthPanelProps = {
   mode: "login" | "register";
