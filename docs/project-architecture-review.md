@@ -45,7 +45,7 @@ flowchart TD
 ### 2.1. Backend (`backend/`)
 Được viết bằng **Python (FastAPI)** với cơ sở dữ liệu quan hệ kết hợp hàng đợi **Redis RQ**.
 
-- **Cơ sở dữ liệu (`app/models/entities.py`)**: 
+- **Cơ sở dữ liệu (`app/models/entities.py`)**:
   - Sử dụng SQLAlchemy 2.0 để định nghĩa các thực thể: `User`, `Project`, `ScanSession`, `ModelAsset`, `Design`, `DesignAsset`, `ExportPackage`, `Job`.
   - Quản lý migrate thông qua **Alembic**.
 - **Luồng Tái Tạo 3D (`ReconstructionService`)**:
