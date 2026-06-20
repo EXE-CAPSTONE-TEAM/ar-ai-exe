@@ -66,7 +66,13 @@ class _ScanSetupScreenState extends State<ScanSetupScreen> {
               _DropdownField(
                 label: 'Material',
                 value: _material,
-                values: const ['canvas', 'leather', 'synthetic', 'mesh', 'unknown'],
+                values: const [
+                  'canvas',
+                  'leather',
+                  'synthetic',
+                  'mesh',
+                  'unknown'
+                ],
                 onChanged: (value) => setState(() => _material = value),
               ),
               _DropdownField(
@@ -75,13 +81,20 @@ class _ScanSetupScreenState extends State<ScanSetupScreen> {
                 values: const ['new', 'used', 'worn'],
                 onChanged: (value) => setState(() => _condition = value),
               ),
-              _TextField(label: 'Length in cm', controller: _lengthController, numeric: true),
-              _TextField(label: 'Width in cm', controller: _widthController, numeric: true),
+              _TextField(
+                  label: 'Length in cm',
+                  controller: _lengthController,
+                  numeric: true),
+              _TextField(
+                  label: 'Width in cm',
+                  controller: _widthController,
+                  numeric: true),
               _DropdownField(
                 label: 'Calibration reference',
                 value: _calibrationReference,
                 values: const ['A4 paper', 'ruler', 'printed marker', 'none'],
-                onChanged: (value) => setState(() => _calibrationReference = value),
+                onChanged: (value) =>
+                    setState(() => _calibrationReference = value),
               ),
               _DropdownField(
                 label: 'Lighting',
@@ -96,9 +109,15 @@ class _ScanSetupScreenState extends State<ScanSetupScreen> {
                 onChanged: (value) => setState(() => _background = value),
               ),
               const SizedBox(height: 12),
-              Text('Customization goal', style: Theme.of(context).textTheme.titleMedium),
-              ...['change_color', 'add_sticker', 'add_text', 'draw_pattern', 'add_background_pattern']
-                  .map(_goalTile),
+              Text('Customization goal',
+                  style: Theme.of(context).textTheme.titleMedium),
+              ...[
+                'change_color',
+                'add_sticker',
+                'add_text',
+                'draw_pattern',
+                'add_background_pattern'
+              ].map(_goalTile),
               const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed: _continueToCamera,
@@ -134,7 +153,9 @@ class _ScanSetupScreenState extends State<ScanSetupScreen> {
     }
     if (_calibrationReference == 'none') {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('A calibration reference improves scale confidence.')),
+        const SnackBar(
+            content:
+                Text('A calibration reference improves scale confidence.')),
       );
     }
 
@@ -183,8 +204,11 @@ class _DropdownField extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 12),
       child: DropdownButtonFormField<String>(
         initialValue: value,
-        decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
-        items: values.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
+        decoration: InputDecoration(
+            labelText: label, border: const OutlineInputBorder()),
+        items: values
+            .map((item) => DropdownMenuItem(value: item, child: Text(item)))
+            .toList(),
         onChanged: (value) {
           if (value != null) {
             onChanged(value);
@@ -213,7 +237,8 @@ class _TextField extends StatelessWidget {
       child: TextFormField(
         controller: controller,
         keyboardType: numeric ? TextInputType.number : TextInputType.text,
-        decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+        decoration: InputDecoration(
+            labelText: label, border: const OutlineInputBorder()),
         validator: (value) {
           if (value == null || value.trim().isEmpty) {
             return 'Required';

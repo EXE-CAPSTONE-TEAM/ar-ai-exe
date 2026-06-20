@@ -33,13 +33,24 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./storage/app.db"
     database_auto_create_tables: bool = True
     web_app_base_url: str = "http://localhost:5173"
+    marketing_login_url: str = "https://kusshoes.vn/login"
     jwt_secret_key: str = "local-dev-jwt-secret-change-me-32bytes-min"
     jwt_algorithm: str = "HS256"
     jwt_access_token_minutes: int = 1440
+    auth_cookie_name: str = "kusshoes_access_token"
+    auth_cookie_domain: str = ""
+    auth_cookie_secure: bool = False
+    auth_cookie_samesite: str = "lax"
+    csrf_cookie_name: str = "kusshoes_csrf_token"
+    csrf_header_name: str = "x-csrf-token"
     enable_demo_auth: bool = True
     demo_access_token: str = "local-demo-token-change-me"
     demo_user_email: str = "demo@shoe-customizer.local"
     max_upload_size_mb: int = 250
+    redis_url: str = "redis://localhost:6379/0"
+    rq_queue_name: str = "kusshoes-jobs"
+    rq_job_timeout_seconds: int = 7200
+    enable_inline_bake_fallback: bool = False
 
     enable_real_reconstruction: bool = True
     colmap_bin: str = "colmap"
@@ -52,7 +63,7 @@ class Settings(BaseSettings):
     reconstruction_min_sharpness: float = 95.0
     reconstruction_duplicate_hamming_threshold: int = 4
     reconstruction_command_timeout_seconds: int = 7200
-    reconstruction_max_threads: int = 4
+    reconstruction_max_threads: int = 2
     reconstruction_min_available_memory_gb: float = 4.0
     reconstruction_min_free_storage_gb: float = 8.0
     mesh_cleanup_target_max_dimension: float = 2.4

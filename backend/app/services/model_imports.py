@@ -10,7 +10,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models import ModelAsset, ScanSession, ScanSource, ScanStatus, User
+from app.models import ModelAsset, ProjectSourceType, ProjectStatus, ScanSession, ScanSource, ScanStatus, User
 from app.schemas.scan import ScanMetadata
 from app.services.file_helpers import write_json
 from app.services.mesh_cleanup import MeshCleanupReport, MeshCleanupService
@@ -58,6 +58,7 @@ class ModelImportService:
         mtl_file: UploadedModelFile | None = None,
         texture_file: UploadedModelFile | None = None,
         package_file: UploadedModelFile | None = None,
+        project_id: str | None = None,
     ) -> ModelAsset:
         display_name = name.strip()
         if not display_name:
@@ -70,7 +71,7 @@ class ModelImportService:
         self._validate_total_upload_size([model_file, mtl_file, texture_file, package_file])
         self._validate_inputs(normalized_format, model_file, mtl_file, texture_file, package_file)
 
-        scan_session = self._create_import_session(user, display_name, metadata)
+        scan_session = self._create_import_session(user, display_name, metadata, normalized_format, project_id)
         work_dir = self.settings.resolved_storage_root / "imports" / scan_session.id
         model_dir = self.settings.resolved_storage_root / "models" / scan_session.id
 
@@ -111,6 +112,11 @@ class ModelImportService:
                     quality_report=quality_report_path,
                     obj_package_zip=obj_package_path,
                 ),
+                source_type=(
+                    ProjectSourceType.UPLOADED_GLB
+                    if normalized_format == "glb"
+                    else ProjectSourceType.UPLOADED_OBJ
+                ),
             )
             self.scan_service.set_status(scan_session.id, ScanStatus.COMPLETED)
             return asset
@@ -122,16 +128,35 @@ class ModelImportService:
             self.scan_service.set_status(scan_session.id, ScanStatus.FAILED, message[:2000])
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
 
-    def _create_import_session(self, user: User, name: str, metadata: ScanMetadata) -> ScanSession:
+    def _create_import_session(
+        self,
+        user: User,
+        name: str,
+        metadata: ScanMetadata,
+        normalized_format: str,
+        project_id: str | None,
+    ) -> ScanSession:
+        project = self.scan_service._project_for_scan(
+            user=user,
+            project_id=project_id,
+            fallback_name=name,
+            source_type=(
+                ProjectSourceType.UPLOADED_GLB
+                if normalized_format == "glb"
+                else ProjectSourceType.UPLOADED_OBJ
+            ),
+        )
+        project.status = ProjectStatus.PROCESSING
         scan_session = ScanSession(
             user_id=user.id,
+            project_id=project.id,
             status=ScanStatus.EXPORTING,
             source_type=ScanSource.IMPORT,
             import_name=name,
         )
         self.db.add(scan_session)
         self.db.flush()
-        scan_session.web_design_url = self.scan_service.web_design_url(scan_session.id)
+        scan_session.web_design_url = self.scan_service.web_design_url(scan_session.id, project.id)
         metadata_object = self.storage.put_bytes(
             f"imports/{scan_session.id}/metadata.json",
             scan_metadata_bytes(metadata),

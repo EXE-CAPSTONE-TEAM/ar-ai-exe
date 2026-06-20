@@ -35,10 +35,12 @@ class ScanMetadata(CamelModel):
 
 class ScanSessionCreate(CamelModel):
     metadata: ScanMetadata | None = None
+    project_id: str | None = Field(default=None, alias="projectId")
 
 
 class ScanStatusResponse(CamelModel):
     id: str
+    project_id: str | None = Field(default=None, alias="projectId")
     status: str
     source_type: str = Field(default="scan", alias="sourceType")
     import_name: str | None = Field(default=None, alias="importName")
@@ -55,6 +57,7 @@ class ScanStatusResponse(CamelModel):
 class ScanSessionResponse(CamelModel):
     id: str
     user_id: str = Field(alias="userId")
+    project_id: str | None = Field(default=None, alias="projectId")
     status: str
     source_type: str = Field(default="scan", alias="sourceType")
     import_name: str | None = Field(default=None, alias="importName")

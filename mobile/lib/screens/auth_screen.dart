@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
 
+import '../app/app_shell.dart';
 import '../services/backend_api.dart';
-import 'scan_setup_screen.dart';
 
 class AuthScreen extends StatefulWidget {
-  const AuthScreen({super.key});
+  const AuthScreen({
+    this.themeMode = ThemeMode.dark,
+    this.onThemeModeChanged,
+    super.key,
+  });
+
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode>? onThemeModeChanged;
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -48,7 +55,8 @@ class _AuthScreenState extends State<AuthScreen> {
                     selected: {_isRegister},
                     onSelectionChanged: _isBusy
                         ? null
-                        : (values) => setState(() => _isRegister = values.first),
+                        : (values) =>
+                            setState(() => _isRegister = values.first),
                   ),
                   const SizedBox(height: 18),
                   if (_isRegister)
@@ -73,7 +81,8 @@ class _AuthScreenState extends State<AuthScreen> {
                   const SizedBox(height: 18),
                   FilledButton.icon(
                     onPressed: _isBusy ? null : _submit,
-                    icon: Icon(_isRegister ? Icons.person_add_alt_1 : Icons.login),
+                    icon: Icon(
+                        _isRegister ? Icons.person_add_alt_1 : Icons.login),
                     label: Text(_isRegister ? 'Create account' : 'Login'),
                   ),
                   const SizedBox(height: 8),
@@ -84,7 +93,9 @@ class _AuthScreenState extends State<AuthScreen> {
                   ),
                   if (_error != null) ...[
                     const SizedBox(height: 14),
-                    Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    Text(_error!,
+                        style: TextStyle(
+                            color: Theme.of(context).colorScheme.error)),
                   ],
                 ],
               ),
@@ -145,7 +156,12 @@ class _AuthScreenState extends State<AuthScreen> {
       return;
     }
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const ScanSetupScreen()),
+      MaterialPageRoute(
+        builder: (_) => AppShell(
+          themeMode: widget.themeMode,
+          onThemeModeChanged: widget.onThemeModeChanged ?? (_) {},
+        ),
+      ),
     );
   }
 }

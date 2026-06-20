@@ -1,6 +1,6 @@
 # ar-ai-exe Domain Context
 
-`ar-ai-exe` is a shoe scan/import and web customization system. Users bring a shoe model from mobile scan or direct import, the backend normalizes it into editor-ready assets, the web editor lets users manually place sticker/text decals, and the backend bakes a draft preview/export package.
+`ar-ai-exe` is a shoe scan/import and web customization system. Users open a backend-owned project from marketing, mobile, or legacy scan/import flows; the backend normalizes shoe models into editor-ready assets, the web editor lets users manually place sticker/text decals, and the backend bakes draft previews/export packages.
 
 This file is the first project context AI agents should read before touching code. Keep it factual and aligned with the current repository state.
 
@@ -8,6 +8,7 @@ This file is the first project context AI agents should read before touching cod
 
 - **`backend/`**: FastAPI API server, SQLAlchemy models, Alembic migrations, storage services, reconstruction/import pipelines, mesh cleanup, design assets, decal baking, and export package generation.
 - **`frontend/`**: React/Vite/TypeScript web editor for loading model assets, placing sticker/text layers, saving draft previews, and downloading reconstruction/export files.
+- **`desktop/`**: Tauri desktop shell that builds and packages the existing `frontend/` editor. It must not fork editor business logic; desktop-specific behavior should stay limited to packaging, launch routing, and native shell integration.
 - **`mobile/`**: Mobile capture/import entry point. Keep mobile scan metadata and upload concerns isolated from the web editor.
 - **`docs/`**: Agent, issue tracker, ADR, and domain documentation.
 - **`.agents/skills/`**: Local workflow instructions agents should follow for planning, testing, security review, and handoff.
@@ -16,14 +17,17 @@ This file is the first project context AI agents should read before touching cod
 
 ```mermaid
 flowchart TD
-    A["Mobile scan or direct model import"] --> B["Raw reconstruction/import asset"]
-    B --> C["MeshCleanupService"]
-    C --> D["Canonical ModelAsset files"]
-    D --> E["Web editor manual decal/text placement"]
-    E --> F["Save Draft & Bake Preview"]
-    F --> G["DecalBakeService preview GLB"]
-    E --> H["Export Package"]
-    H --> I["Final GLB/OBJ/MTL/texture + notes"]
+    A["Marketing/mobile create Project"] --> B["Mobile scan or direct model import"]
+    B --> C["Raw reconstruction/import asset"]
+    C --> D["MeshCleanupService"]
+    D --> E["Canonical ModelAsset files"]
+    E --> F["Web editor /editor/:projectId"]
+    F --> G["Manual decal/text placement"]
+    G --> H["Save Draft"]
+    H --> I["Redis RQ Bake Job"]
+    I --> J["DecalBakeService preview GLB"]
+    G --> K["Export Package"]
+    K --> L["Final GLB/OBJ/MTL/texture + notes"]
 ```
 
 ## Backend Domain Map
@@ -33,7 +37,9 @@ flowchart TD
 - **Mesh cleanup**: `MeshCleanupService` runs a server-generated Blender background script to normalize origin/scale/orientation, remove helper objects, repair basic mesh state, preserve materials/textures, and report editor-readiness. This is editor-ready cleanup, not production retopology or true sculpting.
 - **Model assets**: `ModelAssetService` exposes canonical files for the web editor and download buttons. Expected canonical names include `shoe_preview.glb`, `shoe.obj`, `shoe.mtl`, and `shoe_texture.png`.
 - **Design assets**: `DesignAssetService` stores uploaded/canvas/text-render sticker imagery and resolves payloads during bake/export.
-- **Design drafts**: `DesignService` stores design config JSON and refreshes baked preview GLB when decals exist.
+- **Design drafts**: `DesignService` stores design config JSON and marks preview state; queued workers refresh baked preview GLBs when decals exist.
+- **Projects**: `ProjectService` owns the external integration boundary for marketing/mobile/editor. The editor route receives only `projectId`, then loads `EditorContext` from `/api/projects/{projectId}/editor-context`.
+- **Jobs**: `JobService` enqueues preview bake work through Redis RQ. API save endpoints persist drafts quickly; the worker updates `Job` and `Design.previewStatus`.
 - **Customization target handling**: `customization_zones.py` no longer enforces strict allow/block shoe-zone names. Decal/text target names are accepted when present, missing targets are allowed, and bake falls back to base shoe meshes while still excluding generated decal meshes.
 - **Decal bake/export**: `DecalBakeService` uses Blender background mode (`apply_decals.py`) to project decal meshes onto the shoe surface and writes `final_shoe.glb`, `final_shoe.obj`, and `final_shoe.mtl`. `ExportPackageService` packages final model files, notes, previews, and config.
 
@@ -45,6 +51,7 @@ flowchart TD
 - **Artwork editor**: `ArtworkCanvasEditor` creates editable sticker artwork before upload/bake.
 - **Sticker presets**: `frontend/src/data/stickerPresets.ts` contains local preset decal metadata.
 - **Customization target filtering**: `frontend/src/utils/customizationZones.ts` excludes generated decal meshes from snapping targets but does not enforce strict shoe-zone allow/block terms.
+- **Desktop launcher**: The desktop shell opens the same editor code with `?desktop=1`; the lightweight launcher accepts a Project ID or web editor URL and then loads the existing project editor context.
 
 ## Current Product Decisions
 
@@ -77,6 +84,8 @@ Run these from the indicated directories when touching the related subsystem:
 - Backend tests: `cd backend; .\.venv\Scripts\python -m pytest`
 - Backend lint: `cd backend; .\.venv\Scripts\python -m ruff check .`
 - Frontend build: `cd frontend; npm run build`
+- Desktop frontend build: `cd frontend; npm run build -- --mode desktop`
+- Desktop package build: `cd desktop; npm install; npm run build` (requires Rust/Cargo and Tauri platform prerequisites)
 - Whitespace check: `git diff --check`
 
 Blender-dependent bake/reconstruction smoke tests require `blender` to be available in PATH or configured through `BLENDER_BIN`.

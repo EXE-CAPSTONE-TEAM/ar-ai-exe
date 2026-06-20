@@ -5,7 +5,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models import ModelAsset, ScanSession, ScanSource, ScanStatus, User
+from app.models import (
+    ModelAsset,
+    Project,
+    ProjectSourceType,
+    ProjectStatus,
+    ScanSession,
+    ScanSource,
+    ScanStatus,
+    User,
+)
 from app.schemas.scan import ScanMetadata
 from app.services.scan_metadata import scan_metadata_bytes
 from app.services.storage import get_storage_service
@@ -27,12 +36,22 @@ class ScanSessionService:
         self.settings = get_settings()
         self.storage = get_storage_service()
 
-    def create(self, user: User, metadata: ScanMetadata | None = None) -> ScanSession:
-        scan_session = ScanSession(user_id=user.id)
-        scan_session.web_design_url = self.web_design_url(scan_session.id)
+    def create(
+        self,
+        user: User,
+        metadata: ScanMetadata | None = None,
+        project_id: str | None = None,
+    ) -> ScanSession:
+        project = self._project_for_scan(
+            user,
+            project_id=project_id,
+            fallback_name="Untitled shoe scan",
+            source_type=ProjectSourceType.SCAN,
+        )
+        scan_session = ScanSession(user_id=user.id, project_id=project.id)
         self.db.add(scan_session)
         self.db.flush()
-        scan_session.web_design_url = self.web_design_url(scan_session.id)
+        scan_session.web_design_url = self.web_design_url(scan_session.id, project.id)
 
         if metadata:
             metadata_object = self.storage.put_bytes(
@@ -151,10 +170,12 @@ class ScanSessionService:
             scan_session.metadata_content_type = metadata_object.content_type
             scan_session.metadata_checksum = metadata_object.checksum
 
-        scan_session.web_design_url = self.web_design_url(scan_session.id)
+        scan_session.web_design_url = self.web_design_url(scan_session.id, scan_session.project_id)
         scan_session.status = (
             ScanStatus.UPLOADED if self.is_ready_for_processing(scan_session) else ScanStatus.WAITING_FOR_UPLOADS
         )
+        if scan_session.project:
+            scan_session.project.status = ProjectStatus.PROCESSING
         scan_session.error_message = None
         self.db.commit()
         self.db.refresh(scan_session)
@@ -170,7 +191,7 @@ class ScanSessionService:
         scan_session.metadata_size_bytes = metadata_object.size_bytes
         scan_session.metadata_content_type = metadata_object.content_type
         scan_session.metadata_checksum = metadata_object.checksum
-        scan_session.web_design_url = self.web_design_url(scan_session.id)
+        scan_session.web_design_url = self.web_design_url(scan_session.id, scan_session.project_id)
         scan_session.error_message = None
         self.db.commit()
         self.db.refresh(scan_session)
@@ -187,12 +208,50 @@ class ScanSessionService:
             raise ValueError(f"Scan session {scan_session_id} not found.")
         scan_session.status = status_value
         scan_session.error_message = error_message
+        if scan_session.project:
+            scan_session.project.status = self._project_status_from_scan_status(status_value)
         self.db.commit()
         self.db.refresh(scan_session)
         return scan_session
 
-    def web_design_url(self, scan_session_id: str) -> str:
+    def web_design_url(self, scan_session_id: str, project_id: str | None = None) -> str:
+        if project_id:
+            return f"{self.settings.web_app_base_url.rstrip('/')}/editor/{project_id}"
         return f"{self.settings.web_app_base_url.rstrip('/')}/design?scanId={scan_session_id}"
+
+    def _project_for_scan(
+        self,
+        user: User,
+        project_id: str | None,
+        fallback_name: str,
+        source_type: str,
+    ) -> Project:
+        if project_id:
+            project = self.db.get(Project, project_id)
+            if not project or project.user_id != user.id:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+            return project
+
+        project = Project(
+            user_id=user.id,
+            name=fallback_name,
+            status=ProjectStatus.DRAFT,
+            source_type=source_type,
+        )
+        self.db.add(project)
+        self.db.flush()
+        return project
+
+    def _project_status_from_scan_status(self, status_value: str) -> str:
+        if status_value == ScanStatus.COMPLETED:
+            return ProjectStatus.READY
+        if status_value == ScanStatus.FAILED:
+            return ProjectStatus.FAILED
+        if status_value == ScanStatus.CREATED:
+            return ProjectStatus.DRAFT
+        if status_value in {ScanStatus.WAITING_FOR_UPLOADS, ScanStatus.UPLOADED}:
+            return ProjectStatus.PROCESSING
+        return ProjectStatus.PROCESSING
 
     def _raw_video_key(self, scan_session_id: str, pass_type: str) -> str:
         file_name = "side_orbit.mp4" if pass_type == "side_orbit" else "top_orbit.mp4"

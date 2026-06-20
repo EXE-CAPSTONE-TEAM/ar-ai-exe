@@ -4,6 +4,7 @@ class ScanGuideOverlay extends StatelessWidget {
   const ScanGuideOverlay({
     required this.seconds,
     required this.isRecording,
+    required this.passTitle,
     required this.idleInstruction,
     required this.recordingInstruction,
     super.key,
@@ -11,6 +12,7 @@ class ScanGuideOverlay extends StatelessWidget {
 
   final int seconds;
   final bool isRecording;
+  final String passTitle;
   final String idleInstruction;
   final String recordingInstruction;
 
@@ -26,17 +28,31 @@ class ScanGuideOverlay extends StatelessWidget {
             children: [
               DecoratedBox(
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(8),
+                  color: const Color(0xFF0A0F14).withValues(alpha: 0.72),
+                  borderRadius: BorderRadius.circular(16),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.12)),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text(
-                    isRecording
-                        ? '$recordingInstruction $seconds s'
-                        : '$idleInstruction Recommended scan: 30-60 s.',
-                    style: const TextStyle(color: Colors.white),
-                    textAlign: TextAlign.center,
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    children: [
+                      Text(
+                        passTitle,
+                        style: const TextStyle(
+                          color: Color(0xFFF36A35),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        isRecording
+                            ? '$recordingInstruction $seconds s'
+                            : '$idleInstruction Recommended scan: 30-60 s.',
+                        style: const TextStyle(color: Colors.white),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -58,10 +74,11 @@ class _GuidePainter extends CustomPainter {
       height: size.height * 0.46,
     );
     final paint = Paint()
-      ..color = Colors.white
+      ..color = const Color(0xFFF36A35)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3;
-    canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(20)), paint);
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, const Radius.circular(20)), paint);
   }
 
   @override

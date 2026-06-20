@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models import ModelAsset, User
+from app.models import AssetStatus, ModelAsset, ProjectStatus, ScanSession, User
 from app.schemas.model_asset import ModelAssetResponse
 from app.services.storage import get_storage_service
 
@@ -79,6 +79,7 @@ class ModelAssetService:
         scan_session_id: str,
         files: ModelAssetFiles,
         storage_prefix: str | None = None,
+        source_type: str = "scan",
     ) -> ModelAsset:
         prefix = (storage_prefix or f"models/{scan_session_id}").strip("/")
         glb_object = self.storage.put_bytes(
@@ -119,6 +120,8 @@ class ModelAssetService:
 
         asset = ModelAsset(
             scan_session_id=scan_session_id,
+            status=AssetStatus.READY,
+            source_type=source_type,
             glb_path=glb_object.key,
             glb_size_bytes=glb_object.size_bytes,
             glb_content_type=glb_object.content_type,
@@ -149,6 +152,9 @@ class ModelAssetService:
             obj_package_zip_checksum=obj_package_object.checksum,
         )
         self.db.add(asset)
+        scan_session = self.db.get(ScanSession, scan_session_id)
+        if scan_session and scan_session.project:
+            scan_session.project.status = ProjectStatus.READY
         self.db.commit()
         self.db.refresh(asset)
         return asset
@@ -162,10 +168,15 @@ class ModelAssetService:
         return ModelAssetResponse(
             id=asset.id,
             scanSessionId=asset.scan_session_id,
+            projectId=asset.scan_session.project_id if asset.scan_session else None,
+            status=asset.status,
+            sourceType=asset.source_type,
             glbUrl=f"/api/models/{asset.id}/download/glb",
+            canonicalGlbUrl=f"/api/models/{asset.id}/download/glb",
             objUrl=f"/api/models/{asset.id}/download/obj",
             mtlUrl=f"/api/models/{asset.id}/download/mtl",
             textureUrl=f"/api/models/{asset.id}/download/texture",
+            textureUrls=[f"/api/models/{asset.id}/download/texture"],
             metadataUrl=f"/api/models/{asset.id}/download/metadata",
             qualityReportUrl=f"/api/models/{asset.id}/quality-report",
             objPackageZipUrl=f"/api/models/{asset.id}/download/obj-package",

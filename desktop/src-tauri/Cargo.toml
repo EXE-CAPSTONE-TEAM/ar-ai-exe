@@ -1,0 +1,17 @@
+[package]
+name = "kusshoes-editor-desktop"
+version = "0.1.0"
+description = "KusShoes desktop editor shell"
+authors = ["KusShoes"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# cookie 0.18.1 currently fails against time 0.3.48 on Rust 1.96 with E0119.
+# Keep the shared transitive time version below that compiler-incompatible edge.
+time = "=0.3.44"

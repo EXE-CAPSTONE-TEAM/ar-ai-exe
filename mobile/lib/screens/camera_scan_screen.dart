@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -23,13 +22,17 @@ enum ScanPass {
       };
 
   String get idleInstruction => switch (this) {
-        ScanPass.sideOrbit => 'Keep the phone level with the shoe side and orbit 360 degrees.',
-        ScanPass.topOrbit => 'Hold the phone 30-45 degrees above the shoe and orbit 360 degrees.',
+        ScanPass.sideOrbit =>
+          'Keep the phone level with the shoe side and orbit 360 degrees.',
+        ScanPass.topOrbit =>
+          'Hold the phone 30-45 degrees above the shoe and orbit 360 degrees.',
       };
 
   String get recordingInstruction => switch (this) {
-        ScanPass.sideOrbit => 'Move slowly around the shoe side. Keep the shoe centered.',
-        ScanPass.topOrbit => 'Keep the upper visible while orbiting. Avoid scanning the sole.',
+        ScanPass.sideOrbit =>
+          'Move slowly around the shoe side. Keep the shoe centered.',
+        ScanPass.topOrbit =>
+          'Keep the upper visible while orbiting. Avoid scanning the sole.',
       };
 }
 
@@ -43,7 +46,7 @@ class CameraScanScreen extends StatefulWidget {
 
   final ScanMetadata metadata;
   final ScanPass pass;
-  final File? sideVideoFile;
+  final XFile? sideVideoFile;
 
   @override
   State<CameraScanScreen> createState() => _CameraScanScreenState();
@@ -76,7 +79,8 @@ class _CameraScanScreenState extends State<CameraScanScreen> {
         setState(() => _error = 'No camera found on this device.');
         return;
       }
-      final controller = CameraController(cameras.first, ResolutionPreset.high, enableAudio: false);
+      final controller = CameraController(cameras.first, ResolutionPreset.high,
+          enableAudio: false);
       await controller.initialize();
       setState(() => _controller = controller);
     } catch (error) {
@@ -101,8 +105,10 @@ class _CameraScanScreenState extends State<CameraScanScreen> {
                         child: ScanGuideOverlay(
                           seconds: _seconds,
                           isRecording: _isRecording,
+                          passTitle: widget.pass.title,
                           idleInstruction: widget.pass.idleInstruction,
-                          recordingInstruction: widget.pass.recordingInstruction,
+                          recordingInstruction:
+                              widget.pass.recordingInstruction,
                         ),
                       ),
                       Positioned(
@@ -110,9 +116,14 @@ class _CameraScanScreenState extends State<CameraScanScreen> {
                         right: 16,
                         bottom: 24,
                         child: FilledButton.icon(
-                          onPressed: _isRecording ? _stopRecording : _startRecording,
-                          icon: Icon(_isRecording ? Icons.stop : Icons.fiber_manual_record),
-                          label: Text(_isRecording ? 'Stop recording' : 'Start recording'),
+                          onPressed:
+                              _isRecording ? _stopRecording : _startRecording,
+                          icon: Icon(_isRecording
+                              ? Icons.stop
+                              : Icons.fiber_manual_record),
+                          label: Text(_isRecording
+                              ? 'Stop recording'
+                              : 'Start recording'),
                         ),
                       ),
                     ],
@@ -143,7 +154,6 @@ class _CameraScanScreenState extends State<CameraScanScreen> {
     }
     _timer?.cancel();
     final video = await controller.stopVideoRecording();
-    final videoFile = File(video.path);
     setState(() => _isRecording = false);
     if (!mounted) {
       return;
@@ -154,7 +164,7 @@ class _CameraScanScreenState extends State<CameraScanScreen> {
           builder: (_) => CameraScanScreen(
             metadata: widget.metadata,
             pass: ScanPass.topOrbit,
-            sideVideoFile: videoFile,
+            sideVideoFile: video,
           ),
         ),
       );
@@ -171,7 +181,7 @@ class _CameraScanScreenState extends State<CameraScanScreen> {
         builder: (_) => UploadProgressScreen(
           metadata: widget.metadata,
           sideVideoFile: sideVideoFile,
-          topVideoFile: videoFile,
+          topVideoFile: video,
         ),
       ),
     );

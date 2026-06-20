@@ -29,10 +29,13 @@ class DesignService:
         model_asset_id: str,
         name: str,
         config: DesignConfig | None,
+        project_id: str | None = None,
     ) -> Design:
         asset = self.db.get(ModelAsset, model_asset_id)
         if not asset or asset.scan_session.user_id != user.id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model asset not found.")
+        if project_id and asset.scan_session.project_id != project_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
 
         config_payload = (
             config.model_dump(by_alias=True)
@@ -42,10 +45,12 @@ class DesignService:
         validate_design_config_customization_zones(config_payload)
         design = Design(
             user_id=user.id,
+            project_id=project_id or asset.scan_session.project_id,
             model_asset_id=model_asset_id,
             name=name,
             design_config_path="",
             status=DesignStatus.DRAFT,
+            preview_status=DesignPreviewStatus.PENDING,
         )
         self.db.add(design)
         self.db.flush()
@@ -59,7 +64,6 @@ class DesignService:
 
         self.db.commit()
         self.db.refresh(design)
-        self.refresh_preview(design)
         return design
 
     def get_for_user(self, design_id: str, user: User) -> Design:
@@ -84,16 +88,18 @@ class DesignService:
                 json.dumps(config_payload, indent=2).encode("utf-8"),
                 "application/json",
             )
+            design.preview_status = DesignPreviewStatus.PENDING
+            design.preview_error_message = None
+            self._clear_preview_artifact(design)
         self.db.commit()
         self.db.refresh(design)
-        if config is not None:
-            self.refresh_preview(design)
         return design
 
     def response(self, design: Design) -> DesignResponse:
         return DesignResponse(
             id=design.id,
             userId=design.user_id,
+            projectId=design.project_id,
             modelAssetId=design.model_asset_id,
             name=design.name,
             status=design.status,
@@ -132,9 +138,14 @@ class DesignService:
         )
 
     def refresh_preview(self, design: Design) -> None:
+        design.preview_status = DesignPreviewStatus.PROCESSING
+        design.preview_error_message = None
+        self.db.commit()
+        self.db.refresh(design)
+
         design_config = self.read_config(design)
         if not self._has_decals(design_config):
-            self._mark_preview_none(design)
+            self._mark_preview_ready_without_artifact(design)
             self.db.commit()
             self.db.refresh(design)
             return
@@ -202,6 +213,12 @@ class DesignService:
     def _mark_preview_none(self, design: Design) -> None:
         self._clear_preview_artifact(design)
         design.preview_status = DesignPreviewStatus.NONE
+        design.preview_error_message = None
+        design.preview_updated_at = datetime.utcnow()
+
+    def _mark_preview_ready_without_artifact(self, design: Design) -> None:
+        self._clear_preview_artifact(design)
+        design.preview_status = DesignPreviewStatus.READY
         design.preview_error_message = None
         design.preview_updated_at = datetime.utcnow()
 

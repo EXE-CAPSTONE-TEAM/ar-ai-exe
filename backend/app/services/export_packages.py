@@ -7,7 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models import Design, DesignStatus, ExportPackage, ModelAsset, User
+from app.models import Design, DesignStatus, ExportPackage, ExportStatus, ModelAsset, User
 from app.schemas.export import ExportPackageResponse
 from app.services.decal_baker import DecalBakeService
 from app.services.design_assets import DesignAssetService
@@ -149,8 +149,13 @@ class ExportPackageService:
         return ExportPackageResponse(
             id=export_package.id,
             designId=export_package.design_id,
-            status=export_package.status,
+            status=(
+                ExportStatus.READY
+                if export_package.status == ExportStatus.COMPLETED
+                else export_package.status
+            ),
             downloadUrl=f"/api/exports/{export_package.id}/download",
+            zipUrl=f"/api/exports/{export_package.id}/download",
             files=[
                 "final_shoe.glb",
                 "final_shoe.obj",
