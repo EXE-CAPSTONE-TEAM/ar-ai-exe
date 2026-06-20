@@ -1,9 +1,11 @@
 # syntax=docker/dockerfile:1.7
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 ARG OPENMVS_REF=v2.4.0
+ARG OPENMVS_BUILD_JOBS=2
 
 FROM ${PYTHON_IMAGE} AS openmvs-builder
 ARG OPENMVS_REF
+ARG OPENMVS_BUILD_JOBS
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
@@ -59,7 +61,7 @@ RUN git clone --depth 1 --branch "${OPENMVS_REF}" https://github.com/cdcseacave/
         -DOpenMVS_USE_PYTHON=OFF \
         -DOpenMVS_ENABLE_IPO=OFF \
         -DOpenMVS_ENABLE_TESTS=OFF \
-    && cmake --build openMVS-build --parallel "$(nproc)" \
+    && cmake --build openMVS-build --parallel "${OPENMVS_BUILD_JOBS}" \
     && cmake --install openMVS-build \
     && for binary in InterfaceCOLMAP DensifyPointCloud ReconstructMesh RefineMesh TextureMesh; do \
         ln -s "/opt/openmvs/bin/OpenMVS/$binary" "/opt/openmvs/bin/$binary"; \
@@ -80,6 +82,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     COLMAP_BIN=colmap \
     BLENDER_BIN=blender \
     FFMPEG_BIN=ffmpeg \
+    OMP_NUM_THREADS=2 \
+    OPENBLAS_NUM_THREADS=2 \
+    MKL_NUM_THREADS=2 \
+    NUMEXPR_NUM_THREADS=2 \
     QT_QPA_PLATFORM=offscreen \
     LD_LIBRARY_PATH="/opt/openmvs/lib:${LD_LIBRARY_PATH}" \
     PATH="/opt/openmvs/bin:${PATH}"

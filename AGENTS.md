@@ -29,7 +29,7 @@ flowchart TD
 
 ## Operating Rules
 
-- Respect the boundaries of `backend/` (FastAPI/Python), `frontend/` (React/Vite/TS), `mobile/`, `docs/`, and `.agents/skills/`.
+- Respect the boundaries of `backend/` (FastAPI/Python), `frontend/` (React/Vite/TS), `desktop/` (Tauri shell for the existing frontend editor), `mobile/`, `docs/`, and `.agents/skills/`.
 - Do not assume file paths. Use `project-structure`, CodeGraph, or deterministic directory listing before editing unfamiliar areas.
 - Prefer existing services, schemas, components, and conventions over new abstractions.
 - Keep changes vertical and scoped. Do not move logic across backend/frontend/mobile boundaries without a documented architecture reason.

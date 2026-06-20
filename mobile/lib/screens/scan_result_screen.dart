@@ -31,7 +31,8 @@ class ScanResultScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Scan session ID', style: Theme.of(context).textTheme.titleMedium),
+                    Text('Scan session ID',
+                        style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 8),
                     SelectableText(scanSessionId),
                     const SizedBox(height: 10),
@@ -41,9 +42,11 @@ class ScanResultScreen extends StatelessWidget {
                       label: const Text('Copy scan ID'),
                     ),
                     const SizedBox(height: 24),
-                    Text('Status', style: Theme.of(context).textTheme.titleMedium),
+                    Text('Status',
+                        style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 8),
-                    _StatusChip(label: statusLabel, isProcessing: processingStarted),
+                    _StatusChip(
+                        label: statusLabel, isProcessing: processingStarted),
                     const SizedBox(height: 16),
                     Text(
                       processingStarted
@@ -53,7 +56,8 @@ class ScanResultScreen extends StatelessWidget {
                               : 'Both shoe videos uploaded. Processing has not started yet.',
                     ),
                     const SizedBox(height: 24),
-                    Text('Web design URL', style: Theme.of(context).textTheme.titleMedium),
+                    Text('Web design URL',
+                        style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 8),
                     SelectableText(webDesignUrl),
                     const SizedBox(height: 16),
@@ -82,7 +86,8 @@ class ScanResultScreen extends StatelessWidget {
               child: SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+                  onPressed: () =>
+                      Navigator.of(context).popUntil((route) => route.isFirst),
                   icon: const Icon(Icons.add_a_photo_outlined),
                   label: const Text('Scan another shoe'),
                 ),
@@ -151,7 +156,9 @@ class _StatusChip extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: isProcessing ? colorScheme.primaryContainer : colorScheme.surfaceContainerHighest,
+        color: isProcessing
+            ? colorScheme.primaryContainer
+            : colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Padding(
@@ -159,7 +166,9 @@ class _StatusChip extends StatelessWidget {
         child: Text(
           label,
           style: TextStyle(
-            color: isProcessing ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+            color: isProcessing
+                ? colorScheme.onPrimaryContainer
+                : colorScheme.onSurfaceVariant,
           ),
         ),
       ),

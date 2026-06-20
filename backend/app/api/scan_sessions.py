@@ -41,13 +41,18 @@ def scan_response(scan_session: ScanSession, model_asset_id: str | None) -> Scan
     payload["uploaded_passes"] = ScanSessionService.uploaded_passes(scan_session)
     payload["required_passes"] = ScanSessionService.required_passes_for(scan_session)
     if not payload.get("web_design_url"):
-        payload["web_design_url"] = f"{get_settings().web_app_base_url.rstrip('/')}/design?scanId={scan_session.id}"
+        payload["web_design_url"] = (
+            f"{get_settings().web_app_base_url.rstrip('/')}/editor/{scan_session.project_id}"
+            if scan_session.project_id
+            else f"{get_settings().web_app_base_url.rstrip('/')}/design?scanId={scan_session.id}"
+        )
     return ScanSessionResponse.model_validate(payload)
 
 
 def status_response(scan_session: ScanSession, service: ScanSessionService) -> ScanStatusResponse:
     return ScanStatusResponse(
         id=scan_session.id,
+        projectId=scan_session.project_id,
         status=scan_session.status,
         errorMessage=scan_session.error_message,
         sourceType=scan_session.source_type,
@@ -58,7 +63,8 @@ def status_response(scan_session: ScanSession, service: ScanSessionService) -> S
         requiredPasses=service.required_passes_for(scan_session),
         readyForProcessing=service.is_ready_for_processing(scan_session),
         processingStarted=scan_session.status in ACTIVE_PROCESSING_STATUSES,
-        webDesignUrl=scan_session.web_design_url or service.web_design_url(scan_session.id),
+        webDesignUrl=scan_session.web_design_url
+        or service.web_design_url(scan_session.id, scan_session.project_id),
     )
 
 
@@ -68,7 +74,11 @@ def create_scan_session(
     db: Annotated[Session, Depends(get_db)],
     payload: Annotated[ScanSessionCreate | None, Body()] = None,
 ) -> ScanSessionResponse:
-    scan_session = ScanSessionService(db).create(current_user, payload.metadata if payload else None)
+    scan_session = ScanSessionService(db).create(
+        current_user,
+        payload.metadata if payload else None,
+        payload.project_id if payload else None,
+    )
     return scan_response(scan_session, None)
 
 

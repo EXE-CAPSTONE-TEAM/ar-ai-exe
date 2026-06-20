@@ -1,0 +1,100 @@
+name: SonarCloud
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+    types: [ opened, synchronize, reopened ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: sonarcloud-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze and publish high-risk findings
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SONAR_HOST_URL: "${{ vars.SONAR_HOST_URL || 'https://sonarcloud.io' }}"
+      SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+      SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate SonarCloud configuration
+        id: sonar_config
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          missing=""
+          for name in SONAR_TOKEN SONAR_PROJECT_KEY SONAR_ORGANIZATION; do
+            if [ -z "${!name}" ]; then
+              missing="$missing $name"
+            fi
+          done
+
+          if [ -n "$missing" ]; then
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "::notice::SonarCloud skipped because configuration is missing:$missing"
+              echo "run_sonar=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::Missing required SonarCloud configuration:$missing"
+            exit 1
+          fi
+
+          echo "run_sonar=true" >> "$GITHUB_OUTPUT"
+
+      - name: Cache SonarQube scanner packages
+        if: steps.sonar_config.outputs.run_sonar == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      - name: SonarCloud scan
+        id: scan
+        if: steps.sonar_config.outputs.run_sonar == 'true'
+        continue-on-error: true
+        uses: SonarSource/sonarqube-scan-action@v8.2.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
+            -Dsonar.organization=${{ env.SONAR_ORGANIZATION }}
+            -Dsonar.qualitygate.wait=true
+
+      - name: Create GitHub issues for high-risk SonarCloud findings
+        if: >
+          steps.sonar_config.outputs.run_sonar == 'true' &&
+          (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main')
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
+          SONAR_PROJECT_KEY: ${{ env.SONAR_PROJECT_KEY }}
+          SONAR_FINDING_LABELS: "${{ vars.SONAR_FINDING_LABELS || 'security,bug,sonarqube,priority: high' }}"
+          SONAR_MAX_ISSUES: "${{ vars.SONAR_MAX_ISSUES || '100' }}"
+        run: python3 scripts/sonarcloud_issue_export.py
+
+      - name: Fail workflow after publishing findings when scan failed
+        if: steps.sonar_config.outputs.run_sonar == 'true' && steps.scan.outcome == 'failure'
+        run: |
+          echo "::error::SonarCloud scan or quality gate failed. Issues were published when this was a main/manual run."
+          exit 1

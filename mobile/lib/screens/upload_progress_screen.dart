@@ -1,5 +1,4 @@
-import 'dart:io';
-
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 
 import '../models/scan_metadata.dart';
@@ -15,8 +14,8 @@ class UploadProgressScreen extends StatefulWidget {
   });
 
   final ScanMetadata metadata;
-  final File sideVideoFile;
-  final File topVideoFile;
+  final XFile sideVideoFile;
+  final XFile topVideoFile;
 
   @override
   State<UploadProgressScreen> createState() => _UploadProgressScreenState();
@@ -48,7 +47,8 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
       _message = 'Creating scan session';
     });
     try {
-      final scanSessionId = await _api.createScanSession(metadata: widget.metadata);
+      final scanSessionId =
+          await _api.createScanSession(metadata: widget.metadata);
       _safeSetState(() {
         _step = 1;
         _message = 'Uploading side orbit';
@@ -75,9 +75,10 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
         _progress = 0;
         _message = 'Starting reconstruction';
       });
-      final processingStatus = await _api.startProcessing(scanSessionId: scanSessionId);
-      final processingStarted =
-          processingStatus != 'toolchain_unavailable' && processingStatus != 'failed';
+      final processingStatus =
+          await _api.startProcessing(scanSessionId: scanSessionId);
+      final processingStarted = processingStatus != 'toolchain_unavailable' &&
+          processingStatus != 'failed';
       if (!mounted) {
         return;
       }
@@ -141,7 +142,8 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
               const SizedBox(height: 16),
               Text(_message, textAlign: TextAlign.center),
               const SizedBox(height: 8),
-              Text(_step == 0 ? 'Preparing' : 'Step $_step of 3', textAlign: TextAlign.center),
+              Text(_step == 0 ? 'Preparing' : 'Step $_step of 3',
+                  textAlign: TextAlign.center),
               if (_failed) ...[
                 const SizedBox(height: 18),
                 OutlinedButton.icon(

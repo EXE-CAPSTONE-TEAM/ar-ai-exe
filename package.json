@@ -1,0 +1,28 @@
+{
+  "name": "ar-ai-exe",
+  "version": "1.0.0",
+  "description": "Prototype MVP for a shoe-only video-to-3D reconstruction and web visual customization workflow.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepare": "husky"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kiet-ta/ar-ai-exe.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/kiet-ta/ar-ai-exe/issues"
+  },
+  "homepage": "https://github.com/kiet-ta/ar-ai-exe#readme",
+  "devDependencies": {
+    "husky": "^9.1.7"
+  }
+}

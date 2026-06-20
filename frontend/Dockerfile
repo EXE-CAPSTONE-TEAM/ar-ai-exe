@@ -3,7 +3,9 @@ FROM node:22-alpine AS build
 WORKDIR /app/frontend
 
 ARG VITE_API_BASE_URL=""
+ARG VITE_MARKETING_LOGIN_URL="https://kusshoes.vn/login"
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+ENV VITE_MARKETING_LOGIN_URL=$VITE_MARKETING_LOGIN_URL
 
 COPY frontend/package*.json ./
 RUN npm ci

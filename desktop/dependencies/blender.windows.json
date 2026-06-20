@@ -1,0 +1,9 @@
+{
+  "name": "blender",
+  "version": "4.5.1",
+  "downloadUrl": "https://download.blender.org/release/Blender4.5/blender-4.5.1-windows-x64.zip",
+  "sha256": "REPLACE_WITH_OFFICIAL_SHA256_BEFORE_RELEASE",
+  "archiveType": "zip",
+  "exeRelativePath": "blender-4.5.1-windows-x64/blender.exe",
+  "installedSizeEstimate": "1.6 GB"
+}

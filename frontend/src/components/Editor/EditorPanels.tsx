@@ -34,6 +34,9 @@ type EditorPanelsProps = {
   designName: string;
   isSaving: boolean;
   isExporting: boolean;
+  canEdit: boolean;
+  canBake: boolean;
+  canExport: boolean;
   exportMessage: string | null;
   exportPackage: ExportPackage | null;
   activeLayerId: string | null;
@@ -60,6 +63,9 @@ export function EditorPanels({
   designName,
   isSaving,
   isExporting,
+  canEdit,
+  canBake,
+  canExport,
   exportMessage,
   exportPackage,
   activeLayerId,
@@ -104,7 +110,7 @@ export function EditorPanels({
   const activeText = config.texts.find((t) => t.id === activeLayerId);
   const activeLayer = activeSticker || activeText;
   const activeLayerIsApplied = Boolean(activeLayer?.targetMeshName);
-  const isDesignBusy = isSaving || isExporting;
+  const isDesignBusy = isSaving || isExporting || !canEdit;
   const isArtworkBusy = isDesignBusy || isUploadingArtwork;
 
   function updateLayer(id: string, patch: any) {
@@ -167,7 +173,7 @@ export function EditorPanels({
         </div>
         <label>
           Draft name
-          <input value={designName} onChange={(event) => onNameChange(event.target.value)} />
+          <input value={designName} disabled={!canEdit || isSaving || isExporting} onChange={(event) => onNameChange(event.target.value)} />
         </label>
       </section>
 
@@ -494,16 +500,16 @@ export function EditorPanels({
             <p className="muted">Export creates the ZIP and starts the download automatically.</p>
           </div>
         </div>
-        <button className="primary-button" type="button" disabled={isDesignBusy} onClick={onSave}>
+        <button className="primary-button" type="button" disabled={isSaving || isExporting || !canEdit || !canBake} onClick={onSave}>
           <Save size={16} aria-hidden="true" />
           {isSaving ? "Applying..." : "Save Draft"}
         </button>
-        <button type="button" disabled={isDesignBusy} onClick={onExport}>
+        <button type="button" disabled={isSaving || isExporting || !canExport} onClick={onExport}>
           <Download size={16} aria-hidden="true" />
           {isExporting ? "Creating ZIP..." : "Export & Download ZIP"}
         </button>
         {exportPackage ? (
-          <button type="button" disabled={isDesignBusy} onClick={onDownload}>
+          <button type="button" disabled={isSaving || isExporting || !canExport} onClick={onDownload}>
             <Download size={16} aria-hidden="true" />
             Download ZIP again
           </button>

@@ -4,36 +4,71 @@ import {
   Cpu,
   HardDrive,
   ImagePlus,
+  Info,
+  Loader2,
   LogIn,
-  MousePointer2,
+  Monitor,
   RefreshCw,
-  Save,
   Search,
   UserPlus,
   Wrench,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
-import { api, ApiError, designStorageKey } from "./api/client";
+import { api, designStorageKey } from "./api/client";
+import {
+  getDesktopRuntime,
+  installDesktopDependency,
+  openDiagnosticsFolder,
+  restartDesktopBackend,
+} from "./api/desktopRuntime";
 import type { ModelImportPayload } from "./api/client";
+import { editorClient } from "./api/editorClient";
+import { setApiBaseUrl } from "./api/runtimeConfig";
 import { EditorPanels } from "./components/Editor/EditorPanels";
 import { AppShell } from "./components/Layout/AppShell";
 import { MetadataPanel } from "./components/MetadataPanel/MetadataPanel";
 import { ModelImportPanel } from "./components/ModelImport/ModelImportPanel";
 import { ModelViewer } from "./components/ModelViewer/ModelViewer";
+import { useEditorContext } from "./hooks/useEditorContext";
 import type {
   Design,
   DesignAssetSource,
   DesignConfig,
+  DesktopRuntime,
+  EditorContext,
+  EditorPermissions,
+  EditorReadiness,
   ExportPackage,
+  InstallProgress,
+  Job,
   ModelAsset,
-  ReconstructionReadiness,
   ScanSession,
   TextLayer,
   User,
 } from "./types";
+import {
+  editorRouteStateLabel,
+  friendlyInlineMessage,
+  messageFromError,
+  noticeFromStatus,
+} from "./utils/editorMessages";
+
+const MARKETING_LOGIN_URL = import.meta.env.VITE_MARKETING_LOGIN_URL ?? "https://kusshoes.vn/login";
+const DESKTOP_DEMO_PROJECT_ID = import.meta.env.VITE_DESKTOP_DEMO_PROJECT_ID ?? "proj_desktop_demo";
+const DEFAULT_EDITOR_PERMISSIONS: EditorPermissions = { canEdit: true, canBake: true, canExport: true };
 
 export function App() {
+  const isDesktopShell = useMemo(() => isDesktopShellLocation(), []);
+  const editorProjectId = useMemo(() => editorProjectIdFromLocation(isDesktopShell), [isDesktopShell]);
+  const isProjectEditor = Boolean(editorProjectId);
+  const [desktopRuntime, setDesktopRuntime] = useState<DesktopRuntime | null>(null);
+  const [desktopRuntimeError, setDesktopRuntimeError] = useState<string | null>(null);
+  const [isDesktopRuntimeLoading, setIsDesktopRuntimeLoading] = useState(isDesktopShell);
+  const [editorReadiness, setEditorReadiness] = useState<EditorReadiness | null>(null);
+  const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
+  const desktopRuntimeReady = !isDesktopShell || desktopRuntime?.backendStatus === "ready";
+  const editorContext = useEditorContext(desktopRuntimeReady ? editorProjectId : null);
   const [user, setUser] = useState<User | null>(null);
   const [scanId, setScanId] = useState(() => new URLSearchParams(window.location.search).get("scanId") ?? "");
   const [scanSession, setScanSession] = useState<ScanSession | null>(null);
@@ -47,7 +82,6 @@ export function App() {
   const [designName, setDesignName] = useState("Untitled shoe design");
   const [config, setConfig] = useState<DesignConfig | null>(null);
   const [exportPackage, setExportPackage] = useState<ExportPackage | null>(null);
-  const [readiness, setReadiness] = useState<ReconstructionReadiness | null>(null);
   const [statusMessage, setStatusMessage] = useState("Ready");
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -62,10 +96,24 @@ export function App() {
   const [meshBounds, setMeshBounds] = useState<{ center: [number, number, number]; size: [number, number, number] } | null>(null);
   const [gizmoMode, setGizmoMode] = useState<"translate" | "rotate" | "scale">("translate");
   const [surfaceApplyRequest, setSurfaceApplyRequest] = useState(0);
+  const [editorPermissions, setEditorPermissions] = useState<EditorPermissions>(DEFAULT_EDITOR_PERMISSIONS);
+  const [desktopProjectInput, setDesktopProjectInput] = useState("");
+  const [desktopLaunchError, setDesktopLaunchError] = useState<string | null>(null);
+  const [isDesktopDemoOpening, setIsDesktopDemoOpening] = useState(false);
+  const [isDesktopImportOpen, setIsDesktopImportOpen] = useState(false);
   const assetPreviewUrlsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    void loadReadiness();
+    if (!isDesktopShell) {
+      return;
+    }
+    void refreshDesktopRuntime();
+  }, [isDesktopShell]);
+
+  useEffect(() => {
+    if (isProjectEditor || isDesktopShell) {
+      return;
+    }
     if (!api.hasToken()) {
       setStatusMessage("Sign in to open scan designs.");
       return;
@@ -76,8 +124,31 @@ export function App() {
       .catch(() => {
         api.logout();
         setStatusMessage("Session expired. Sign in again.");
-      });
-  }, []);
+    });
+  }, [isDesktopShell, isProjectEditor]);
+
+  useEffect(() => {
+    if (!isProjectEditor) {
+      return;
+    }
+    if (editorContext.user) {
+      setUser(editorContext.user);
+    }
+  }, [editorContext.user, isProjectEditor]);
+
+  useEffect(() => {
+    if (!isProjectEditor || editorContext.state !== "UNAUTHENTICATED") {
+      return;
+    }
+    window.location.assign(loginRedirectUrl());
+  }, [editorContext.state, isProjectEditor]);
+
+  useEffect(() => {
+    if (!isProjectEditor || !editorContext.context) {
+      return;
+    }
+    void loadProjectEditorContext(editorContext.context);
+  }, [editorContext.context, isProjectEditor]);
 
   useEffect(() => {
     if (user && scanId.trim()) {
@@ -121,6 +192,20 @@ export function App() {
   const canLoad = useMemo(() => scanId.trim().length > 0 && Boolean(user), [scanId, user]);
   const activeModelUrl = previewModelUrl ?? modelUrl;
   const hiddenLayerIds = previewModelUrl ? bakedLayerIds : [];
+  const canUsePreviewRenderer =
+    !isDesktopShell ||
+    editorReadiness?.previewRenderer.available === true ||
+    desktopRuntime?.blenderStatus === "installed";
+  const isEditorBusy =
+    isSaving ||
+    isExporting ||
+    isImporting ||
+    isDesktopRuntimeLoading ||
+    editorContext.state === "AUTH_CHECKING" ||
+    editorContext.state === "PROJECT_LOADING";
+  const friendlyPreviewErrorMessage = previewErrorMessage ? friendlyInlineMessage(previewErrorMessage) : null;
+  const friendlyExportMessage = exportMessage ? friendlyInlineMessage(exportMessage) : null;
+  const isSaved = Boolean(config && savedConfigFingerprint && configFingerprint(config) === savedConfigFingerprint);
 
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -153,12 +238,103 @@ export function App() {
     }
   }
 
-  async function loadReadiness() {
+
+
+  async function loadEditorReadiness() {
     try {
-      setReadiness(await api.getReconstructionReadiness());
+      setEditorReadiness(await api.getEditorReadiness());
+    } catch {
+      setEditorReadiness(null);
+    }
+  }
+
+  async function refreshDesktopRuntime() {
+    setIsDesktopRuntimeLoading(true);
+    setDesktopRuntimeError(null);
+    try {
+      const runtime = await getDesktopRuntime();
+      setApiBaseUrl(runtime.apiBaseUrl);
+      setDesktopRuntime(runtime);
+      setStatusMessage(
+        runtime.backendStatus === "ready"
+          ? "EDITOR_READY"
+          : "Ứng dụng chưa khởi động được backend local. Vui lòng mở Diagnostics hoặc thử Restart.",
+      );
+      if (runtime.backendStatus === "ready") {
+        await loadEditorReadiness();
+      }
     } catch (error) {
-      setReadiness(null);
+      const message = messageFromError(error);
+      setDesktopRuntimeError(message);
+      setStatusMessage(message);
+    } finally {
+      setIsDesktopRuntimeLoading(false);
+    }
+  }
+
+  async function restartDesktopRuntimeBackend() {
+    setIsDesktopRuntimeLoading(true);
+    setDesktopRuntimeError(null);
+    try {
+      const runtime = await restartDesktopBackend();
+      setApiBaseUrl(runtime.apiBaseUrl);
+      setDesktopRuntime(runtime);
+      setStatusMessage(runtime.backendStatus === "ready" ? "EDITOR_READY" : "Ứng dụng chưa khởi động được backend local.");
+      if (runtime.backendStatus === "ready") {
+        await loadEditorReadiness();
+      }
+    } catch (error) {
+      const message = messageFromError(error);
+      setDesktopRuntimeError(message);
+      setStatusMessage(message);
+    } finally {
+      setIsDesktopRuntimeLoading(false);
+    }
+  }
+
+  async function installPreviewRenderer() {
+    setInstallProgress({
+      name: "blender",
+      status: "downloading",
+      message: "Ứng dụng đang chuẩn bị cài Preview renderer.",
+      percent: 5,
+    });
+    try {
+      const progress = await installDesktopDependency("blender");
+      setInstallProgress(progress);
+      await refreshDesktopRuntime();
+      if (progress.status === "installed") {
+        setStatusMessage("Preview renderer đã sẵn sàng.");
+      } else {
+        setStatusMessage("Preview renderer cần được cấu hình trước khi cài đặt.");
+      }
+    } catch (error) {
+      const message = messageFromError(error);
+      setInstallProgress({
+        name: "blender",
+        status: "failed",
+        message,
+        percent: 0,
+      });
+      setStatusMessage(message);
+    }
+  }
+
+  async function openDesktopDiagnostics() {
+    try {
+      await openDiagnosticsFolder();
+    } catch (error) {
       setStatusMessage(messageFromError(error));
+    }
+  }
+
+  async function copyDesktopDiagnostics() {
+    const summary = desktopRuntime?.diagnosticSummary ?? desktopRuntimeError ?? "Desktop diagnostics are not available.";
+    try {
+      await navigator.clipboard.writeText(summary);
+      setStatusMessage("Đã copy thông tin diagnostics.");
+    } catch {
+      setStatusMessage("Ứng dụng chưa copy được diagnostics. Vui lòng mở Logs để xem chi tiết.");
     }
   }
 
@@ -233,6 +409,67 @@ export function App() {
       setModelUrl(await api.fetchModelBlobUrl(loadedModel));
       const loadedPreview = await loadSavedDesign(loadedModel.id);
       setStatusMessage(loadedPreview ? "Model loaded with saved preview" : "Model loaded");
+    } catch (error) {
+      setStatusMessage(messageFromError(error));
+    }
+  }
+
+  async function loadProjectEditorContext(context: EditorContext) {
+    setStatusMessage("Loading project");
+    setEditorPermissions(context.permissions);
+    setScanSession(null);
+    setModelAsset(null);
+    setModelUrl(null);
+    clearAssetPreviewUrls();
+    clearSavedDesignState();
+    setExportPackage(null);
+    setExportMessage(null);
+    setActiveLayerId(null);
+    setMeshBounds(null);
+
+    const loadedModel = context.modelAsset;
+    if (!loadedModel) {
+      setDesign(context.latestDesign);
+      setConfig(null);
+      setDesignName(context.latestDesign?.name ?? context.project.name);
+      setStatusMessage("MODEL_PROCESSING: Project model is not ready yet.");
+      return;
+    }
+    if (loadedModel.status === "failed") {
+      setConfig(null);
+      setStatusMessage("MODEL_PROCESSING: Project model processing failed.");
+      return;
+    }
+    if (loadedModel.status !== "ready") {
+      setConfig(null);
+      setStatusMessage("MODEL_PROCESSING: Project model is still processing.");
+      return;
+    }
+
+    try {
+      setModelAsset(loadedModel);
+      setModelUrl(await api.fetchModelBlobUrl(loadedModel));
+      if (context.latestDesign) {
+        setDesign(context.latestDesign);
+        setDesignName(context.latestDesign.name);
+        const hydratedConfig = normalizeFixedMaterial(
+          await hydrateDesignAssetPreviewUrls(context.latestDesign.designConfig),
+        );
+        setConfig(hydratedConfig);
+        setSavedConfigFingerprint(configFingerprint(context.latestDesign.designConfig));
+        setPreviewErrorMessage(
+          context.latestDesign.previewStatus === "failed"
+            ? context.latestDesign.previewErrorMessage
+            : null,
+        );
+        await loadBakedPreview(context.latestDesign);
+      } else {
+        setDesign(null);
+        setDesignName(context.project.name);
+        setConfig(createDefaultConfig(loadedModel.id));
+        setSavedConfigFingerprint(null);
+      }
+      setStatusMessage(context.latestDesign?.previewGlbUrl ? "PREVIEW_READY" : "EDITOR_READY");
     } catch (error) {
       setStatusMessage(messageFromError(error));
     }
@@ -347,28 +584,52 @@ export function App() {
     if (!modelAsset || !config) {
       return;
     }
+    if (isProjectEditor && (!editorPermissions.canEdit || !editorPermissions.canBake)) {
+      setStatusMessage("FORBIDDEN: You do not have permission to save or bake this design.");
+      return null;
+    }
 
     setIsSaving(true);
-    setStatusMessage("Đang áp sticker/text vào giày...");
+    setStatusMessage("SAVING_DRAFT");
     try {
-      const bakeConfig = await prepareBakeConfig(config);
-      const savedDesign = design
-        ? await api.updateDesign(design.id, designName, bakeConfig)
-        : await api.createDesign(modelAsset.id, designName, bakeConfig);
-      setDesign(savedDesign);
-      setDesignName(savedDesign.name);
-      setConfig(await hydrateDesignAssetPreviewUrls(savedDesign.designConfig));
-      setSavedConfigFingerprint(configFingerprint(savedDesign.designConfig));
-      localStorage.setItem(designStorageKey(modelAsset.id), savedDesign.id);
-      const hasPreview = await loadBakedPreview(savedDesign);
-      if (savedDesign.previewStatus === "failed") {
-        setPreviewErrorMessage(savedDesign.previewErrorMessage ?? "Move the sticker/text closer to the shoe and save again.");
-        setStatusMessage(savedDesign.previewErrorMessage ?? "Draft saved, but preview bake failed.");
+      const bakeConfig = withEditorMetadata(await prepareBakeConfig(config));
+      const savedDesign =
+        isProjectEditor && editorProjectId
+          ? await editorClient.saveDesign(editorProjectId, bakeConfig, designName)
+          : design
+            ? await api.updateDesign(design.id, designName, bakeConfig)
+            : await api.createDesign(modelAsset.id, designName, bakeConfig);
+      const job = isProjectEditor
+        ? await editorClient.bakeDesign(savedDesign.id)
+        : await api.bakeDesign(savedDesign.id);
+      setStatusMessage("BAKING");
+      const completedJob = isProjectEditor
+        ? await waitForBakeJob(job.id, editorClient.getJob)
+        : await waitForBakeJob(job.id, api.getJob);
+      const refreshedDesign = isProjectEditor
+        ? await editorClient.getDesign(savedDesign.id)
+        : await api.getDesign(savedDesign.id);
+
+      setDesign(refreshedDesign);
+      setDesignName(refreshedDesign.name);
+      setConfig(await hydrateDesignAssetPreviewUrls(refreshedDesign.designConfig));
+      setSavedConfigFingerprint(configFingerprint(refreshedDesign.designConfig));
+      if (!isProjectEditor) {
+        localStorage.setItem(designStorageKey(modelAsset.id), refreshedDesign.id);
+      }
+      const hasPreview = await loadBakedPreview(refreshedDesign);
+      if (completedJob.status === "failed" || refreshedDesign.previewStatus === "failed") {
+        const message =
+          completedJob.errorMessage ??
+          refreshedDesign.previewErrorMessage ??
+          "Move the sticker/text closer to the shoe and save again.";
+        setPreviewErrorMessage(message);
+        setStatusMessage(message);
       } else {
         setPreviewErrorMessage(null);
-        setStatusMessage(hasPreview ? "Draft saved and applied to shoe" : "Design saved");
+        setStatusMessage(hasPreview ? "PREVIEW_READY" : "EDITOR_READY");
       }
-      return savedDesign;
+      return refreshedDesign;
     } catch (error) {
       setStatusMessage(messageFromError(error));
       return null;
@@ -378,6 +639,10 @@ export function App() {
   }
 
   function handleConfigChange(nextConfig: DesignConfig) {
+    if (isProjectEditor && !editorPermissions.canEdit) {
+      setStatusMessage("FORBIDDEN: You do not have permission to edit this design.");
+      return;
+    }
     if (previewModelUrl && config && !canKeepBakedPreview(config, nextConfig, bakedLayerIds)) {
       clearBakedPreview();
     }
@@ -392,6 +657,9 @@ export function App() {
   }
 
   async function uploadDesignAssetWithPreview(file: File, sourceType: Extract<DesignAssetSource, "upload" | "canvas">) {
+    if (isProjectEditor && !editorPermissions.canEdit) {
+      throw new Error("You do not have permission to edit this design.");
+    }
     const asset = await api.uploadDesignAsset(file, sourceType);
     return {
       assetId: asset.id,
@@ -405,14 +673,21 @@ export function App() {
     if (isSaving || isExporting) {
       return;
     }
+    if (isProjectEditor && !editorPermissions.canExport) {
+      setExportMessage("You do not have permission to export this design.");
+      setStatusMessage("FORBIDDEN: You do not have permission to export this design.");
+      return;
+    }
 
     setIsExporting(true);
-    setExportMessage("Preparing export package...");
-    setStatusMessage("Preparing export package");
+    setExportMessage("EXPORTING");
+    setStatusMessage("EXPORTING");
     try {
       const hasUnsavedConfig = config ? configFingerprint(config) !== savedConfigFingerprint : false;
       const savedDesign = !design || hasUnsavedConfig ? await saveDesign() : design;
-      const activeDesignId = savedDesign?.id ?? (modelAsset && localStorage.getItem(designStorageKey(modelAsset.id)));
+      const activeDesignId =
+        savedDesign?.id ??
+        (isProjectEditor ? design?.id : modelAsset && localStorage.getItem(designStorageKey(modelAsset.id)));
       if (!activeDesignId) {
         setExportMessage("Save the draft before exporting.");
         setStatusMessage("Save the draft before exporting.");
@@ -421,13 +696,15 @@ export function App() {
 
       setExportMessage("Creating ZIP package...");
       setStatusMessage("Creating export package");
-      const createdExport = await api.exportDesign(activeDesignId);
+      const createdExport = isProjectEditor
+        ? await editorClient.exportDesign(activeDesignId)
+        : await api.exportDesign(activeDesignId);
       setExportPackage(createdExport);
       setExportMessage("ZIP package ready. Download starting...");
-      setStatusMessage("Export package ready. Download starting.");
+      setStatusMessage("EXPORT_READY");
       await api.downloadExport(createdExport);
       setExportMessage("Download started. Use Download ZIP again if the browser blocked it.");
-      setStatusMessage("Export package downloaded");
+      setStatusMessage("EXPORT_READY");
     } catch (error) {
       const message = messageFromError(error);
       setExportMessage(message);
@@ -464,17 +741,127 @@ export function App() {
     }
   }
 
+  function openDesktopProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const projectId = projectIdFromEditorInput(desktopProjectInput);
+    if (!projectId) {
+      setDesktopLaunchError("Enter a Project ID or a valid /editor/{projectId} URL.");
+      return;
+    }
+    openDesktopProjectId(projectId);
+  }
+
+  async function openDesktopDemoProject() {
+    const projectId = sanitizeProjectId(DESKTOP_DEMO_PROJECT_ID);
+    if (!projectId) {
+      setDesktopLaunchError("Desktop demo project is not configured.");
+      return;
+    }
+    setIsDesktopDemoOpening(true);
+    setDesktopLaunchError(null);
+    try {
+      await api.demoLogin();
+      openDesktopProjectId(projectId);
+    } catch (error) {
+      setDesktopLaunchError(messageFromError(error));
+      setIsDesktopDemoOpening(false);
+    }
+  }
+
+  async function importDesktopModel(payload: ModelImportPayload) {
+    setIsImporting(true);
+    setDesktopLaunchError(null);
+    setStatusMessage("Đang import model vào desktop project.");
+    try {
+      await api.demoLogin();
+      const imported = await api.importModel(payload);
+      const projectId = sanitizeProjectId(imported.scanSession.projectId ?? "");
+      if (!projectId) {
+        throw new Error("Ứng dụng chưa tạo được project từ model vừa import. Vui lòng thử lại.");
+      }
+      openDesktopProjectId(projectId);
+    } catch (error) {
+      const message = friendlyInlineMessage(messageFromError(error));
+      setDesktopLaunchError(message);
+      setStatusMessage(message);
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
   return (
     <AppShell user={user} onLogout={logout}>
       <main className="workspace" id="main-workspace">
-        {!user ? (
+        {isDesktopShell && !isProjectEditor ? (
+          <div className="desktop-launcher-layout">
+            <DesktopRuntimePanel
+              runtime={desktopRuntime}
+              editorReadiness={editorReadiness}
+              installProgress={installProgress}
+              isLoading={isDesktopRuntimeLoading}
+              errorMessage={desktopRuntimeError}
+              onRefresh={refreshDesktopRuntime}
+              onRestartBackend={restartDesktopRuntimeBackend}
+              onInstallRenderer={installPreviewRenderer}
+              onOpenDiagnostics={openDesktopDiagnostics}
+              onCopyDiagnostics={copyDesktopDiagnostics}
+            />
+            <div className="desktop-launcher-stack">
+              <DesktopProjectLauncher
+                value={desktopProjectInput}
+                errorMessage={desktopLaunchError}
+                demoProjectId={DESKTOP_DEMO_PROJECT_ID}
+                isDemoOpening={isDesktopDemoOpening}
+                isImportOpen={isDesktopImportOpen}
+                backendReady={desktopRuntimeReady}
+                onValueChange={(value) => {
+                  setDesktopProjectInput(value);
+                  setDesktopLaunchError(null);
+                }}
+                onSubmit={openDesktopProject}
+                onOpenDemo={openDesktopDemoProject}
+                onToggleImport={() => setIsDesktopImportOpen((current) => !current)}
+              />
+              {isDesktopImportOpen ? (
+                <section className="desktop-import-card">
+                  {canUsePreviewRenderer ? (
+                    <ModelImportPanel
+                      isBusy={isImporting || !desktopRuntimeReady}
+                      onImport={importDesktopModel}
+                    />
+                  ) : (
+                    <div className="desktop-import-blocked">
+                      <Wrench size={20} aria-hidden="true" />
+                      <div>
+                        <h2>Preview renderer cần cài đặt</h2>
+                        <p>
+                          Import GLB/OBJ cần renderer local để chuẩn hóa model trước khi mở trong editor.
+                          Bạn vẫn có thể mở demo project để review giao diện trước.
+                        </p>
+                      </div>
+                      <button type="button" className="primary-button" onClick={installPreviewRenderer}>
+                        <Wrench size={16} aria-hidden="true" />
+                        Cài Preview renderer
+                      </button>
+                    </div>
+                  )}
+                </section>
+              ) : null}
+            </div>
+          </div>
+        ) : isProjectEditor && !user ? (
+          <EditorRouteState
+            state={editorContext.state}
+            message={friendlyInlineMessage(editorContext.errorMessage ?? "Redirecting to login.")}
+          />
+        ) : !user ? (
           <AuthPanel
             mode={authMode}
             name={authName}
             email={authEmail}
             password={authPassword}
             isBusy={isAuthBusy}
-            statusMessage={statusMessage}
+            statusMessage={friendlyInlineMessage(statusMessage)}
             onModeChange={setAuthMode}
             onNameChange={setAuthName}
             onEmailChange={setAuthEmail}
@@ -492,45 +879,77 @@ export function App() {
                     AI + 3D Sneaker Studio
                   </span>
                   <div>
-                    <h2>Kus Studio workspace</h2>
-                    <p>Load a scan or import a model, then customize the shoe in the 3D stage.</p>
+                    <h2>{isProjectEditor ? editorContext.context?.project.name ?? "Kus Studio workspace" : "Kus Studio workspace"}</h2>
+                    <p>
+                      {isProjectEditor
+                        ? "Customize the project model, save a backend draft, bake preview, then export."
+                        : "Load a scan or import a model, then customize the shoe in the 3D stage."}
+                    </p>
                   </div>
                 </div>
-                <div className="scan-loader">
-                  <label>
-                    Scan session ID
-                    <input
-                      value={scanId}
-                      onChange={(event) => setScanId(event.target.value)}
-                      placeholder="scan_..."
-                    />
-                  </label>
-                  <button type="button" disabled={!canLoad} onClick={loadScan}>
-                    <Search size={16} aria-hidden="true" />
-                    Load
-                  </button>
-                  <button type="button" disabled={!scanSession} onClick={loadScan}>
-                    <RefreshCw size={16} aria-hidden="true" />
-                    Refresh
-                  </button>
-                </div>
-                <ModelImportPanel isBusy={isImporting} onImport={importModel} />
+                {isProjectEditor ? (
+                  <ProjectRouteSummary
+                    projectId={editorProjectId ?? ""}
+                    state={editorContext.state}
+                    canEdit={editorPermissions.canEdit}
+                    canBake={editorPermissions.canBake}
+                    canExport={editorPermissions.canExport}
+                  />
+                ) : (
+                  <>
+                    <div className="scan-loader">
+                      <label>
+                        Scan session ID
+                        <input
+                          value={scanId}
+                          onChange={(event) => setScanId(event.target.value)}
+                          placeholder="scan_..."
+                        />
+                      </label>
+                      <button type="button" disabled={!canLoad} onClick={loadScan}>
+                        <Search size={16} aria-hidden="true" />
+                        Load
+                      </button>
+                      <button type="button" disabled={!scanSession} onClick={loadScan}>
+                        <RefreshCw size={16} aria-hidden="true" />
+                        Refresh
+                      </button>
+                    </div>
+                    <ModelImportPanel isBusy={isImporting} onImport={importModel} />
+                  </>
+                )}
               </div>
-              <span className="status-line">{statusMessage}</span>
             </section>
 
-            <ReadinessBanner readiness={readiness} onRefresh={loadReadiness} />
+            <EditorStatusNotice message={statusMessage} isBusy={isEditorBusy} />
 
-            <WorkflowGuide
-              hasModel={Boolean(modelAsset && activeModelUrl)}
-              layerCount={(config?.stickers.length ?? 0) + (config?.texts.length ?? 0)}
-              hasActiveLayer={Boolean(activeLayerId)}
-              isSaved={Boolean(config && savedConfigFingerprint && configFingerprint(config) === savedConfigFingerprint)}
-              hasExportPackage={Boolean(exportPackage)}
-            />
+            {isDesktopShell && (
+              <DesktopRuntimePanel
+                runtime={desktopRuntime}
+                editorReadiness={editorReadiness}
+                installProgress={installProgress}
+                isLoading={isDesktopRuntimeLoading}
+                errorMessage={desktopRuntimeError}
+                onRefresh={refreshDesktopRuntime}
+                onRestartBackend={restartDesktopRuntimeBackend}
+                onInstallRenderer={installPreviewRenderer}
+                onOpenDiagnostics={openDesktopDiagnostics}
+                onCopyDiagnostics={copyDesktopDiagnostics}
+              />
+            )}
 
             <section className="main-grid">
-              <MetadataPanel scanSession={scanSession} modelAsset={modelAsset} />
+              <MetadataPanel
+                scanSession={scanSession}
+                modelAsset={modelAsset}
+                config={config}
+                designName={designName}
+                activeLayerId={activeLayerId}
+                meshBounds={meshBounds}
+                isSaved={isSaved}
+                hasBakedPreview={Boolean(previewModelUrl)}
+                hasExportPackage={Boolean(exportPackage)}
+              />
               <ModelViewer
                 modelUrl={activeModelUrl}
                 config={config}
@@ -538,7 +957,7 @@ export function App() {
                 gizmoMode={gizmoMode}
                 hiddenLayerIds={hiddenLayerIds}
                 isSaving={isSaving}
-                previewErrorMessage={previewErrorMessage}
+                previewErrorMessage={friendlyPreviewErrorMessage}
                 surfaceApplyRequest={surfaceApplyRequest}
                 onConfigChange={handleConfigChange}
                 onActiveLayerChange={setActiveLayerId}
@@ -551,7 +970,10 @@ export function App() {
                 designName={designName}
                 isSaving={isSaving}
                 isExporting={isExporting}
-                exportMessage={exportMessage}
+                canEdit={!isProjectEditor || editorPermissions.canEdit}
+                canBake={(!isProjectEditor || editorPermissions.canBake) && canUsePreviewRenderer}
+                canExport={(!isProjectEditor || editorPermissions.canExport) && canUsePreviewRenderer}
+                exportMessage={friendlyExportMessage}
                 exportPackage={exportPackage}
                 activeLayerId={activeLayerId}
                 meshBounds={meshBounds}
@@ -575,150 +997,279 @@ export function App() {
   );
 }
 
-type WorkflowGuideProps = {
-  hasModel: boolean;
-  layerCount: number;
-  hasActiveLayer: boolean;
-  isSaved: boolean;
-  hasExportPackage: boolean;
-};
-
-type WorkflowStepState = "complete" | "current" | "upcoming";
-
-function WorkflowGuide({
-  hasModel,
-  layerCount,
-  hasActiveLayer,
-  isSaved,
-  hasExportPackage,
-}: WorkflowGuideProps) {
-  const hasLayers = layerCount > 0;
-  const placementState: WorkflowStepState = !hasLayers ? "upcoming" : isSaved ? "complete" : "current";
-  const exportState: WorkflowStepState = hasExportPackage ? "complete" : isSaved ? "current" : "upcoming";
-
-  const steps: Array<{
-    icon: typeof Search;
-    title: string;
-    detail: string;
-    state: WorkflowStepState;
-  }> = [
-    {
-      icon: Search,
-      title: "Load or import",
-      detail: hasModel ? "Model is ready in the viewer." : "Paste a scan ID or import a GLB/OBJ model.",
-      state: hasModel ? "complete" : "current",
-    },
-    {
-      icon: ImagePlus,
-      title: "Add artwork",
-      detail: hasLayers ? `${layerCount} layer${layerCount === 1 ? "" : "s"} added.` : "Use text, upload, draw, or preset stickers.",
-      state: !hasModel ? "upcoming" : hasLayers ? "complete" : "current",
-    },
-    {
-      icon: MousePointer2,
-      title: "Place on shoe",
-      detail: hasActiveLayer ? "Use move, rotate, scale, then apply to surface." : "Select a layer before adjusting placement.",
-      state: placementState,
-    },
-    {
-      icon: Save,
-      title: "Save and export",
-      detail: hasExportPackage ? "ZIP package is ready to download." : "Save Draft bakes the preview before export.",
-      state: exportState,
-    },
-  ];
-
+function EditorRouteState({ state, message }: { state: string; message: string }) {
   return (
-    <section className="workflow-guide" id="workflow-guide" aria-label="Editor workflow">
-      <div className="workflow-guide-header">
+    <section className="auth-panel">
+      <div className="empty-panel-callout">
+        <RefreshCw size={22} aria-hidden="true" />
         <div>
-          <h2>Editor flow</h2>
-          <p>Follow the same left-to-right order used by most creation tools.</p>
+          <h2>{editorRouteStateLabel(state)}</h2>
+          <p>{message}</p>
         </div>
       </div>
-      <ol className="workflow-steps">
-        {steps.map((step, index) => {
-          const Icon = step.icon;
-          return (
-            <li className={`workflow-step ${step.state}`} key={step.title}>
-              <span className="workflow-step-index">{index + 1}</span>
-              <span className="workflow-step-icon">
-                <Icon size={18} aria-hidden="true" />
-              </span>
-              <span className="workflow-step-copy">
-                <strong>{step.title}</strong>
-                <span>{step.detail}</span>
-              </span>
-            </li>
-          );
-        })}
-      </ol>
     </section>
   );
 }
 
-type ReadinessBannerProps = {
-  readiness: ReconstructionReadiness | null;
+function EditorStatusNotice({ message, isBusy }: { message: string; isBusy: boolean }) {
+  const notice = noticeFromStatus(message, isBusy);
+  const role = notice.tone === "error" ? "alert" : "status";
+  const ariaLive = notice.tone === "error" ? "assertive" : "polite";
+
+  return (
+    <section className={`editor-status-notice ${notice.tone}`} role={role} aria-live={ariaLive}>
+      <span className="editor-status-icon">
+        {notice.tone === "loading" ? (
+          <Loader2 size={20} aria-hidden="true" />
+        ) : notice.tone === "success" ? (
+          <CheckCircle2 size={20} aria-hidden="true" />
+        ) : notice.tone === "warning" || notice.tone === "error" ? (
+          <AlertTriangle size={20} aria-hidden="true" />
+        ) : (
+          <Info size={20} aria-hidden="true" />
+        )}
+      </span>
+      <div className="editor-status-copy">
+        <h2>{notice.title}</h2>
+        <p>{notice.detail}</p>
+      </div>
+    </section>
+  );
+}
+
+function ProjectRouteSummary({
+  projectId,
+  state,
+  canEdit,
+  canBake,
+  canExport,
+}: {
+  projectId: string;
+  state: string;
+  canEdit: boolean;
+  canBake: boolean;
+  canExport: boolean;
+}) {
+  return (
+    <div className="scan-loader">
+      <label>
+        Project ID
+        <input value={projectId} readOnly />
+      </label>
+      <span className="status-line">{editorRouteStateLabel(state)}</span>
+      <span className="status-line">
+        {canEdit ? "Edit" : "View"} / {canBake ? "Bake" : "No bake"} / {canExport ? "Export" : "No export"}
+      </span>
+    </div>
+  );
+}
+
+type DesktopRuntimePanelProps = {
+  runtime: DesktopRuntime | null;
+  editorReadiness: EditorReadiness | null;
+  installProgress: InstallProgress | null;
+  isLoading: boolean;
+  errorMessage: string | null;
   onRefresh: () => void;
+  onRestartBackend: () => void;
+  onInstallRenderer: () => void;
+  onOpenDiagnostics: () => void;
+  onCopyDiagnostics: () => void;
 };
 
-function ReadinessBanner({ readiness, onRefresh }: ReadinessBannerProps) {
-  if (!readiness) {
-    return (
-      <section className="readiness-banner warning">
-        <Wrench size={18} aria-hidden="true" />
-        <div>
-          <h2>Reconstruction readiness unknown</h2>
-          <p>Backend readiness could not be loaded.</p>
-        </div>
-        <button type="button" onClick={onRefresh}>
-          <RefreshCw size={16} aria-hidden="true" />
-          Retry
-        </button>
-      </section>
-    );
-  }
-
-  const memory = readiness.resources.find((resource) => resource.name === "available_memory");
-  const storage = readiness.resources.find((resource) => resource.name === "storage_free");
+function DesktopRuntimePanel({
+  runtime,
+  editorReadiness,
+  installProgress,
+  isLoading,
+  errorMessage,
+  onRefresh,
+  onRestartBackend,
+  onInstallRenderer,
+  onOpenDiagnostics,
+  onCopyDiagnostics,
+}: DesktopRuntimePanelProps) {
+  const backendStatus = runtime?.backendStatus ?? (isLoading ? "starting" : "failed");
+  const rendererStatus =
+    editorReadiness?.previewRenderer.available || runtime?.blenderStatus === "installed"
+      ? "installed"
+      : installProgress?.status === "downloading"
+        ? "downloading"
+        : runtime?.blenderStatus ?? "missing";
+  const demoStatus = runtime?.demoProjectStatus ?? "missing";
+  const rendererMessage =
+    installProgress?.message ??
+    friendlyRendererMessage(editorReadiness, runtime);
 
   return (
-    <section className={`readiness-banner ${readiness.ready ? "ready" : "warning"}`}>
-      {readiness.ready ? <CheckCircle2 size={18} aria-hidden="true" /> : <AlertTriangle size={18} aria-hidden="true" />}
-      <div className="readiness-copy">
-        <h2>{readiness.ready ? "Reconstruction ready" : "Reconstruction blocked"}</h2>
-        <p>{readiness.message}</p>
-        <div className="readiness-metrics">
-          <span>
-            <Cpu size={14} aria-hidden="true" />
-            RAM {formatResource(memory)}
+    <section className="desktop-runtime-panel" aria-label="Desktop editor readiness">
+      <div className="desktop-runtime-header">
+        <div>
+          <span className="studio-eyebrow">
+            <Monitor size={14} aria-hidden="true" />
+            Desktop beta runtime
           </span>
-          <span>
-            <HardDrive size={14} aria-hidden="true" />
-            Storage {formatResource(storage)}
-          </span>
-          <span>
-            <Wrench size={14} aria-hidden="true" />
-            Threads {String(readiness.settings.maxThreads ?? "n/a")}
-          </span>
+          <h2>Editor readiness</h2>
+          <p>
+            Desktop beta tập trung vào mở model, đặt sticker/text, bake preview và export.
+            Scan-to-3D không chạy trong bản này.
+          </p>
         </div>
-        {readiness.missingTools.length > 0 ? (
-          <div className="tool-chip-row">
-            {readiness.missingTools.map((tool) => (
-              <span className="tool-chip" key={tool}>
-                {tool}
-              </span>
-            ))}
-          </div>
-        ) : null}
+        <div className="desktop-runtime-actions">
+          <button type="button" onClick={onRefresh} disabled={isLoading}>
+            <RefreshCw size={16} aria-hidden="true" />
+            Refresh
+          </button>
+          <button type="button" onClick={onOpenDiagnostics}>
+            <Wrench size={16} aria-hidden="true" />
+            Logs
+          </button>
+          <button type="button" onClick={onCopyDiagnostics}>
+            <Info size={16} aria-hidden="true" />
+            Copy diagnostics
+          </button>
+        </div>
       </div>
-      <button type="button" onClick={onRefresh}>
-        <RefreshCw size={16} aria-hidden="true" />
-        Refresh
-      </button>
+
+      <div className="desktop-runtime-grid">
+        <RuntimeStatusItem
+          title="Local backend"
+          status={backendStatus}
+          detail={
+            backendStatus === "ready"
+              ? `Ready at ${runtime?.apiBaseUrl ?? "local API"}`
+              : errorMessage ?? "Ứng dụng đang khởi động backend local."
+          }
+          actionLabel={backendStatus === "ready" ? undefined : "Restart backend"}
+          onAction={backendStatus === "ready" ? undefined : onRestartBackend}
+        />
+        <RuntimeStatusItem
+          title="Preview renderer"
+          status={rendererStatus}
+          detail={rendererMessage}
+          actionLabel={rendererStatus === "installed" ? undefined : "Install renderer"}
+          onAction={rendererStatus === "installed" ? undefined : onInstallRenderer}
+        />
+        <RuntimeStatusItem
+          title="Demo project"
+          status={demoStatus}
+          detail={
+            demoStatus === "ready"
+              ? "Demo project is ready for review."
+              : "Ứng dụng sẽ seed demo project khi backend local sẵn sàng."
+          }
+        />
+      </div>
     </section>
   );
 }
+
+function RuntimeStatusItem({
+  title,
+  status,
+  detail,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  status: string;
+  detail: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  const tone =
+    status === "ready" || status === "installed"
+      ? "ready"
+      : status === "starting" || status === "downloading"
+        ? "working"
+        : "blocked";
+  return (
+    <div className={`runtime-status-item ${tone}`}>
+      <div className="runtime-status-title">
+        {tone === "ready" ? <CheckCircle2 size={18} aria-hidden="true" /> : <AlertTriangle size={18} aria-hidden="true" />}
+        <div>
+          <strong>{title}</strong>
+          <span>{runtimeStatusLabel(status)}</span>
+        </div>
+      </div>
+      <p>{detail}</p>
+      {actionLabel && onAction ? (
+        <button type="button" onClick={onAction}>
+          {actionLabel}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+type DesktopProjectLauncherProps = {
+  value: string;
+  errorMessage: string | null;
+  demoProjectId: string;
+  isDemoOpening: boolean;
+  isImportOpen: boolean;
+  backendReady: boolean;
+  onValueChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onOpenDemo: () => void;
+  onToggleImport: () => void;
+};
+
+function DesktopProjectLauncher({
+  value,
+  errorMessage,
+  demoProjectId,
+  isDemoOpening,
+  isImportOpen,
+  backendReady,
+  onValueChange,
+  onSubmit,
+  onOpenDemo,
+  onToggleImport,
+}: DesktopProjectLauncherProps) {
+  const hasDemoProject = Boolean(sanitizeProjectId(demoProjectId));
+
+  return (
+    <section className="auth-panel">
+      <form className="auth-form desktop-launcher" onSubmit={onSubmit}>
+        <div className="desktop-launcher-title">
+          <span className="desktop-launcher-icon">
+            <Monitor size={22} aria-hidden="true" />
+          </span>
+          <div>
+            <h2>KusShoes Desktop Editor</h2>
+            <p>Mở demo project hoặc dán project URL. Ứng dụng tự quản lý backend local cho tester beta.</p>
+          </div>
+        </div>
+        <label>
+          Project ID hoặc editor URL
+          <input
+            value={value}
+            onChange={(event) => onValueChange(event.target.value)}
+            placeholder="proj_... or https://.../editor/proj_..."
+            autoFocus
+          />
+        </label>
+        <button type="submit" className="primary-button" disabled={!backendReady}>
+          <Monitor size={16} aria-hidden="true" />
+          Mở editor
+        </button>
+        {hasDemoProject ? (
+          <button type="button" disabled={isDemoOpening || !backendReady} onClick={onOpenDemo}>
+            <LogIn size={16} aria-hidden="true" />
+            {isDemoOpening ? "Đang mở demo" : "Mở demo project"}
+          </button>
+        ) : null}
+        <button type="button" disabled={!backendReady} onClick={onToggleImport}>
+          <ImagePlus size={16} aria-hidden="true" />
+          {isImportOpen ? "Ẩn import" : "Import GLB/OBJ"}
+        </button>
+        {errorMessage ? <span className="status-line danger-text">{errorMessage}</span> : null}
+      </form>
+    </section>
+  );
+}
+
 
 type AuthPanelProps = {
   mode: "login" | "register";
@@ -993,6 +1544,20 @@ function createDefaultConfig(modelAssetId: string): DesignConfig {
     },
     stickers: [],
     texts: [],
+    camera: {},
+    metadata: {
+      editorVersion: "1.0.0",
+    },
+  };
+}
+
+function withEditorMetadata(config: DesignConfig): DesignConfig {
+  return {
+    ...config,
+    metadata: {
+      ...(config.metadata ?? {}),
+      editorVersion: "1.0.0",
+    },
   };
 }
 
@@ -1014,6 +1579,89 @@ function setScanIdInUrl(scanSessionId: string) {
   const url = new URL(window.location.href);
   url.searchParams.set("scanId", scanSessionId);
   window.history.replaceState({}, "", url);
+}
+
+function projectIdFromEditorPath(pathname: string): string | null {
+  const match = pathname.match(/^\/editor\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function editorProjectIdFromLocation(isDesktopShell: boolean): string | null {
+  const pathProjectId = projectIdFromEditorPath(window.location.pathname);
+  if (pathProjectId) {
+    return pathProjectId;
+  }
+  if (!isDesktopShell) {
+    return null;
+  }
+  const queryProjectId = new URLSearchParams(window.location.search).get("projectId");
+  return queryProjectId ? sanitizeProjectId(queryProjectId) : null;
+}
+
+function isDesktopShellLocation(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("desktop") === "1" || import.meta.env.VITE_DESKTOP_SHELL === "true";
+}
+
+function projectIdFromEditorInput(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(trimmed);
+    const routeProjectId = projectIdFromEditorPath(parsedUrl.pathname);
+    if (routeProjectId) {
+      return sanitizeProjectId(routeProjectId);
+    }
+    const customProtocolProjectId = projectIdFromEditorPath(`/${parsedUrl.host}${parsedUrl.pathname}`);
+    if (customProtocolProjectId) {
+      return sanitizeProjectId(customProtocolProjectId);
+    }
+  } catch {
+    // Treat non-URL input as either a route fragment or a raw project id.
+  }
+
+  const routeProjectId = projectIdFromEditorPath(trimmed.startsWith("/") ? trimmed : `/${trimmed}`);
+  if (routeProjectId) {
+    return sanitizeProjectId(routeProjectId);
+  }
+  return sanitizeProjectId(trimmed);
+}
+
+function openDesktopProjectId(projectId: string): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set("desktop", "1");
+  url.searchParams.set("projectId", projectId);
+  url.hash = "";
+  window.location.assign(url.toString());
+}
+
+function sanitizeProjectId(value: string): string | null {
+  const projectId = value.trim();
+  return /^[A-Za-z0-9_-]{3,120}$/.test(projectId) ? projectId : null;
+}
+
+function loginRedirectUrl(): string {
+  const url = new URL(MARKETING_LOGIN_URL);
+  url.searchParams.set("redirect", window.location.href);
+  return url.toString();
+}
+
+async function waitForBakeJob(jobId: string, getJob: (jobId: string) => Promise<Job>): Promise<Job> {
+  for (let attempt = 0; attempt < 180; attempt += 1) {
+    const job = await getJob(jobId);
+    if (job.status === "completed" || job.status === "failed") {
+      return job;
+    }
+    await delay(2000);
+  }
+  throw new Error("Bake job timed out.");
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
 function scanStatusLabel(status: string): string {
@@ -1044,12 +1692,25 @@ function formatResource(resource: { available: number | null; required: number; 
   return `${resource.available.toFixed(1)}/${resource.required.toFixed(1)} ${resource.unit}`;
 }
 
-function messageFromError(error: unknown): string {
-  if (error instanceof ApiError) {
-    return `${error.status}: ${error.message}`;
+function friendlyRendererMessage(editorReadiness: EditorReadiness | null, runtime: DesktopRuntime | null): string {
+  if (editorReadiness?.previewRenderer.available || runtime?.blenderStatus === "installed") {
+    return "Preview renderer đã sẵn sàng để bake preview và export.";
   }
-  if (error instanceof Error) {
-    return error.message;
+  if (runtime?.blenderStatus === "failed" || editorReadiness?.previewRenderer.status === "failed") {
+    return "Ứng dụng chưa chuẩn bị được Preview renderer. Vui lòng thử cài lại hoặc mở Logs để gửi diagnostics cho team.";
   }
-  return "Unexpected error";
+  return "Preview renderer cần cài đặt để Save Draft, bake preview và export. Bạn vẫn có thể mở model và xem demo trước.";
+}
+
+function runtimeStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    ready: "Ready",
+    installed: "Installed",
+    starting: "Starting",
+    downloading: "Installing",
+    missing: "Needs setup",
+    failed: "Needs attention",
+    repairing: "Repairing",
+  };
+  return labels[status] ?? status;
 }

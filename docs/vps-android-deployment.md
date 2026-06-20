@@ -122,10 +122,23 @@ Build characteristics:
 | Scalability | Good for one CPU worker per VPS. Split reconstruction into a separate worker service before high traffic. |
 | Maintainability | Stronger than manual installs because binary versions are pinned in `backend/Dockerfile` and Compose. |
 | Security | Backend port remains private. Review OpenMVS AGPL-3.0 obligations before commercial network use. |
-| Performance | CPU-only reconstruction is slow but predictable. Use 4+ vCPU, 12-16 GB RAM, and 40+ GB free disk for practical builds. |
+| Performance | CPU-only reconstruction is slow but predictable. The minimum VPS profile is 2-4 vCPU, 8 GB RAM, 4-8 GB swap, and 40+ GB disk with one 3D task at a time. |
 | User experience | Mobile can upload scans to one HTTPS API; users see queued, processing, completed, failed, or toolchain_unavailable status. |
 
-The first build can take tens of minutes because OpenMVS compiles from source and Blender/COLMAP pull large system dependencies.
+The first build can take tens of minutes because OpenMVS compiles from source and Blender/COLMAP pull large system dependencies. Compose passes `OPENMVS_BUILD_JOBS=2` by default so the OpenMVS build does not fan out to every detected CPU core on an 8 GB VPS.
+
+The default production Compose resource profile is tuned for a single small VPS:
+
+| Setting | Default | Reason |
+|---|---:|---|
+| `OPENMVS_BUILD_JOBS` | `2` | Avoids memory spikes while compiling OpenMVS. |
+| `APP_RECONSTRUCTION_MAX_THREADS` | `2` | Compose-level thread cap mapped into backend `RECONSTRUCTION_MAX_THREADS` and numeric library thread env vars. |
+| `BACKEND_MEMORY_LIMIT` | `6g` | Leaves host memory for Docker, Caddy, Redis, and the worker. |
+| `BACKEND_MEMORY_SWAP_LIMIT` | `10g` | Allows roughly 4 GB swap headroom for backend reconstruction/import work. |
+| `WORKER_MEMORY_LIMIT` | `2g` | Keeps the bake worker from taking over the host. |
+| `WORKER_MEMORY_SWAP_LIMIT` | `4g` | Allows roughly 2 GB swap headroom for Blender bake bursts. |
+
+Do not scale `backend` or `worker` replicas on the 8 GB profile. The current MVP assumes one backend container and one RQ worker container. Running multiple 3D jobs concurrently can exceed the VPS memory envelope even when each individual job normally stays below 4 GB.
 ## VPS Setup Steps
 
 1. Point DNS `A` record to the VPS public IP:
@@ -150,6 +163,14 @@ Example:
 ```text
 APP_DOMAIN=your-domain.example.com
 ACME_EMAIL=admin@your-domain.example.com
+OPENMVS_BUILD_JOBS=2
+APP_RECONSTRUCTION_MAX_THREADS=2
+BACKEND_CPUS=2.0
+BACKEND_MEMORY_LIMIT=6g
+BACKEND_MEMORY_SWAP_LIMIT=10g
+WORKER_CPUS=1.0
+WORKER_MEMORY_LIMIT=2g
+WORKER_MEMORY_SWAP_LIMIT=4g
 ```
 
 5. Create backend secret env:
@@ -170,6 +191,7 @@ DATABASE_URL=postgresql://USER:PASSWORD@HOST-POOLER.neon.tech/neondb?sslmode=req
 DATABASE_AUTO_CREATE_TABLES=false
 JWT_SECRET_KEY=<random secret from openssl rand -base64 48>
 ENABLE_DEMO_AUTH=false
+RECONSTRUCTION_MAX_THREADS=2
 ```
 
 Generate JWT secret:
@@ -201,7 +223,7 @@ Allow: 443/tcp from 0.0.0.0/0
 Deny: 8000, 5173, 5432, all other inbound ports
 ```
 
-7. Build and start. The first backend image build is intentionally heavy because it compiles OpenMVS:
+7. Build and start. The first backend image build is intentionally heavy because it compiles OpenMVS. On an 8 GB VPS, create 4-8 GB swap before this step:
 
 ```bash
 DOCKER_BUILDKIT=1 docker compose --env-file deploy/.env up -d --build
