@@ -28,9 +28,10 @@ class ScanGuideOverlay extends StatelessWidget {
             children: [
               DecoratedBox(
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0A0F14).withOpacity(0.72),
+                  color: const Color(0xFF0A0F14).withValues(alpha: 0.72),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.white.withOpacity(0.12)),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.12)),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(14),

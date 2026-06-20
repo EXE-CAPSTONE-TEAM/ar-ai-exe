@@ -66,7 +66,7 @@ class ScanHeroCard extends StatelessWidget {
                       color: Theme.of(context)
                           .colorScheme
                           .onSurface
-                          .withOpacity(0.64),
+                          .withValues(alpha: 0.64),
                       letterSpacing: 2,
                       fontWeight: FontWeight.w700,
                     ),
@@ -78,7 +78,7 @@ class ScanHeroCard extends StatelessWidget {
                       color: Theme.of(context)
                           .colorScheme
                           .onSurface
-                          .withOpacity(0.64),
+                          .withValues(alpha: 0.64),
                       letterSpacing: 2,
                       fontWeight: FontWeight.w700,
                     ),
@@ -107,21 +107,21 @@ class _ScanFramePainter extends CustomPainter {
         end: Alignment.bottomCenter,
         colors: isDark
             ? [
-                const Color(0xFF3A1B12).withOpacity(0.52),
-                const Color(0xFF111111).withOpacity(0.1),
-                const Color(0xFF090909).withOpacity(0.72),
+                const Color(0xFF3A1B12).withValues(alpha: 0.52),
+                const Color(0xFF111111).withValues(alpha: 0.1),
+                const Color(0xFF090909).withValues(alpha: 0.72),
               ]
             : [
-                const Color(0xFFFFD8C8).withOpacity(0.9),
-                const Color(0xFFFFFFFF).withOpacity(0.4),
-                const Color(0xFFFFF2EA).withOpacity(0.8),
+                const Color(0xFFFFD8C8).withValues(alpha: 0.9),
+                const Color(0xFFFFFFFF).withValues(alpha: 0.4),
+                const Color(0xFFFFF2EA).withValues(alpha: 0.8),
               ],
       ).createShader(bg);
     canvas.drawRect(bg, wash);
 
     final gridPaint = Paint()
       ..color = (isDark ? Colors.white : Colors.black)
-          .withOpacity(isDark ? 0.055 : 0.05)
+          .withValues(alpha: isDark ? 0.055 : 0.05)
       ..strokeWidth = 1;
     for (var x = 0.0; x < size.width; x += 28) {
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
@@ -133,9 +133,9 @@ class _ScanFramePainter extends CustomPainter {
     final horizon = Paint()
       ..shader = LinearGradient(
         colors: [
-          AppTheme.orange.withOpacity(0),
-          AppTheme.orange.withOpacity(0.75),
-          AppTheme.orange.withOpacity(0),
+          AppTheme.orange.withValues(alpha: 0),
+          AppTheme.orange.withValues(alpha: 0.75),
+          AppTheme.orange.withValues(alpha: 0),
         ],
       ).createShader(Rect.fromLTWH(20, size.height * 0.68, size.width - 40, 4))
       ..strokeWidth = 2;
@@ -148,7 +148,7 @@ class _ScanFramePainter extends CustomPainter {
     _drawCorners(canvas, size);
     _drawFoot(canvas, size);
 
-    final center = Paint()..color = AppTheme.orange.withOpacity(0.85);
+    final center = Paint()..color = AppTheme.orange.withValues(alpha: 0.85);
     canvas.drawCircle(Offset(size.width * 0.5, size.height * 0.52), 6, center);
   }
 
@@ -204,7 +204,7 @@ class _ScanFramePainter extends CustomPainter {
           size.height * 0.82, size.width * 0.43, size.height * 0.79);
 
     final paint = Paint()
-      ..color = AppTheme.orange.withOpacity(0.72)
+      ..color = AppTheme.orange.withValues(alpha: 0.72)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3.5
       ..strokeCap = StrokeCap.round;

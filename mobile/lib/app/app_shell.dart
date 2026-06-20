@@ -116,7 +116,7 @@ class _PillBottomNav extends StatelessWidget {
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(isDark ? 0.5 : 0.12),
+                color: Colors.black.withValues(alpha: isDark ? 0.5 : 0.12),
                 blurRadius: 28,
                 offset: const Offset(0, 18),
               ),
@@ -247,7 +247,10 @@ class _ExploreTab extends StatelessWidget {
           Text(
             'Quet ban chan 3D, thiet ke giay ca nhan hoa bang AI va dat san xuat chi trong vai phut.',
             style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+              color: Theme.of(context)
+                  .colorScheme
+                  .onSurface
+                  .withValues(alpha: 0.7),
               height: 1.5,
             ),
           ),
@@ -390,8 +393,10 @@ class _FeatureCard extends StatelessWidget {
             Text(
               body,
               style: TextStyle(
-                color:
-                    Theme.of(context).colorScheme.onSurface.withOpacity(0.66),
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withValues(alpha: 0.66),
                 fontSize: 12,
                 height: 1.3,
               ),
@@ -447,7 +452,7 @@ class _WebsiteTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      color: Theme.of(context).colorScheme.primary.withOpacity(0.08),
+      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
       child: ListTile(
         leading: const _IconBubble(icon: Icons.open_in_new),
         title: const Text('Truy cap KusShoe.vn',
@@ -549,7 +554,7 @@ class _NotificationTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       color: unread
-          ? Theme.of(context).colorScheme.primary.withOpacity(0.06)
+          ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.06)
           : null,
       margin: const EdgeInsets.only(bottom: 18),
       child: Stack(
@@ -574,7 +579,7 @@ class _NotificationTile extends StatelessWidget {
                               color: Theme.of(context)
                                   .colorScheme
                                   .onSurface
-                                  .withOpacity(0.72),
+                                  .withValues(alpha: 0.72),
                               height: 1.45)),
                       const SizedBox(height: 14),
                       Text(time,
@@ -582,7 +587,7 @@ class _NotificationTile extends StatelessWidget {
                               color: Theme.of(context)
                                   .colorScheme
                                   .onSurface
-                                  .withOpacity(0.48))),
+                                  .withValues(alpha: 0.48))),
                     ],
                   ),
                 ),
@@ -647,7 +652,8 @@ class _ProfileTab extends StatelessWidget {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                          color: AppTheme.orange.withOpacity(0.6), width: 3),
+                          color: AppTheme.orange.withValues(alpha: 0.6),
+                          width: 3),
                     ),
                     child: const Icon(Icons.person_outline, size: 48),
                   ),
@@ -695,7 +701,7 @@ class _ProfileTab extends StatelessWidget {
             subtitle: isDark ? 'Dark mode' : 'Light mode',
             trailing: Switch(
               value: isDark,
-              activeColor: AppTheme.orange,
+              activeThumbColor: AppTheme.orange,
               onChanged: (value) =>
                   onThemeModeChanged(value ? ThemeMode.dark : ThemeMode.light),
             ),
@@ -820,9 +826,9 @@ class _NewBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: AppTheme.orange.withOpacity(0.16),
+        color: AppTheme.orange.withValues(alpha: 0.16),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppTheme.orange.withOpacity(0.4)),
+        border: Border.all(color: AppTheme.orange.withValues(alpha: 0.4)),
       ),
       child: const Padding(
         padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -858,9 +864,9 @@ class _Tag extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: AppTheme.orange.withOpacity(filled ? 0.18 : 0.08),
+        color: AppTheme.orange.withValues(alpha: filled ? 0.18 : 0.08),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: AppTheme.orange.withOpacity(0.34)),
+        border: Border.all(color: AppTheme.orange.withValues(alpha: 0.34)),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
@@ -892,12 +898,12 @@ class _IconBubble extends StatelessWidget {
     return CircleAvatar(
       radius: large ? 32 : 22,
       backgroundColor: muted
-          ? Theme.of(context).colorScheme.onSurface.withOpacity(0.04)
-          : AppTheme.orange.withOpacity(0.16),
+          ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.04)
+          : AppTheme.orange.withValues(alpha: 0.16),
       child: Icon(
         icon,
         color: muted
-            ? Theme.of(context).colorScheme.onSurface.withOpacity(0.65)
+            ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.65)
             : AppTheme.orange,
       ),
     );

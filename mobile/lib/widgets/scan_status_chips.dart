@@ -19,9 +19,9 @@ class ScanStatusChips extends StatelessWidget {
         for (final item in items)
           DecoratedBox(
             decoration: BoxDecoration(
-              color: item.color.withOpacity(0.14),
+              color: item.color.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: item.color.withOpacity(0.42)),
+              border: Border.all(color: item.color.withValues(alpha: 0.42)),
             ),
             child: Padding(
               padding: EdgeInsets.symmetric(

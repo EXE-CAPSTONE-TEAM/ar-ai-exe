@@ -54,7 +54,7 @@ class _ScanHomeScreenState extends State<ScanHomeScreen> {
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: AppTheme.orange.withOpacity(0.28),
+                        color: AppTheme.orange.withValues(alpha: 0.28),
                         blurRadius: 46,
                         spreadRadius: 8,
                       ),
@@ -83,8 +83,10 @@ class _ScanHomeScreenState extends State<ScanHomeScreen> {
                 'Powered by KusShoe Neural Engine',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color:
-                      Theme.of(context).colorScheme.onSurface.withOpacity(0.62),
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withValues(alpha: 0.62),
                   fontSize: 16,
                 ),
               ),
@@ -201,9 +203,10 @@ class _ReadinessStrip extends StatelessWidget {
 
         return DecoratedBox(
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primary.withOpacity(0.08),
+            color:
+                Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppTheme.orange.withOpacity(0.25)),
+            border: Border.all(color: AppTheme.orange.withValues(alpha: 0.25)),
           ),
           child: ListTile(
             leading: Icon(icon, color: AppTheme.orange),

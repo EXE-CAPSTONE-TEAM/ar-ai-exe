@@ -31,7 +31,7 @@ class AppTheme {
         surfaceTintColor: Colors.transparent,
         centerTitle: false,
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: darkSurface,
         elevation: 0,
         shape: RoundedRectangleBorder(
@@ -100,7 +100,7 @@ class AppTheme {
         surfaceTintColor: Colors.transparent,
         centerTitle: false,
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: lightSurface,
         elevation: 0,
         shape: RoundedRectangleBorder(
