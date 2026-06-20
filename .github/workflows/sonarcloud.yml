@@ -13,10 +13,15 @@ permissions:
   pull-requests: read
   issues: write
 
+concurrency:
+  group: sonarcloud-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   analyze:
     name: Analyze and publish high-risk findings
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       SONAR_HOST_URL: "${{ vars.SONAR_HOST_URL || 'https://sonarcloud.io' }}"
       SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
@@ -51,6 +56,14 @@ jobs:
           fi
 
           echo "run_sonar=true" >> "$GITHUB_OUTPUT"
+
+      - name: Cache SonarQube scanner packages
+        if: steps.sonar_config.outputs.run_sonar == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
 
       - name: SonarCloud scan
         id: scan

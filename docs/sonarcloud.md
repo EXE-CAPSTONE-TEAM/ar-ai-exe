@@ -19,11 +19,14 @@ Do not commit token values or paste them into chat.
 
 - Pull requests into `main` run SonarCloud analysis when configuration is available.
 - Pushes to `main` and manual `workflow_dispatch` runs also query SonarCloud Web API and create GitHub Issues.
+- Workflow runs are serialized per Git ref so overlapping scans do not race while creating GitHub Issues.
+- The scanner cache is stored under `~/.sonar/cache` to reduce repeated action time.
 - Issue creation filters to unresolved SonarCloud findings that are code-addressable and match:
   - Type: `VULNERABILITY` or `BUG`
   - Severity: `BLOCKER`, `CRITICAL`, or `HIGH`
 - Created issues use labels: `security`, `bug`, `sonarqube`, `priority: high`.
 - Each issue body includes a hidden Sonar issue marker so reruns skip duplicates.
+- Analysis includes backend, frontend, mobile, deployment files, GitHub workflows, and Sonar automation scripts.
 
 ## Manual Run
 
@@ -38,3 +41,5 @@ Then review the Actions log and newly created GitHub Issues.
 ## Notes
 
 SonarCloud must have the project created before the scanner can publish analysis. If `SONAR_PROJECT_KEY` or `SONAR_ORGANIZATION` is missing, the workflow skips pull-request scans with a notice and fails main/manual scans with a clear configuration error.
+
+This repository does not yet publish coverage reports from backend, frontend, or mobile CI into SonarCloud. If the SonarCloud quality gate requires coverage on new code, either add coverage report generation to CI or adjust the project quality gate before enabling the scan as a required branch protection check.

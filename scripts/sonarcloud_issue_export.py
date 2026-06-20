@@ -18,6 +18,7 @@ from typing import Any
 
 TARGET_TYPES = {"BUG", "VULNERABILITY"}
 TARGET_SEVERITIES = {"BLOCKER", "CRITICAL", "HIGH"}
+MAX_HTTP_ATTEMPTS = 3
 DEFAULT_LABELS = ["security", "bug", "sonarqube", "priority: high"]
 LABEL_COLORS = {
     "security": "b60205",
@@ -78,7 +79,7 @@ class SonarClient:
     def search_high_risk_findings(self, project_key: str) -> list[dict[str, Any]]:
         candidates: dict[str, dict[str, Any]] = {}
         queries = [
-            {"types": "BUG,VULNERABILITY", "severities": "BLOCKER,CRITICAL"},
+            {"types": "BUG,VULNERABILITY", "severities": "BLOCKER,CRITICAL,HIGH"},
             {"impactSoftwareQualities": "SECURITY,RELIABILITY", "impactSeverities": "BLOCKER,HIGH"},
         ]
 
@@ -134,14 +135,10 @@ class SonarClient:
             headers={
                 "Accept": "application/json",
                 "Authorization": f"Bearer {self.token}",
+                "User-Agent": "ar-ai-exe-sonarcloud-automation",
             },
         )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"SonarCloud API request failed with {exc.code}: {body[:400]}") from exc
+        return open_json(request, service="SonarCloud")["data"]
 
 
 class GitHubClient:
@@ -191,9 +188,21 @@ class GitHubClient:
                 "Accept": "application/vnd.github+json",
                 "Authorization": f"Bearer {self.token}",
                 "Content-Type": "application/json",
+                "User-Agent": "ar-ai-exe-sonarcloud-automation",
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
+        return open_json(request, service="GitHub", expected=expected)
+
+
+def open_json(
+    request: urllib.request.Request,
+    *,
+    service: str,
+    expected: tuple[int, ...] = (200,),
+) -> dict[str, Any]:
+    last_error = ""
+    for attempt in range(1, MAX_HTTP_ATTEMPTS + 1):
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 body = response.read().decode("utf-8")
@@ -202,7 +211,15 @@ class GitHubClient:
             body = exc.read().decode("utf-8", errors="replace")
             if exc.code in expected:
                 return {"status": exc.code, "data": json.loads(body) if body else {}}
-            raise RuntimeError(f"GitHub API request failed with {exc.code}: {body[:400]}") from exc
+            last_error = f"{service} API request failed with {exc.code}: {body[:400]}"
+            if exc.code not in {429, 500, 502, 503, 504} or attempt == MAX_HTTP_ATTEMPTS:
+                raise RuntimeError(last_error) from exc
+
+        sleep_seconds = min(2**attempt, 10)
+        print(f"::warning::{service} API request failed; retrying in {sleep_seconds}s.")
+        time.sleep(sleep_seconds)
+
+    raise RuntimeError(last_error or f"{service} API request failed.")
 
 
 def matches_policy(issue: dict[str, Any]) -> bool:
