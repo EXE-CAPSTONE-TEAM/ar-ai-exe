@@ -23,9 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SONAR_HOST_URL: "${{ vars.SONAR_HOST_URL || 'https://sonarcloud.io' }}"
-      SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
-      SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+      SONAR_HOST_URL: "${{ secrets.SONAR_HOST_URL || 'https://sonarcloud.io' }}"
+      SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
+      SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
 
     steps:
       - name: Checkout code
@@ -89,8 +89,8 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
           SONAR_PROJECT_KEY: ${{ env.SONAR_PROJECT_KEY }}
-          SONAR_FINDING_LABELS: "${{ vars.SONAR_FINDING_LABELS || 'security,bug,sonarqube,priority: high' }}"
-          SONAR_MAX_ISSUES: "${{ vars.SONAR_MAX_ISSUES || '100' }}"
+          SONAR_FINDING_LABELS: "${{ secrets.SONAR_FINDING_LABELS || 'security,bug,sonarqube,priority: high' }}"
+          SONAR_MAX_ISSUES: "${{ secrets.SONAR_MAX_ISSUES || '100' }}"
         run: python3 scripts/sonarcloud_issue_export.py
 
       - name: Fail workflow after publishing findings when scan failed
