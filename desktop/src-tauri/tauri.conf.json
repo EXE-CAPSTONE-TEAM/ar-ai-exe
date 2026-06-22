@@ -31,8 +31,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "icon": [
+      "icons/icon.ico"
+    ],
     "resources": [
-      "../dependencies/*",
+      "../dependencies/blender.windows.json",
+      "../dependencies/BLENDER-NOTICE.txt",
+      "../dependencies/tools",
       "../sidecars/*",
       "../../data/3DModel.glb"
     ]

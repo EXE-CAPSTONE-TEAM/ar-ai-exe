@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import {
   Crosshair,
+  Cpu,
   Download,
   ImagePlus,
   Maximize2,
@@ -33,6 +34,7 @@ type EditorPanelsProps = {
   modelAsset: ModelAsset | null;
   designName: string;
   isSaving: boolean;
+  isBakingPreview: boolean;
   isExporting: boolean;
   canEdit: boolean;
   canBake: boolean;
@@ -48,6 +50,7 @@ type EditorPanelsProps = {
   onApplyActiveLayerToSurface: () => void;
   onGizmoModeChange: (mode: "translate" | "rotate" | "scale") => void;
   onSave: () => void;
+  onBakePreview: () => void;
   onExport: () => void;
   onDownload: () => void;
   onDownloadModelFile: (urlPath: string, filename: string) => void;
@@ -62,6 +65,7 @@ export function EditorPanels({
   modelAsset,
   designName,
   isSaving,
+  isBakingPreview,
   isExporting,
   canEdit,
   canBake,
@@ -77,6 +81,7 @@ export function EditorPanels({
   onApplyActiveLayerToSurface,
   onGizmoModeChange,
   onSave,
+  onBakePreview,
   onExport,
   onDownload,
   onDownloadModelFile,
@@ -110,7 +115,7 @@ export function EditorPanels({
   const activeText = config.texts.find((t) => t.id === activeLayerId);
   const activeLayer = activeSticker || activeText;
   const activeLayerIsApplied = Boolean(activeLayer?.targetMeshName);
-  const isDesignBusy = isSaving || isExporting || !canEdit;
+  const isDesignBusy = isSaving || isBakingPreview || isExporting || !canEdit;
   const isArtworkBusy = isDesignBusy || isUploadingArtwork;
 
   function updateLayer(id: string, patch: any) {
@@ -173,7 +178,7 @@ export function EditorPanels({
         </div>
         <label>
           Draft name
-          <input value={designName} disabled={!canEdit || isSaving || isExporting} onChange={(event) => onNameChange(event.target.value)} />
+          <input value={designName} disabled={!canEdit || isSaving || isBakingPreview || isExporting} onChange={(event) => onNameChange(event.target.value)} />
         </label>
       </section>
 
@@ -190,7 +195,7 @@ export function EditorPanels({
           <ol className="mini-guide-list">
             <li>Add text, upload an image, draw artwork, or choose a preset.</li>
             <li>Select the layer, then apply it to the shoe surface.</li>
-            <li>Use Save Draft to bake the preview before exporting.</li>
+            <li>Save the draft first, then bake the preview when you need a rendered check.</li>
           </ol>
         </div>
         <div className="button-row">
@@ -500,16 +505,20 @@ export function EditorPanels({
             <p className="muted">Export creates the ZIP and starts the download automatically.</p>
           </div>
         </div>
-        <button className="primary-button" type="button" disabled={isSaving || isExporting || !canEdit || !canBake} onClick={onSave}>
+        <button className="primary-button" type="button" disabled={isSaving || isBakingPreview || isExporting || !canEdit} onClick={onSave}>
           <Save size={16} aria-hidden="true" />
-          {isSaving ? "Applying..." : "Save Draft"}
+          {isSaving ? "Saving..." : "Save Draft"}
         </button>
-        <button type="button" disabled={isSaving || isExporting || !canExport} onClick={onExport}>
+        <button type="button" disabled={isSaving || isBakingPreview || isExporting || !canEdit || !canBake} onClick={onBakePreview}>
+          <Cpu size={16} aria-hidden="true" />
+          {isBakingPreview ? "Baking..." : "Bake Preview"}
+        </button>
+        <button type="button" disabled={isSaving || isBakingPreview || isExporting || !canExport} onClick={onExport}>
           <Download size={16} aria-hidden="true" />
           {isExporting ? "Creating ZIP..." : "Export & Download ZIP"}
         </button>
         {exportPackage ? (
-          <button type="button" disabled={isSaving || isExporting || !canExport} onClick={onDownload}>
+          <button type="button" disabled={isSaving || isBakingPreview || isExporting || !canExport} onClick={onDownload}>
             <Download size={16} aria-hidden="true" />
             Download ZIP again
           </button>

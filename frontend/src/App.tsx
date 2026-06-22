@@ -84,6 +84,7 @@ export function App() {
   const [exportPackage, setExportPackage] = useState<ExportPackage | null>(null);
   const [statusMessage, setStatusMessage] = useState("Ready");
   const [isSaving, setIsSaving] = useState(false);
+  const [isBakingPreview, setIsBakingPreview] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
@@ -198,6 +199,7 @@ export function App() {
     desktopRuntime?.blenderStatus === "installed";
   const isEditorBusy =
     isSaving ||
+    isBakingPreview ||
     isExporting ||
     isImporting ||
     isDesktopRuntimeLoading ||
@@ -580,25 +582,82 @@ export function App() {
     return { ...designConfig, stickers };
   }
 
-  async function saveDesign() {
+  async function persistDesignDraft(): Promise<Design | null> {
     if (!modelAsset || !config) {
-      return;
+      return null;
     }
-    if (isProjectEditor && (!editorPermissions.canEdit || !editorPermissions.canBake)) {
-      setStatusMessage("FORBIDDEN: You do not have permission to save or bake this design.");
+    if (isProjectEditor && !editorPermissions.canEdit) {
+      setStatusMessage("FORBIDDEN: You do not have permission to save this design.");
+      return null;
+    }
+
+    const draftConfig = withEditorMetadata(await prepareBakeConfig(config));
+    const savedDesign =
+      isProjectEditor && editorProjectId
+        ? await editorClient.saveDesign(editorProjectId, draftConfig, designName)
+        : design
+          ? await api.updateDesign(design.id, designName, draftConfig)
+          : await api.createDesign(modelAsset.id, designName, draftConfig);
+    const hydratedConfig = normalizeFixedMaterial(await hydrateDesignAssetPreviewUrls(savedDesign.designConfig));
+
+    setDesign(savedDesign);
+    setDesignName(savedDesign.name);
+    setConfig(hydratedConfig);
+    setSavedConfigFingerprint(configFingerprint(savedDesign.designConfig));
+    setPreviewErrorMessage(savedDesign.previewStatus === "failed" ? savedDesign.previewErrorMessage : null);
+    setExportPackage(null);
+    setExportMessage(null);
+    if (!isProjectEditor) {
+      localStorage.setItem(designStorageKey(modelAsset.id), savedDesign.id);
+    }
+    await loadBakedPreview(savedDesign);
+    return savedDesign;
+  }
+
+  async function saveDesign() {
+    if (isSaving || isBakingPreview) {
       return null;
     }
 
     setIsSaving(true);
     setStatusMessage("SAVING_DRAFT");
     try {
-      const bakeConfig = withEditorMetadata(await prepareBakeConfig(config));
-      const savedDesign =
-        isProjectEditor && editorProjectId
-          ? await editorClient.saveDesign(editorProjectId, bakeConfig, designName)
-          : design
-            ? await api.updateDesign(design.id, designName, bakeConfig)
-            : await api.createDesign(modelAsset.id, designName, bakeConfig);
+      const savedDesign = await persistDesignDraft();
+      if (savedDesign) {
+        setStatusMessage("DRAFT_SAVED");
+      }
+      return savedDesign;
+    } catch (error) {
+      setStatusMessage(messageFromError(error));
+      return null;
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function bakePreview() {
+    if (isSaving || isBakingPreview || !modelAsset || !config) {
+      return null;
+    }
+    if (isProjectEditor && (!editorPermissions.canEdit || !editorPermissions.canBake)) {
+      setStatusMessage("FORBIDDEN: You do not have permission to bake this design.");
+      return null;
+    }
+    if (!canUsePreviewRenderer) {
+      const message = "Preview renderer cần cài đặt trước khi bake preview. Draft của bạn vẫn có thể lưu riêng.";
+      setPreviewErrorMessage(message);
+      setStatusMessage(message);
+      return null;
+    }
+
+    setIsBakingPreview(true);
+    setStatusMessage("SAVING_DRAFT");
+    try {
+      const savedDesign = await persistDesignDraft();
+      if (!savedDesign) {
+        return null;
+      }
+
       const job = isProjectEditor
         ? await editorClient.bakeDesign(savedDesign.id)
         : await api.bakeDesign(savedDesign.id);
@@ -609,10 +668,9 @@ export function App() {
       const refreshedDesign = isProjectEditor
         ? await editorClient.getDesign(savedDesign.id)
         : await api.getDesign(savedDesign.id);
-
       setDesign(refreshedDesign);
       setDesignName(refreshedDesign.name);
-      setConfig(await hydrateDesignAssetPreviewUrls(refreshedDesign.designConfig));
+      setConfig(normalizeFixedMaterial(await hydrateDesignAssetPreviewUrls(refreshedDesign.designConfig)));
       setSavedConfigFingerprint(configFingerprint(refreshedDesign.designConfig));
       if (!isProjectEditor) {
         localStorage.setItem(designStorageKey(modelAsset.id), refreshedDesign.id);
@@ -634,7 +692,7 @@ export function App() {
       setStatusMessage(messageFromError(error));
       return null;
     } finally {
-      setIsSaving(false);
+      setIsBakingPreview(false);
     }
   }
 
@@ -670,12 +728,18 @@ export function App() {
   }
 
   async function exportDesign() {
-    if (isSaving || isExporting) {
+    if (isSaving || isBakingPreview || isExporting) {
       return;
     }
     if (isProjectEditor && !editorPermissions.canExport) {
       setExportMessage("You do not have permission to export this design.");
       setStatusMessage("FORBIDDEN: You do not have permission to export this design.");
+      return;
+    }
+    if (!canUsePreviewRenderer) {
+      const message = "Preview renderer cần cài đặt trước khi export.";
+      setExportMessage(message);
+      setStatusMessage(message);
       return;
     }
 
@@ -684,7 +748,7 @@ export function App() {
     setStatusMessage("EXPORTING");
     try {
       const hasUnsavedConfig = config ? configFingerprint(config) !== savedConfigFingerprint : false;
-      const savedDesign = !design || hasUnsavedConfig ? await saveDesign() : design;
+      const savedDesign = !design || hasUnsavedConfig ? await persistDesignDraft() : design;
       const activeDesignId =
         savedDesign?.id ??
         (isProjectEditor ? design?.id : modelAsset && localStorage.getItem(designStorageKey(modelAsset.id)));
@@ -715,7 +779,7 @@ export function App() {
   }
 
   async function downloadExport() {
-    if (!exportPackage || isExporting) {
+    if (!exportPackage || isSaving || isBakingPreview || isExporting) {
       return;
     }
     setIsExporting(true);
@@ -956,7 +1020,8 @@ export function App() {
                 activeLayerId={activeLayerId}
                 gizmoMode={gizmoMode}
                 hiddenLayerIds={hiddenLayerIds}
-                isSaving={isSaving}
+                isSaving={isSaving || isBakingPreview}
+                savingMessage={isBakingPreview ? "Đang bake preview..." : "Đang lưu draft..."}
                 previewErrorMessage={friendlyPreviewErrorMessage}
                 surfaceApplyRequest={surfaceApplyRequest}
                 onConfigChange={handleConfigChange}
@@ -969,6 +1034,7 @@ export function App() {
                 modelAsset={modelAsset}
                 designName={designName}
                 isSaving={isSaving}
+                isBakingPreview={isBakingPreview}
                 isExporting={isExporting}
                 canEdit={!isProjectEditor || editorPermissions.canEdit}
                 canBake={(!isProjectEditor || editorPermissions.canBake) && canUsePreviewRenderer}
@@ -984,6 +1050,7 @@ export function App() {
                 onApplyActiveLayerToSurface={applyActiveLayerToSurface}
                 onGizmoModeChange={setGizmoMode}
                 onSave={saveDesign}
+                onBakePreview={bakePreview}
                 onExport={exportDesign}
                 onDownload={downloadExport}
                 onDownloadModelFile={downloadModelFile}
@@ -1699,7 +1766,7 @@ function friendlyRendererMessage(editorReadiness: EditorReadiness | null, runtim
   if (runtime?.blenderStatus === "failed" || editorReadiness?.previewRenderer.status === "failed") {
     return "Ứng dụng chưa chuẩn bị được Preview renderer. Vui lòng thử cài lại hoặc mở Logs để gửi diagnostics cho team.";
   }
-  return "Preview renderer cần cài đặt để Save Draft, bake preview và export. Bạn vẫn có thể mở model và xem demo trước.";
+  return "Preview renderer cần cài đặt để bake preview, import GLB/OBJ và export. Save Draft vẫn hoạt động khi renderer chưa sẵn sàng.";
 }
 
 function runtimeStatusLabel(status: string): string {

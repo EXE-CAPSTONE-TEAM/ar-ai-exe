@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
-    "build:frontend": "npm --prefix ../frontend run build -- --mode desktop"
+    "build:frontend": "npm --prefix ../frontend run build -- --mode desktop",
+    "build:sidecar": "powershell -ExecutionPolicy Bypass -File .\\scripts\\build-backend-sidecar.ps1",
+    "prepare:blender": "powershell -ExecutionPolicy Bypass -File .\\scripts\\prepare-blender-runtime.ps1",
+    "build:production": "powershell -ExecutionPolicy Bypass -File .\\scripts\\build-production-desktop.ps1"
   },
   "engines": {
     "node": ">=20"

@@ -20,7 +20,7 @@ flowchart TD
     C --> D["SQLite + storage under Windows app data"]
     C --> E["Seed demo from data/3DModel.glb"]
     B --> F["Preview renderer status"]
-    F --> G["Portable Blender under app data"]
+    F --> G["Bundled or app-data Blender"]
     B --> H["React editor with desktop runtime API base URL"]
 ```
 
@@ -79,7 +79,7 @@ The first screen opens with `?desktop=1`, starts the local backend, seeds
 - Import GLB/OBJ
 - Diagnostics actions
 
-## Preview Renderer Manifest
+## Preview Renderer Artifact
 
 The dependency manifest lives at:
 
@@ -87,9 +87,38 @@ The dependency manifest lives at:
 desktop/dependencies/blender.windows.json
 ```
 
-Before a release build, replace the placeholder `sha256` with the official
-checksum for the configured Blender archive. The installer refuses to download
-when the checksum is missing; this is intentional fail-safe behavior.
+Desktop production builds must use the internal artifact store, not direct
+runtime downloads from `download.blender.org`. Configure one of these inputs
+before preparing or building the desktop app:
+
+```powershell
+$env:KUSSHOES_BLENDER_ARTIFACT_PATH = "X:\artifacts\blender-4.5.1-windows-x64.zip"
+# or
+$env:KUSSHOES_BLENDER_ARTIFACT_URL = "https://internal-artifacts.example/kusshoes/blender-4.5.1-windows-x64.zip"
+$env:KUSSHOES_BLENDER_SHA256 = "<64-character sha256>"
+```
+
+Prepare the bundled resource:
+
+```powershell
+cd desktop
+npm run prepare:blender
+```
+
+The script copies/downloads the artifact, verifies SHA-256, extracts it under
+`desktop/dependencies/tools/blender/`, and keeps the Blender notice in
+`desktop/dependencies/BLENDER-NOTICE.txt`. Generated archives and extracted
+runtime files are ignored by git but included by Tauri when present.
+
+At runtime, the launcher resolves Blender in this order:
+
+1. `BLENDER_BIN`
+2. installed app-data runtime under `%LOCALAPPDATA%\KusShoes Editor`
+3. bundled Tauri resource under `desktop/dependencies/tools/blender`
+4. development auto-install from the configured internal artifact
+
+Save Draft does not require Blender. Import GLB/OBJ, Bake Preview, and Export
+still require the Preview renderer.
 
 ## Build Backend Sidecar
 
@@ -118,8 +147,19 @@ npm install
 npm run build
 ```
 
-The Tauri build packages `frontend/dist`, `desktop/dependencies/*`,
-`desktop/sidecars/*`, and `data/3DModel.glb`.
+The Tauri build packages `frontend/dist`, the Blender manifest/notice,
+`desktop/dependencies/tools/**`, `desktop/sidecars/*`, and `data/3DModel.glb`.
+
+Production build helper:
+
+```powershell
+cd desktop
+npm run build:production
+```
+
+This runs Blender artifact preparation, backend sidecar packaging, and Tauri
+packaging in sequence. It fails closed when the Blender SHA-256 or artifact
+source is missing.
 
 ## Diagnostics
 
@@ -137,8 +177,6 @@ runtime logs for testers to send to the team.
 
 ## Current Limitations
 
-- The first-run Blender download is disabled until the release manifest has a
-  real SHA-256 checksum.
 - Import GLB/OBJ requires the Preview renderer because the backend normalizes
   imported models through Blender.
 - The beta is Windows-first. macOS/Linux packaging should be planned
