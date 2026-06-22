@@ -8,6 +8,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from app.core.path_safety import resolve_existing_file
 from app.db.database import Base, SessionLocal, engine
 from app.models import (
     AssetStatus,
@@ -32,6 +33,9 @@ from app.services.users import UserService
 DEMO_PROJECT_ID = "proj_desktop_demo"
 DEMO_SCAN_ID = "scan_desktop_demo"
 DEMO_DESIGN_ID = "design_desktop_demo"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_DEMO_MODEL_PATH = REPO_ROOT / "data" / "3DModel.glb"
+DEMO_MODEL_SUFFIXES = {".glb", ".gltf"}
 
 
 def main() -> None:
@@ -45,9 +49,10 @@ def seed_demo_project(
     name: str = "KusShoes Desktop Demo",
     force: bool = False,
 ) -> dict[str, str]:
-    model_path = model_path.resolve()
-    if not model_path.is_file():
-        raise SystemExit(f"Model file not found: {model_path}")
+    try:
+        model_path = validate_demo_model_path(model_path)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
 
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
@@ -100,12 +105,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=Path,
-        default=Path("../data/3DModel.glb"),
+        default=DEFAULT_DEMO_MODEL_PATH,
         help="Path to the GLB file used for the demo project.",
     )
     parser.add_argument("--name", default="KusShoes Desktop Demo", help="Demo project name.")
     parser.add_argument("--force", action="store_true", help="Reset existing demo project records.")
     return parser.parse_args()
+
+
+def validate_demo_model_path(model_path: Path) -> Path:
+    return resolve_existing_file(
+        model_path,
+        allowed_suffixes=DEMO_MODEL_SUFFIXES,
+        label="Demo model",
+    )
 
 
 def upsert_project(db, user_id: str, name: str) -> Project:
@@ -199,6 +212,7 @@ def create_demo_design(db, user_id: str, project_id: str, model_asset_id: str, n
 
 
 def create_model_asset_files(temp_dir: Path, glb_path: Path, name: str) -> ModelAssetFiles:
+    glb_path = validate_demo_model_path(glb_path)
     glb = temp_dir / "shoe_preview.glb"
     obj = temp_dir / "shoe.obj"
     mtl = temp_dir / "shoe.mtl"
@@ -221,7 +235,7 @@ def create_model_asset_files(temp_dir: Path, glb_path: Path, name: str) -> Model
             {
                 "name": name,
                 "source": "desktop-demo",
-                "sourceModel": str(glb_path),
+                "sourceModel": glb_path.name,
                 "format": "glb",
             },
             indent=2,

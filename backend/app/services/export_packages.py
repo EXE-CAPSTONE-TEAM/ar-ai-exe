@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.path_safety import ensure_path_within, safe_child_path
 from app.models import Design, DesignStatus, ExportPackage, ExportStatus, ModelAsset, User
 from app.schemas.export import ExportPackageResponse
 from app.services.decal_baker import DecalBakeService
@@ -46,13 +47,12 @@ class ExportPackageService:
             shutil.rmtree(export_dir)
         export_dir.mkdir(parents=True, exist_ok=True)
 
-        glb_path = export_dir / "final_shoe.glb"
-        obj_path = export_dir / "final_shoe.obj"
-        mtl_path = export_dir / "final_shoe.mtl"
-        texture_path = export_dir / "final_texture.png"
-        design_config_path = export_dir / "design_config.json"
-        measurement_info_path = export_dir / "measurement_info.json"
-        production_notes_path = export_dir / "production_notes.json"
+        glb_path = self._export_file(export_dir, "final_shoe.glb")
+        obj_path = self._export_file(export_dir, "final_shoe.obj")
+        mtl_path = self._export_file(export_dir, "final_shoe.mtl")
+        texture_path = self._export_file(export_dir, "final_texture.png")
+        design_config_path = self._export_file(export_dir, "design_config.json")
+        production_notes_path = self._export_file(export_dir, "production_notes.json")
         preview_dir = export_dir
 
         model_service = ModelAssetService(self.db)
@@ -66,7 +66,7 @@ class ExportPackageService:
             json.dumps(design_config, indent=2),
             encoding="utf-8",
         )
-        self._write_measurements(asset, measurement_info_path)
+        self._write_measurements(asset, export_dir)
         self._write_previews(preview_dir)
         asset_service = DesignAssetService(self.db)
         decals_baked = DecalBakeService(
@@ -75,9 +75,9 @@ class ExportPackageService:
                 design.user_id,
             )
         ).bake(glb_path, export_dir, design_config)
-        self._write_production_notes(design, production_notes_path, decals_baked)
+        self._write_production_notes(design, export_dir, decals_baked)
 
-        zip_path = export_dir / f"{export_package.id}.zip"
+        zip_path = self._export_file(export_dir, f"{export_package.id}.zip")
         self._zip_export(export_dir, zip_path)
 
         glb_object = self.storage.put_bytes(
@@ -176,24 +176,50 @@ class ExportPackageService:
     def zip_bytes(self, export_package: ExportPackage) -> bytes:
         if self.storage.exists(export_package.zip_path):
             return self.storage.get_bytes(export_package.zip_path)
-        return Path(export_package.zip_path).read_bytes()
+        legacy_path = Path(export_package.zip_path)
+        if not legacy_path.is_absolute():
+            legacy_path = self.settings.resolved_storage_root / legacy_path
+        safe_legacy_path = ensure_path_within(
+            legacy_path,
+            self.settings.resolved_storage_root,
+            label="export zip path",
+        )
+        return safe_legacy_path.read_bytes()
 
     def _export_folder(self, export_id: str) -> Path:
-        return self.settings.resolved_storage_root / "exports" / export_id
+        exports_root = safe_child_path(
+            self.settings.resolved_storage_root,
+            "exports",
+            label="exports root",
+        )
+        return safe_child_path(exports_root, export_id, label="export folder")
+
+    def _export_file(self, export_dir: Path, name: str) -> Path:
+        return safe_child_path(export_dir, name, label="export file")
 
     def _read_scan_metadata(self, asset: ModelAsset) -> dict:
         metadata_key = asset.scan_session.metadata_path or ""
+        if not metadata_key:
+            return {}
         if metadata_key and self.storage.exists(metadata_key):
             return json.loads(self.storage.get_bytes(metadata_key).decode("utf-8"))
         metadata_path = Path(metadata_key)
-        if metadata_path.exists():
+        if not metadata_path.is_absolute():
+            metadata_path = self.settings.resolved_storage_root / metadata_path
+        metadata_path = ensure_path_within(
+            metadata_path,
+            self.settings.resolved_storage_root,
+            label="scan metadata path",
+        )
+        if metadata_path.is_file():
             return json.loads(metadata_path.read_text(encoding="utf-8"))
         return {}
 
-    def _write_measurements(self, asset: ModelAsset, path: Path) -> None:
+    def _write_measurements(self, asset: ModelAsset, export_dir: Path) -> None:
         metadata = self._read_scan_metadata(asset)
         self._write_json(
-            path,
+            export_dir,
+            "measurement_info.json",
             {
                 "shoe": metadata.get("shoe", {}),
                 "measurements": metadata.get("measurements", {}),
@@ -204,7 +230,7 @@ class ExportPackageService:
     def _write_previews(self, preview_dir: Path) -> None:
         preview_dir.mkdir(parents=True, exist_ok=True)
         for name in ["front", "side", "top", "back"]:
-            preview_path = preview_dir / f"preview_{name}.png"
+            preview_path = self._export_file(preview_dir, f"preview_{name}.png")
             preview_path.write_bytes(PLACEHOLDER_PNG)
             self.storage.put_bytes(
                 f"exports/{preview_dir.name}/preview_{name}.png",
@@ -212,13 +238,19 @@ class ExportPackageService:
                 "image/png",
             )
 
-    def _write_production_notes(self, design: Design, path: Path, decals_baked: bool = False) -> None:
+    def _write_production_notes(
+        self,
+        design: Design,
+        export_dir: Path,
+        decals_baked: bool = False,
+    ) -> None:
         metadata = self._read_scan_metadata(design.model_asset)
         design_config = DesignService(self.db).read_config(design)
         shoe = metadata.get("shoe", {})
         measurements = metadata.get("measurements", {})
         self._write_json(
-            path,
+            export_dir,
+            "production_notes.json",
             {
                 "orderType": "visual_design_package",
                 "shoe": {
@@ -263,15 +295,19 @@ class ExportPackageService:
             )
         return "Use preview images and design_config.json as manual customization reference."
 
-    def _write_json(self, path: Path, payload: dict) -> None:
+    def _write_json(self, export_dir: Path, filename: str, payload: dict) -> None:
+        path = self._export_file(export_dir, filename)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def _zip_export(self, export_dir: Path, zip_path: Path) -> None:
-        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        safe_zip_path = ensure_path_within(zip_path, export_dir, label="export zip path")
+        with zipfile.ZipFile(safe_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for path in export_dir.rglob("*"):
-                if path == zip_path or path.is_dir():
+                safe_path = ensure_path_within(path, export_dir, label="export archive path")
+                if safe_path == safe_zip_path or safe_path.is_dir():
                     continue
-                if "_work" in path.relative_to(export_dir).parts:
+                relative_path = safe_path.relative_to(export_dir)
+                if "_work" in relative_path.parts:
                     continue
-                archive.write(path, path.relative_to(export_dir))
+                archive.write(safe_path, relative_path)
