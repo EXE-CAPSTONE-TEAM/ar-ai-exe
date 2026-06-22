@@ -61,7 +61,10 @@ def test_cleanup_runs_blender_background_and_ensures_canonical_files(tmp_path: P
 
     report = service.cleanup(source_model, output_dir)
 
-    assert runner.command[:3] == ["blender", "--background", "--python"]
+    assert len(runner.command) >= 3
+    assert runner.command[0] == "blender"
+    assert runner.command[1] == "--background"
+    assert runner.command[2] == "--python"
     assert runner.command[-5:] == [
         str(source_model),
         str(output_dir),

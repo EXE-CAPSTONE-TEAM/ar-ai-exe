@@ -14,9 +14,9 @@ import type {
   ScanSession,
   User,
 } from "../types";
+import { clearAccessToken, storeAccessToken, storedAccessToken } from "./authStorage";
 import { apiUrl, getApiBaseUrl } from "./runtimeConfig";
 
-const TOKEN_STORAGE_KEY = "shoe-customizer-token";
 const CSRF_COOKIE_NAME = "kusshoes_csrf_token";
 
 export class ApiError extends Error {
@@ -60,7 +60,7 @@ async function errorMessage(response: Response): Promise<string> {
 }
 
 function authHeader(): Record<string, string> {
-  const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+  const token = storedAccessToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
@@ -74,10 +74,6 @@ function csrfHeader(method: string | undefined): Record<string, string> {
     .find((value) => value.startsWith(`${CSRF_COOKIE_NAME}=`))
     ?.split("=")[1];
   return csrfToken ? { "X-CSRF-Token": decodeURIComponent(csrfToken) } : {};
-}
-
-function storeToken(accessToken: string): void {
-  localStorage.setItem(TOKEN_STORAGE_KEY, accessToken);
 }
 
 function downloadBlob(blob: Blob, filename: string): void {
@@ -98,11 +94,11 @@ export const api = {
   },
 
   hasToken(): boolean {
-    return Boolean(localStorage.getItem(TOKEN_STORAGE_KEY));
+    return Boolean(storedAccessToken());
   },
 
   logout(): void {
-    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    clearAccessToken();
     void fetch(apiUrl("/api/auth/logout"), {
       method: "POST",
       credentials: "include",
@@ -115,7 +111,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ name, email, password }),
     });
-    storeToken(payload.accessToken);
+    storeAccessToken(payload.accessToken);
     return payload.user;
   },
 
@@ -124,7 +120,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
-    storeToken(payload.accessToken);
+    storeAccessToken(payload.accessToken);
     return payload.user;
   },
 
@@ -132,7 +128,7 @@ export const api = {
     const payload = await request<{ accessToken: string; user: User }>("/api/auth/demo-login", {
       method: "POST",
     });
-    storeToken(payload.accessToken);
+    storeAccessToken(payload.accessToken);
     return payload.user;
   },
 
