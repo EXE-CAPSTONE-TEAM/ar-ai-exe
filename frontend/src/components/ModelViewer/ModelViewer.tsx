@@ -19,6 +19,7 @@ type ModelViewerProps = {
   activeLayerId: string | null;
   hiddenLayerIds: string[];
   isSaving: boolean;
+  savingMessage?: string;
   previewErrorMessage: string | null;
   surfaceApplyRequest: number;
   onConfigChange: (config: DesignConfig) => void;
@@ -34,6 +35,7 @@ export function ModelViewer({
   activeLayerId,
   hiddenLayerIds,
   isSaving,
+  savingMessage,
   previewErrorMessage,
   surfaceApplyRequest,
   gizmoMode,
@@ -84,7 +86,7 @@ export function ModelViewer({
           {isSaving ? (
             <div className="viewer-saving-overlay" role="status" aria-live="polite">
               <div className="saving-spinner" aria-hidden="true" />
-              <span>Đang áp sticker/text vào giày...</span>
+              <span>{savingMessage ?? "Đang áp sticker/text vào giày..."}</span>
             </div>
           ) : null}
           {!isSaving && previewErrorMessage ? (

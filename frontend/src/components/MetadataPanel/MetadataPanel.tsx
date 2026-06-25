@@ -92,6 +92,7 @@ export function MetadataPanel({
             layerCount,
             hasActiveLayer: Boolean(activeLayer),
             isSaved,
+            hasBakedPreview,
             hasExportPackage,
           }).map((step) => (
             <li className={`progress-step ${step.state}`} key={step.label}>
@@ -268,8 +269,11 @@ function nextActionState({
   if (!activeLayer) {
     return { title: "Select a layer", detail: "Pick a layer so the 3D controls can move, rotate, scale, and snap it." };
   }
-  if (!isSaved || !hasBakedPreview) {
-    return { title: "Save draft", detail: "Save Draft bakes a fresh preview after placement changes." };
+  if (!isSaved) {
+    return { title: "Save draft", detail: "Persist the current layout before preview or export work." };
+  }
+  if (!hasBakedPreview) {
+    return { title: "Bake preview", detail: "Render a preview when the saved draft is ready for visual review." };
   }
   if (!hasExportPackage) {
     return { title: "Export ZIP", detail: "The preview is ready. Export when the design is approved." };
@@ -282,19 +286,23 @@ function progressSteps({
   layerCount,
   hasActiveLayer,
   isSaved,
+  hasBakedPreview,
   hasExportPackage,
 }: {
   hasModel: boolean;
   layerCount: number;
   hasActiveLayer: boolean;
   isSaved: boolean;
+  hasBakedPreview: boolean;
   hasExportPackage: boolean;
 }) {
   return [
     { label: "Model", state: hasModel ? "complete" : "current" },
     { label: "Artwork", state: !hasModel ? "upcoming" : layerCount > 0 ? "complete" : "current" },
     { label: "Placement", state: layerCount === 0 ? "upcoming" : hasActiveLayer || isSaved ? "complete" : "current" },
-    { label: "Export", state: hasExportPackage ? "complete" : isSaved ? "current" : "upcoming" },
+    { label: "Draft", state: !hasModel || layerCount === 0 ? "upcoming" : isSaved ? "complete" : "current" },
+    { label: "Preview", state: !isSaved ? "upcoming" : hasBakedPreview ? "complete" : "current" },
+    { label: "Export", state: hasExportPackage ? "complete" : hasBakedPreview ? "current" : "upcoming" },
   ] as const;
 }
 

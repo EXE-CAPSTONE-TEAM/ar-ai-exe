@@ -1,0 +1,18 @@
+KusShoes Desktop Blender Runtime Notice
+
+KusShoes Desktop can bundle a portable Blender runtime for local GLB/OBJ import
+cleanup, preview baking, and export packaging. The bundled runtime must be
+prepared from the team's internal artifact store and verified by SHA-256 before
+Tauri packaging.
+
+Blender is Free Software distributed under GPL-compatible licenses. Release
+owners must keep the Blender license files that ship inside the Blender ZIP
+artifact in the bundled resource directory and make the corresponding source and
+license information available according to Blender's licensing terms.
+
+This repository intentionally does not download Blender directly from
+download.blender.org at app runtime. Configure one of these release inputs:
+
+- KUSSHOES_BLENDER_ARTIFACT_PATH: local/internal ZIP artifact path.
+- KUSSHOES_BLENDER_ARTIFACT_URL: internal artifact URL.
+- KUSSHOES_BLENDER_SHA256: expected SHA-256 for that ZIP artifact.
