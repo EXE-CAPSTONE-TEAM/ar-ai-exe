@@ -58,6 +58,7 @@ type EditorPanelsProps = {
     file: File,
     sourceType: ArtworkAssetSource,
   ) => Promise<UploadedDesignAssetPreview>;
+  simplified?: boolean;
 };
 
 export function EditorPanels({
@@ -86,6 +87,7 @@ export function EditorPanels({
   onDownload,
   onDownloadModelFile,
   onUploadDesignAsset,
+  simplified = false,
 }: EditorPanelsProps) {
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [isArtworkEditorOpen, setIsArtworkEditorOpen] = useState(false);
@@ -173,7 +175,7 @@ export function EditorPanels({
           <PenLine size={18} aria-hidden="true" />
           <div>
             <h2>Design Tools</h2>
-            <p className="muted">Name the draft before saving it.</p>
+            {!simplified ? <p className="muted">Name the draft before saving it.</p> : null}
           </div>
         </div>
         <label>
@@ -186,18 +188,18 @@ export function EditorPanels({
         <div className="section-heading">
           <ImagePlus size={18} aria-hidden="true" />
           <div>
-            <h3>Decals & Text</h3>
-            <p className="muted">Add the artwork first, then place it on the model.</p>
+            <h3>{simplified ? "Artwork" : "Decals & Text"}</h3>
+            {!simplified ? <p className="muted">Add the artwork first, then place it on the model.</p> : null}
           </div>
         </div>
-        <div className="decal-guidance">
+        {!simplified ? <div className="decal-guidance">
           <ImagePlus size={18} aria-hidden="true" />
           <ol className="mini-guide-list">
             <li>Add text, upload an image, draw artwork, or choose a preset.</li>
             <li>Select the layer, then apply it to the shoe surface.</li>
             <li>Save the draft first, then bake the preview when you need a rendered check.</li>
           </ol>
-        </div>
+        </div> : null}
         <div className="button-row">
           <button type="button" disabled={isDesignBusy} onClick={() => {
             const newConfig = addText(config, meshBounds);
@@ -277,7 +279,7 @@ export function EditorPanels({
           <Type size={18} aria-hidden="true" />
           <div>
             <h3>Layers</h3>
-            <p className="muted">Select a layer to edit its placement and style.</p>
+            {!simplified ? <p className="muted">Select a layer to edit its placement and style.</p> : null}
           </div>
         </div>
         <div className="layer-list" onClick={(e) => {
@@ -348,8 +350,8 @@ export function EditorPanels({
           <div className="section-heading">
             <Crosshair size={18} aria-hidden="true" />
             <div>
-              <h3>Layer Properties</h3>
-              <p className="muted">Use the familiar move, rotate, and scale order.</p>
+              <h3>{simplified ? "Placement" : "Layer Properties"}</h3>
+              {!simplified ? <p className="muted">Use the familiar move, rotate, and scale order.</p> : null}
             </div>
           </div>
           <div className="button-row gizmo-toolbar">
@@ -392,17 +394,19 @@ export function EditorPanels({
               aria-label="Apply selected layer to the shoe surface"
               disabled={isDesignBusy}
               onClick={onApplyActiveLayerToSurface}
-              title="Apply to surface"
+              title={simplified ? "Snap to shoe" : "Apply to surface"}
             >
               <Crosshair size={16} />
-              {activeLayerIsApplied ? "Reapply to surface" : "Apply to surface"}
+              {simplified
+                ? activeLayerIsApplied ? "Snap again" : "Snap to Shoe"
+                : activeLayerIsApplied ? "Reapply to surface" : "Apply to surface"}
             </button>
           </div>
-          <span className={`surface-status-line ${activeLayerIsApplied ? "applied" : "blocked"}`}>
+          {!simplified ? <span className={`surface-status-line ${activeLayerIsApplied ? "applied" : "blocked"}`}>
             {activeLayerIsApplied
               ? `Applied to ${activeLayer?.targetMeshName}`
               : "Positioned manually. Apply to surface to snap it onto the shoe."}
-          </span>
+          </span> : null}
           {activeText && (
             <>
               <label>
@@ -448,7 +452,7 @@ export function EditorPanels({
               </label>
             </>
           )}
-          <label>
+          {!simplified ? <label>
             Scale
             <input
               type="range"
@@ -477,8 +481,8 @@ export function EditorPanels({
                 );
               }}
             />
-          </label>
-          <label>
+          </label> : null}
+          {!simplified ? <label>
             Rotation
             <input
               type="range"
@@ -493,11 +497,11 @@ export function EditorPanels({
                 updateLayer(activeLayer.id, { rotation: rot as [number, number, number] });
               }}
             />
-          </label>
+          </label> : null}
         </section>
       )}
 
-      <section className="panel-section action-stack" id="export-tools">
+      {!simplified ? <section className="panel-section action-stack" id="export-tools">
         <div className="section-heading">
           <Save size={18} aria-hidden="true" />
           <div>
@@ -528,9 +532,9 @@ export function EditorPanels({
             {exportMessage}
           </span>
         ) : null}
-      </section>
+      </section> : null}
 
-      {modelAsset ? (
+      {modelAsset && !simplified ? (
         <section className="panel-section">
           <div className="section-heading">
             <Download size={18} aria-hidden="true" />

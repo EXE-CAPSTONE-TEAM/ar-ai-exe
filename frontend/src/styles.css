@@ -1491,6 +1491,263 @@ dd {
   box-shadow: var(--shadow-hard);
 }
 
+.desktop-editor-shell {
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.desktop-editor-shell .skip-link {
+  display: none;
+}
+
+.desktop-editor-shell .workspace {
+  width: 100%;
+  max-width: none;
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.desktop-customize-shell {
+  display: grid;
+  grid-template-rows: 64px minmax(0, 1fr);
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--app-text);
+  background: var(--app-bg);
+}
+
+.desktop-editor-topbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  border-bottom: 1px solid var(--line-strong);
+  padding: 0 14px 0 18px;
+  background: rgba(255, 250, 247, 0.96);
+}
+
+.desktop-project-title {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.desktop-project-title h1 {
+  overflow: hidden;
+  font-size: 18px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-save-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  min-width: 148px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  padding: 0 10px;
+  background: var(--surface);
+  color: var(--app-muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.desktop-save-status.ready {
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.desktop-save-status.working {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.desktop-save-status.warning {
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.desktop-topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.desktop-topbar-actions button,
+.desktop-icon-button {
+  min-height: 36px;
+}
+
+.desktop-icon-button {
+  width: 38px;
+  padding: 0;
+}
+
+.desktop-editor-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 26vw, 390px);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.desktop-stage {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  gap: 10px;
+  overflow: hidden;
+  padding: 10px;
+}
+
+.desktop-stage .editor-status-notice.compact {
+  min-height: 0;
+  padding: 8px 10px;
+}
+
+.editor-status-notice.compact .editor-status-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.editor-status-notice.compact .editor-status-copy {
+  gap: 0;
+}
+
+.editor-status-notice.compact .editor-status-copy h2 {
+  font-size: 13px;
+}
+
+.editor-status-notice.compact .editor-status-copy p {
+  font-size: 12px;
+}
+
+.desktop-stage .viewer-surface {
+  height: 100%;
+  min-height: 0;
+  border-radius: 2px;
+  box-shadow: none;
+}
+
+.desktop-tools-sidebar {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-left: 1px solid var(--line-strong);
+  padding: 12px;
+  background: rgba(255, 250, 247, 0.96);
+  scrollbar-width: thin;
+}
+
+.desktop-tools-sidebar .editor-panel {
+  position: static;
+  max-height: none;
+  overflow: visible;
+  border: 0;
+  padding: 0;
+  gap: 14px;
+}
+
+.desktop-tools-sidebar .panel-section {
+  gap: 10px;
+}
+
+.desktop-tools-sidebar .section-heading h2,
+.desktop-tools-sidebar .section-heading h3 {
+  font-size: 13px;
+}
+
+.desktop-tools-sidebar .sticker-gallery {
+  max-height: 150px;
+}
+
+.desktop-tools-sidebar .layer-list {
+  max-height: 210px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.desktop-details-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  justify-content: end;
+  background: rgba(17, 17, 17, 0.28);
+}
+
+.desktop-details-drawer {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(520px, 100vw);
+  height: 100dvh;
+  min-height: 0;
+  border-left: 1px solid var(--line-strong);
+  background: var(--surface);
+  box-shadow: -8px 0 0 rgba(17, 17, 17, 0.12);
+}
+
+.desktop-details-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--line-strong);
+  padding: 14px;
+}
+
+.desktop-details-header h2 {
+  margin-top: 4px;
+  font-size: 18px;
+  line-height: 1.15;
+}
+
+.desktop-details-content {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px;
+  scrollbar-width: thin;
+}
+
+.desktop-details-content .scan-loader {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+.desktop-details-content .metadata-panel,
+.desktop-details-content .editor-panel {
+  position: static;
+  max-height: none;
+  overflow: visible;
+  border: 0;
+  padding: 0;
+}
+
+.desktop-details-content .desktop-runtime-panel {
+  box-shadow: var(--shadow-small);
+}
+
+.desktop-details-content .desktop-runtime-grid {
+  grid-template-columns: 1fr;
+}
+
 .desktop-import-card {
   border: 1px solid var(--line-strong);
   border-radius: 2px;
