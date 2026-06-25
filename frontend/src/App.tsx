@@ -948,10 +948,18 @@ export function App() {
         ) : isDesktopShell && isProjectEditor ? (
           <section className="desktop-customize-shell" aria-label="Customize shoe design">
             <header className="desktop-editor-topbar">
+              <div className="desktop-brand-lockup" aria-label="KusShoes desktop">
+                <img className="desktop-brand-logo" src="/logo.png" alt="KusShoes" />
+                <nav className="desktop-brand-nav" aria-label="Desktop sections">
+                  <span>Studio</span>
+                  <span>Customize</span>
+                  <span>Export</span>
+                </nav>
+              </div>
               <div className="desktop-project-title">
                 <span className="studio-eyebrow">
                   <Monitor size={14} aria-hidden="true" />
-                  Desktop Customize
+                  Desktop Studio
                 </span>
                 <h1>{editorContext.context?.project.name ?? designName ?? "KusShoes project"}</h1>
               </div>

@@ -246,11 +246,16 @@ export function EditorPanels({
         ) : null}
         <div className="sticker-gallery-container">
           <div className="category-tabs">
-            <button type="button" className={activeCategory === "all" ? "active" : ""} onClick={() => setActiveCategory("all")}>All</button>
-            <button type="button" className={activeCategory === "popular" ? "active" : ""} onClick={() => setActiveCategory("popular")}>Popular</button>
-            <button type="button" className={activeCategory === "symbols" ? "active" : ""} onClick={() => setActiveCategory("symbols")}>Symbols</button>
-            <button type="button" className={activeCategory === "nature" ? "active" : ""} onClick={() => setActiveCategory("nature")}>Nature</button>
-            <button type="button" className={activeCategory === "sport" ? "active" : ""} onClick={() => setActiveCategory("sport")}>Sport</button>
+            {stickerCategoryTabs.map((category) => (
+              <button
+                type="button"
+                className={activeCategory === category.id ? "active" : ""}
+                key={category.id}
+                onClick={() => setActiveCategory(category.id)}
+              >
+                {category.label}
+              </button>
+            ))}
           </div>
           <div className="sticker-gallery">
             {stickerPresets
@@ -431,7 +436,7 @@ export function EditorPanels({
                   disabled={isDesignBusy}
                   onChange={(e) => updateLayer(activeLayer.id, { font: e.target.value, renderAssetId: undefined })}
                 >
-                  {fontOptions.map((font) => (
+                  {fontChoices(activeText.font).map((font) => (
                     <option value={font} key={font}>
                       {font}
                     </option>
@@ -655,6 +660,7 @@ function addText(config: DesignConfig, meshBounds: { center: [number, number, nu
   const s = meshBounds ? meshBounds.size : [1, 1, 1];
   const maxModelSize = Math.max(s[0], s[1], s[2]);
   const scale = maxModelSize * 0.1;
+  const defaultValue = "KICKS";
 
   return {
     ...config,
@@ -662,13 +668,13 @@ function addText(config: DesignConfig, meshBounds: { center: [number, number, nu
       ...config.texts,
       {
         id: `text_${String(index).padStart(3, "0")}`,
-        value: "TAK",
-        font: "Arial",
+        value: defaultValue,
+        font: "Bahnschrift",
         color: "#ffffff",
         position: [c[0] + s[0] * 0.4, c[1] + s[1] * 0.1, c[2] + s[2] * 0.1],
         rotation: [0, 1.57, 0],
         scale: scale,
-        width: scale * 1.9,
+        width: scale * textAspect(defaultValue),
         height: scale,
         offset: 0.004,
         projectionDepth: Math.max(maxModelSize * 1.25, scale * 2, 0.05),
@@ -703,13 +709,30 @@ function stickerLayerLabel(sticker: StickerLayer): string {
   return sticker.id;
 }
 
-const fontOptions = [
-  "Arial",
-  "Helvetica",
-  "Georgia",
-  "Times New Roman",
-  "Courier New",
-  "Verdana",
-  "Trebuchet MS",
-  "Impact",
+const stickerCategoryTabs = [
+  { id: "all", label: "All" },
+  { id: "popular", label: "Featured" },
+  { id: "street", label: "Street" },
+  { id: "racing", label: "Racing" },
+  { id: "marks", label: "Marks" },
+  { id: "type", label: "Type" },
 ];
+
+const fontOptions = [
+  "Bahnschrift",
+  "Agency FB",
+  "Impact",
+  "Arial Black",
+  "Haettenschweiler",
+  "Stencil",
+  "Copperplate Gothic Bold",
+  "Segoe Script",
+  "Brush Script MT",
+  "Lucida Handwriting",
+  "Freestyle Script",
+  "Segoe Print",
+];
+
+function fontChoices(currentFont: string): string[] {
+  return fontOptions.includes(currentFont) ? fontOptions : [currentFont, ...fontOptions];
+}
