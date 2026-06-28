@@ -23,6 +23,14 @@ export type Project = {
   updatedAt: string;
 };
 
+export type CloudProject = {
+  id: string;
+  name: string;
+  status: ProjectStatus;
+  thumbnailUrl?: string | null;
+  updatedAt: string;
+};
+
 export type ScanSession = {
   id: string;
   userId: string;

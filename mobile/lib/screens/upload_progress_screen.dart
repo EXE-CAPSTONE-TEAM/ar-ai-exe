@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../models/scan_metadata.dart';
 import '../services/backend_api.dart';
-import 'scan_result_screen.dart';
+import 'kiri_crop_screen.dart';
 
 class UploadProgressScreen extends StatefulWidget {
   const UploadProgressScreen({
@@ -73,22 +73,18 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
       _safeSetState(() {
         _step = 3;
         _progress = 0;
-        _message = 'Starting reconstruction';
+        _message = 'Sending scan to Kiri Engine';
       });
-      final processingStatus =
-          await _api.startProcessing(scanSessionId: scanSessionId);
-      final processingStarted = processingStatus != 'toolchain_unavailable' &&
-          processingStatus != 'failed';
+      final kiriStatus =
+          await _api.startKiriProcessing(scanSessionId: scanSessionId);
       if (!mounted) {
         return;
       }
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => ScanResultScreen(
+          builder: (_) => KiriCropScreen(
             scanSessionId: result.scanSessionId,
-            status: processingStatus,
-            processingStarted: processingStarted,
-            webDesignUrl: result.webDesignUrl,
+            initialStatus: kiriStatus,
           ),
         ),
       );
@@ -116,7 +112,7 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
     return switch (_step) {
       1 => 'Uploading side orbit',
       2 => 'Uploading top-angle orbit',
-      3 => 'Starting reconstruction',
+      3 => 'Sending scan to Kiri Engine',
       _ => 'Preparing upload',
     };
   }

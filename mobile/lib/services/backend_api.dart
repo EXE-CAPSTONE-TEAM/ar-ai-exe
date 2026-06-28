@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/reconstruction_readiness.dart';
+import '../models/kiri_status.dart';
 import '../models/scan_metadata.dart';
 import '../models/scan_upload_result.dart';
 import 'token_storage.dart';
@@ -123,6 +124,77 @@ class BackendApi {
       options: _authOptions(),
     );
     return response.data?['status'] as String? ?? 'uploaded';
+  }
+
+  Future<KiriStatus> startKiriProcessing({required String scanSessionId}) async {
+    await _ensureToken();
+    final response = await _dio.post<Map<String, dynamic>>(
+      '$_baseUrl/api/scan-sessions/$scanSessionId/kiri/process',
+      data: const <String, dynamic>{},
+      options: _authOptions(),
+    );
+    return _kiriStatus(response.data);
+  }
+
+  Future<KiriStatus> getKiriStatus({required String scanSessionId}) async {
+    await _ensureToken();
+    final response = await _dio.get<Map<String, dynamic>>(
+      '$_baseUrl/api/scan-sessions/$scanSessionId/kiri/status',
+      options: _authOptions(),
+    );
+    return _kiriStatus(response.data);
+  }
+
+  Future<KiriStatus> configureCrop({
+    required String scanSessionId,
+    required CropBox cropBox,
+  }) async {
+    await _ensureToken();
+    final response = await _dio.post<Map<String, dynamic>>(
+      '$_baseUrl/api/scan-sessions/$scanSessionId/crop',
+      data: cropBox.toJson(),
+      options: _authOptions(),
+    );
+    return _kiriStatus(response.data);
+  }
+
+  Future<KiriStatus> saveKiriProject({
+    required String scanSessionId,
+    required String projectName,
+    required CropBox cropBox,
+  }) async {
+    await _ensureToken();
+    final response = await _dio.post<Map<String, dynamic>>(
+      '$_baseUrl/api/scan-sessions/$scanSessionId/save-project',
+      data: {
+        'projectName': projectName,
+        'cropBox': cropBox.toJson(),
+      },
+      options: _authOptions(),
+    );
+    return _kiriStatus(response.data);
+  }
+
+  KiriStatus _kiriStatus(Map<String, dynamic>? payload) {
+    if (payload == null) {
+      throw Exception('Backend did not return Kiri status.');
+    }
+    final status = KiriStatus.fromJson(payload);
+    final previewUrl = status.previewUrl;
+    if (previewUrl == null || Uri.parse(previewUrl).hasScheme) {
+      return status;
+    }
+    return KiriStatus(
+      scanSessionId: status.scanSessionId,
+      projectId: status.projectId,
+      status: status.status,
+      providerStatus: status.providerStatus,
+      progress: status.progress,
+      previewUrl: '$_baseUrl$previewUrl',
+      cropBox: status.cropBox,
+      modelAssetId: status.modelAssetId,
+      errorMessage: status.errorMessage,
+    );
   }
 
   Future<void> _storeToken(String? token) async {
