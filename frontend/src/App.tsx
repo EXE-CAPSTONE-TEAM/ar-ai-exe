@@ -20,6 +20,8 @@ import {
   X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
+import { listen } from "@tauri-apps/api/event";
 
 import { api, designStorageKey } from "./api/client";
 import {
@@ -63,7 +65,7 @@ import {
 
 const MARKETING_LOGIN_URL = import.meta.env.VITE_MARKETING_LOGIN_URL ?? "https://kusshoes.vn/login";
 const DESKTOP_DEMO_PROJECT_ID = import.meta.env.VITE_DESKTOP_DEMO_PROJECT_ID ?? "proj_desktop_demo";
-const DESKTOP_CLOUD_API_BASE_URL = (import.meta.env.VITE_DESKTOP_CLOUD_API_BASE_URL ?? "").replace(/\/+$/, "");
+const DESKTOP_CLOUD_API_BASE_URL = (import.meta.env.VITE_DESKTOP_CLOUD_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
 const DEFAULT_EDITOR_PERMISSIONS: EditorPermissions = { canEdit: true, canBake: true, canExport: true };
 type DesktopApiMode = "local" | "cloud";
 
@@ -123,6 +125,67 @@ export function App() {
   const [isDesktopImportOpen, setIsDesktopImportOpen] = useState(false);
   const [isDesktopDetailsOpen, setIsDesktopDetailsOpen] = useState(false);
   const assetPreviewUrlsRef = useRef<Set<string>>(new Set());
+
+  // Handle Tauri Custom Protocol Deep Link and Single Instance
+  useEffect(() => {
+    if (!isDesktopShell) return;
+
+    const handleDeepLinkUrl = (urlStr: string) => {
+      console.log("Caught deep link URL:", urlStr);
+      try {
+        // Expected format: kusshoes-editor://editor/proj_123?token=abc
+        const url = new URL(urlStr.replace("kusshoes-editor://", "http://localhost/"));
+        const pathParts = url.pathname.split("/");
+        const projectId = pathParts[2] || pathParts[1];
+        const token = url.searchParams.get("token");
+
+        if (token) {
+          localStorage.setItem("shoe-customizer-token", token);
+        }
+        localStorage.setItem("kusshoes-desktop-api-mode", "cloud");
+
+        if (projectId) {
+          // Force page reload to apply new token and projectId
+          window.location.href = `/?desktop=1&projectId=${projectId}`;
+        }
+      } catch (err) {
+        console.error("Failed to parse deep link URL:", err);
+      }
+    };
+
+    // 1. Listen for active running deep link events from other single instances
+    let unsubscribeSingleInstance: (() => void) | undefined;
+    listen<string[]>("single-instance-deep-link", (event) => {
+      const args = event.payload;
+      console.log("Single instance args received:", args);
+      const deepLinkArg = args.find((arg) => arg.startsWith("kusshoes-editor://"));
+      if (deepLinkArg) {
+        handleDeepLinkUrl(deepLinkArg);
+      }
+    }).then((unsub) => {
+      unsubscribeSingleInstance = unsub;
+    }).catch((err) => {
+      console.error("Failed to listen to single-instance-deep-link:", err);
+    });
+
+    // 2. Listen to startup deep links using the plugin
+    let unsubscribeDeepLink: (() => void) | undefined;
+    onOpenUrl((urls) => {
+      console.log("Tauri deep link URLs received:", urls);
+      if (urls.length > 0) {
+        handleDeepLinkUrl(urls[0]);
+      }
+    }).then((unsub) => {
+      unsubscribeDeepLink = unsub;
+    }).catch((err) => {
+      console.error("Failed to listen to tauri-plugin-deep-link onOpenUrl:", err);
+    });
+
+    return () => {
+      if (unsubscribeSingleInstance) unsubscribeSingleInstance();
+      if (unsubscribeDeepLink) unsubscribeDeepLink();
+    };
+  }, [isDesktopShell]);
 
   useEffect(() => {
     if (!isDesktopShell) {
