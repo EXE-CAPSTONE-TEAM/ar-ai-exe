@@ -639,6 +639,10 @@ fn blender_bin_under(base: &Path) -> PathBuf {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            let _ = app.emit("single-instance-deep-link", args);
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .manage(Mutex::new(RuntimeState::default()))
         .invoke_handler(tauri::generate_handler![
             get_desktop_runtime,
