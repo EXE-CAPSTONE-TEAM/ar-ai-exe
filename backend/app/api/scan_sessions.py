@@ -1,23 +1,30 @@
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, UploadFile, status
+import jwt
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.core.config import get_settings
+from app.core.security import decode_kiri_preview_ticket
 from app.db.database import get_db
-from app.models import ScanSession, ScanStatus, User
+from app.models import KiriTaskStatus, ScanSession, ScanStatus, User
 from app.schemas.scan import (
     ScanMetadata,
+    CropBox,
+    KiriStatusResponse,
+    SaveKiriProjectRequest,
     ScanSessionCreate,
     ScanSessionResponse,
     ScanStatusResponse,
     ScanUploadResponse,
 )
 from app.services.reconstruction_toolchain import ReconstructionToolchainService
+from app.services.kiri_pipeline import KiriPipelineService
 from app.services.scan_metadata import parse_scan_metadata
 from app.services.scan_sessions import ScanSessionService
 from app.workers.reconstruction_worker import process_scan_session
+from app.workers.kiri_worker import bake_kiri_project, start_kiri_processing
 
 
 router = APIRouter(prefix="/scan-sessions", tags=["scan-sessions"])
@@ -32,6 +39,8 @@ ACTIVE_PROCESSING_STATUSES = {
     ScanStatus.UV_UNWRAPPING,
     ScanStatus.TEXTURE_BAKING,
     ScanStatus.EXPORTING,
+    ScanStatus.KIRI_PROCESSING,
+    ScanStatus.CROP_BAKING,
 }
 
 
@@ -164,6 +173,93 @@ def get_scan_status(
     service = ScanSessionService(db)
     scan_session = service.get_for_user(scan_session_id, current_user)
     return status_response(scan_session, service)
+
+
+@router.post("/{scan_session_id}/kiri/process", response_model=KiriStatusResponse)
+def process_scan_with_kiri(
+    scan_session_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> KiriStatusResponse:
+    scan_session = ScanSessionService(db).get_for_user(scan_session_id, current_user)
+    service = KiriPipelineService(db)
+    task = service.create_task(scan_session)
+    if task.status == KiriTaskStatus.QUEUED:
+        background_tasks.add_task(start_kiri_processing, scan_session_id)
+    return service.response(task)
+
+
+@router.get("/{scan_session_id}/kiri/status", response_model=KiriStatusResponse)
+def get_kiri_status(
+    scan_session_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> KiriStatusResponse:
+    ScanSessionService(db).get_for_user(scan_session_id, current_user)
+    service = KiriPipelineService(db)
+    task = service.refresh(service.require_task(scan_session_id))
+    return service.response(task)
+
+
+@router.post("/{scan_session_id}/crop", response_model=KiriStatusResponse)
+def configure_kiri_crop(
+    scan_session_id: str,
+    payload: CropBox,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> KiriStatusResponse:
+    ScanSessionService(db).get_for_user(scan_session_id, current_user)
+    service = KiriPipelineService(db)
+    return service.response(service.set_crop(service.require_task(scan_session_id), payload))
+
+
+@router.post("/{scan_session_id}/save-project", response_model=KiriStatusResponse)
+def save_kiri_project(
+    scan_session_id: str,
+    payload: SaveKiriProjectRequest,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> KiriStatusResponse:
+    ScanSessionService(db).get_for_user(scan_session_id, current_user)
+    service = KiriPipelineService(db)
+    task = service.queue_save(
+        service.require_task(scan_session_id),
+        payload.project_name,
+        payload.crop_box,
+    )
+    if task.status == KiriTaskStatus.CROP_BAKING:
+        background_tasks.add_task(bake_kiri_project, scan_session_id)
+    return service.response(task)
+
+
+@router.get("/{scan_session_id}/kiri/preview")
+def get_kiri_preview(
+    scan_session_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    ticket: Annotated[str, Query(min_length=1)],
+) -> Response:
+    try:
+        ticket_scan_id = decode_kiri_preview_ticket(ticket)
+    except jwt.InvalidTokenError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid preview ticket.") from exc
+    if ticket_scan_id != scan_session_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid preview ticket.")
+    service = KiriPipelineService(db)
+    task = service.require_task(scan_session_id)
+    if not task.source_glb_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Kiri preview not found.")
+    return Response(
+        content=service.storage.get_bytes(task.source_glb_path),
+        media_type="model/gltf-binary",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "private, max-age=300",
+            "Cross-Origin-Resource-Policy": "cross-origin",
+            "Referrer-Policy": "no-referrer",
+        },
+    )
 
 
 @router.post("/{scan_session_id}/process", response_model=ScanStatusResponse)

@@ -41,3 +41,23 @@ def create_access_token(subject: str, extra_claims: dict[str, Any] | None = None
 def decode_access_token(token: str) -> dict[str, Any]:
     settings = get_settings()
     return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+
+
+def create_kiri_preview_ticket(scan_session_id: str) -> str:
+    settings = get_settings()
+    now = datetime.now(UTC)
+    payload = {
+        "sub": scan_session_id,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=settings.kiri_preview_ticket_minutes)).timestamp()),
+        "typ": "kiri-preview",
+    }
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def decode_kiri_preview_ticket(token: str) -> str:
+    settings = get_settings()
+    payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+    if payload.get("typ") != "kiri-preview" or not payload.get("sub"):
+        raise jwt.InvalidTokenError("Invalid Kiri preview ticket.")
+    return str(payload["sub"])

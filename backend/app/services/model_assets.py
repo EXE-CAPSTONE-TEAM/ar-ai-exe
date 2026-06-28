@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import AssetStatus, ModelAsset, ProjectStatus, ScanSession, User
 from app.schemas.model_asset import ModelAssetResponse
-from app.services.storage import get_storage_service
+from app.services.storage import StorageService, get_storage_service
 
 
 @dataclass(frozen=True)
@@ -22,9 +22,9 @@ class ModelAssetFiles:
 
 
 class ModelAssetService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, storage: StorageService | None = None):
         self.db = db
-        self.storage = get_storage_service()
+        self.storage = storage or get_storage_service()
 
     def get(self, model_asset_id: str) -> ModelAsset:
         asset = self.db.get(ModelAsset, model_asset_id)
