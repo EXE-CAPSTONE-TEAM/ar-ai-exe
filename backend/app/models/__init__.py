@@ -2,6 +2,11 @@
 
 from app.models.entities import (
     AssetStatus,
+    AssetVersion,
+    AssetVersionFile,
+    AssetVersionLegacyLink,
+    AssetVersionStatus,
+    AssetVersionType,
     Design,
     DesignAsset,
     DesignPreviewStatus,
@@ -19,10 +24,16 @@ from app.models.entities import (
     ScanSource,
     ScanStatus,
     User,
+    new_id,
 )
 
 __all__ = [
     "AssetStatus",
+    "AssetVersion",
+    "AssetVersionFile",
+    "AssetVersionLegacyLink",
+    "AssetVersionStatus",
+    "AssetVersionType",
     "Design",
     "DesignAsset",
     "DesignPreviewStatus",
@@ -40,4 +51,5 @@ __all__ = [
     "ScanSource",
     "ScanStatus",
     "User",
+    "new_id",
 ]

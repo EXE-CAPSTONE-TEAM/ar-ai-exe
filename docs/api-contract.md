@@ -253,3 +253,12 @@ quality_report.json
 ## Legacy Compatibility
 
 `POST /api/scan-sessions/{scan_session_id}/upload-video` still accepts the old single-video form and stores it as `side_orbit`, but the real reconstruction worker will not process until `top_orbit` is also uploaded.
+# Project Asset Manifest (Sprint 1)
+
+`GET /api/projects/{projectId}/asset-manifest` returns an owner-scoped, stable document with
+`project`, `model`, `design`, `preview`, and `exports` sections. Missing values are null or empty.
+The model section resolves the highest ready/published version number for
+`(projectId, assetType=model, logicalKey=primary)`.
+
+`GET /api/projects/{projectId}/asset-versions/{versionId}/files/{fileType}` returns immutable
+version file bytes after project ownership validation. Existing model APIs remain supported.
