@@ -3,6 +3,7 @@ import type {
   DesignAsset,
   DesignAssetSource,
   DesignConfig,
+  CloudProject,
   EditorReadiness,
   ExportPackage,
   Job,
@@ -137,6 +138,11 @@ export const api = {
 
   async me(): Promise<User> {
     return request<User>("/api/auth/me");
+  },
+
+  async listProjects(): Promise<CloudProject[]> {
+    const payload = await request<{ items: CloudProject[] }>("/api/projects");
+    return payload.items;
   },
 
   async getReconstructionReadiness(): Promise<ReconstructionReadiness> {

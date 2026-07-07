@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import {
   Crosshair,
+  Cpu,
   Download,
   ImagePlus,
   Maximize2,
@@ -33,6 +34,7 @@ type EditorPanelsProps = {
   modelAsset: ModelAsset | null;
   designName: string;
   isSaving: boolean;
+  isBakingPreview: boolean;
   isExporting: boolean;
   canEdit: boolean;
   canBake: boolean;
@@ -48,6 +50,7 @@ type EditorPanelsProps = {
   onApplyActiveLayerToSurface: () => void;
   onGizmoModeChange: (mode: "translate" | "rotate" | "scale") => void;
   onSave: () => void;
+  onBakePreview: () => void;
   onExport: () => void;
   onDownload: () => void;
   onDownloadModelFile: (urlPath: string, filename: string) => void;
@@ -55,6 +58,7 @@ type EditorPanelsProps = {
     file: File,
     sourceType: ArtworkAssetSource,
   ) => Promise<UploadedDesignAssetPreview>;
+  simplified?: boolean;
 };
 
 export function EditorPanels({
@@ -62,6 +66,7 @@ export function EditorPanels({
   modelAsset,
   designName,
   isSaving,
+  isBakingPreview,
   isExporting,
   canEdit,
   canBake,
@@ -77,10 +82,12 @@ export function EditorPanels({
   onApplyActiveLayerToSurface,
   onGizmoModeChange,
   onSave,
+  onBakePreview,
   onExport,
   onDownload,
   onDownloadModelFile,
   onUploadDesignAsset,
+  simplified = false,
 }: EditorPanelsProps) {
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [isArtworkEditorOpen, setIsArtworkEditorOpen] = useState(false);
@@ -110,7 +117,7 @@ export function EditorPanels({
   const activeText = config.texts.find((t) => t.id === activeLayerId);
   const activeLayer = activeSticker || activeText;
   const activeLayerIsApplied = Boolean(activeLayer?.targetMeshName);
-  const isDesignBusy = isSaving || isExporting || !canEdit;
+  const isDesignBusy = isSaving || isBakingPreview || isExporting || !canEdit;
   const isArtworkBusy = isDesignBusy || isUploadingArtwork;
 
   function updateLayer(id: string, patch: any) {
@@ -168,12 +175,12 @@ export function EditorPanels({
           <PenLine size={18} aria-hidden="true" />
           <div>
             <h2>Design Tools</h2>
-            <p className="muted">Name the draft before saving it.</p>
+            {!simplified ? <p className="muted">Name the draft before saving it.</p> : null}
           </div>
         </div>
         <label>
           Draft name
-          <input value={designName} disabled={!canEdit || isSaving || isExporting} onChange={(event) => onNameChange(event.target.value)} />
+          <input value={designName} disabled={!canEdit || isSaving || isBakingPreview || isExporting} onChange={(event) => onNameChange(event.target.value)} />
         </label>
       </section>
 
@@ -181,18 +188,18 @@ export function EditorPanels({
         <div className="section-heading">
           <ImagePlus size={18} aria-hidden="true" />
           <div>
-            <h3>Decals & Text</h3>
-            <p className="muted">Add the artwork first, then place it on the model.</p>
+            <h3>{simplified ? "Artwork" : "Decals & Text"}</h3>
+            {!simplified ? <p className="muted">Add the artwork first, then place it on the model.</p> : null}
           </div>
         </div>
-        <div className="decal-guidance">
+        {!simplified ? <div className="decal-guidance">
           <ImagePlus size={18} aria-hidden="true" />
           <ol className="mini-guide-list">
             <li>Add text, upload an image, draw artwork, or choose a preset.</li>
             <li>Select the layer, then apply it to the shoe surface.</li>
-            <li>Use Save Draft to bake the preview before exporting.</li>
+            <li>Save the draft first, then bake the preview when you need a rendered check.</li>
           </ol>
-        </div>
+        </div> : null}
         <div className="button-row">
           <button type="button" disabled={isDesignBusy} onClick={() => {
             const newConfig = addText(config, meshBounds);
@@ -239,11 +246,16 @@ export function EditorPanels({
         ) : null}
         <div className="sticker-gallery-container">
           <div className="category-tabs">
-            <button type="button" className={activeCategory === "all" ? "active" : ""} onClick={() => setActiveCategory("all")}>All</button>
-            <button type="button" className={activeCategory === "popular" ? "active" : ""} onClick={() => setActiveCategory("popular")}>Popular</button>
-            <button type="button" className={activeCategory === "symbols" ? "active" : ""} onClick={() => setActiveCategory("symbols")}>Symbols</button>
-            <button type="button" className={activeCategory === "nature" ? "active" : ""} onClick={() => setActiveCategory("nature")}>Nature</button>
-            <button type="button" className={activeCategory === "sport" ? "active" : ""} onClick={() => setActiveCategory("sport")}>Sport</button>
+            {stickerCategoryTabs.map((category) => (
+              <button
+                type="button"
+                className={activeCategory === category.id ? "active" : ""}
+                key={category.id}
+                onClick={() => setActiveCategory(category.id)}
+              >
+                {category.label}
+              </button>
+            ))}
           </div>
           <div className="sticker-gallery">
             {stickerPresets
@@ -272,7 +284,7 @@ export function EditorPanels({
           <Type size={18} aria-hidden="true" />
           <div>
             <h3>Layers</h3>
-            <p className="muted">Select a layer to edit its placement and style.</p>
+            {!simplified ? <p className="muted">Select a layer to edit its placement and style.</p> : null}
           </div>
         </div>
         <div className="layer-list" onClick={(e) => {
@@ -343,8 +355,8 @@ export function EditorPanels({
           <div className="section-heading">
             <Crosshair size={18} aria-hidden="true" />
             <div>
-              <h3>Layer Properties</h3>
-              <p className="muted">Use the familiar move, rotate, and scale order.</p>
+              <h3>{simplified ? "Placement" : "Layer Properties"}</h3>
+              {!simplified ? <p className="muted">Use the familiar move, rotate, and scale order.</p> : null}
             </div>
           </div>
           <div className="button-row gizmo-toolbar">
@@ -387,17 +399,19 @@ export function EditorPanels({
               aria-label="Apply selected layer to the shoe surface"
               disabled={isDesignBusy}
               onClick={onApplyActiveLayerToSurface}
-              title="Apply to surface"
+              title={simplified ? "Snap to shoe" : "Apply to surface"}
             >
               <Crosshair size={16} />
-              {activeLayerIsApplied ? "Reapply to surface" : "Apply to surface"}
+              {simplified
+                ? activeLayerIsApplied ? "Snap again" : "Snap to Shoe"
+                : activeLayerIsApplied ? "Reapply to surface" : "Apply to surface"}
             </button>
           </div>
-          <span className={`surface-status-line ${activeLayerIsApplied ? "applied" : "blocked"}`}>
+          {!simplified ? <span className={`surface-status-line ${activeLayerIsApplied ? "applied" : "blocked"}`}>
             {activeLayerIsApplied
               ? `Applied to ${activeLayer?.targetMeshName}`
               : "Positioned manually. Apply to surface to snap it onto the shoe."}
-          </span>
+          </span> : null}
           {activeText && (
             <>
               <label>
@@ -422,7 +436,7 @@ export function EditorPanels({
                   disabled={isDesignBusy}
                   onChange={(e) => updateLayer(activeLayer.id, { font: e.target.value, renderAssetId: undefined })}
                 >
-                  {fontOptions.map((font) => (
+                  {fontChoices(activeText.font).map((font) => (
                     <option value={font} key={font}>
                       {font}
                     </option>
@@ -443,7 +457,7 @@ export function EditorPanels({
               </label>
             </>
           )}
-          <label>
+          {!simplified ? <label>
             Scale
             <input
               type="range"
@@ -472,8 +486,8 @@ export function EditorPanels({
                 );
               }}
             />
-          </label>
-          <label>
+          </label> : null}
+          {!simplified ? <label>
             Rotation
             <input
               type="range"
@@ -488,11 +502,11 @@ export function EditorPanels({
                 updateLayer(activeLayer.id, { rotation: rot as [number, number, number] });
               }}
             />
-          </label>
+          </label> : null}
         </section>
       )}
 
-      <section className="panel-section action-stack" id="export-tools">
+      {!simplified ? <section className="panel-section action-stack" id="export-tools">
         <div className="section-heading">
           <Save size={18} aria-hidden="true" />
           <div>
@@ -500,16 +514,20 @@ export function EditorPanels({
             <p className="muted">Export creates the ZIP and starts the download automatically.</p>
           </div>
         </div>
-        <button className="primary-button" type="button" disabled={isSaving || isExporting || !canEdit || !canBake} onClick={onSave}>
+        <button className="primary-button" type="button" disabled={isSaving || isBakingPreview || isExporting || !canEdit} onClick={onSave}>
           <Save size={16} aria-hidden="true" />
-          {isSaving ? "Applying..." : "Save Draft"}
+          {isSaving ? "Saving..." : "Save Draft"}
         </button>
-        <button type="button" disabled={isSaving || isExporting || !canExport} onClick={onExport}>
+        <button type="button" disabled={isSaving || isBakingPreview || isExporting || !canEdit || !canBake} onClick={onBakePreview}>
+          <Cpu size={16} aria-hidden="true" />
+          {isBakingPreview ? "Baking..." : "Bake Preview"}
+        </button>
+        <button type="button" disabled={isSaving || isBakingPreview || isExporting || !canExport} onClick={onExport}>
           <Download size={16} aria-hidden="true" />
           {isExporting ? "Creating ZIP..." : "Export & Download ZIP"}
         </button>
         {exportPackage ? (
-          <button type="button" disabled={isSaving || isExporting || !canExport} onClick={onDownload}>
+          <button type="button" disabled={isSaving || isBakingPreview || isExporting || !canExport} onClick={onDownload}>
             <Download size={16} aria-hidden="true" />
             Download ZIP again
           </button>
@@ -519,9 +537,9 @@ export function EditorPanels({
             {exportMessage}
           </span>
         ) : null}
-      </section>
+      </section> : null}
 
-      {modelAsset ? (
+      {modelAsset && !simplified ? (
         <section className="panel-section">
           <div className="section-heading">
             <Download size={18} aria-hidden="true" />
@@ -642,6 +660,7 @@ function addText(config: DesignConfig, meshBounds: { center: [number, number, nu
   const s = meshBounds ? meshBounds.size : [1, 1, 1];
   const maxModelSize = Math.max(s[0], s[1], s[2]);
   const scale = maxModelSize * 0.1;
+  const defaultValue = "KICKS";
 
   return {
     ...config,
@@ -649,13 +668,13 @@ function addText(config: DesignConfig, meshBounds: { center: [number, number, nu
       ...config.texts,
       {
         id: `text_${String(index).padStart(3, "0")}`,
-        value: "TAK",
-        font: "Arial",
+        value: defaultValue,
+        font: "Bahnschrift",
         color: "#ffffff",
         position: [c[0] + s[0] * 0.4, c[1] + s[1] * 0.1, c[2] + s[2] * 0.1],
         rotation: [0, 1.57, 0],
         scale: scale,
-        width: scale * 1.9,
+        width: scale * textAspect(defaultValue),
         height: scale,
         offset: 0.004,
         projectionDepth: Math.max(maxModelSize * 1.25, scale * 2, 0.05),
@@ -690,13 +709,30 @@ function stickerLayerLabel(sticker: StickerLayer): string {
   return sticker.id;
 }
 
-const fontOptions = [
-  "Arial",
-  "Helvetica",
-  "Georgia",
-  "Times New Roman",
-  "Courier New",
-  "Verdana",
-  "Trebuchet MS",
-  "Impact",
+const stickerCategoryTabs = [
+  { id: "all", label: "All" },
+  { id: "popular", label: "Featured" },
+  { id: "street", label: "Street" },
+  { id: "racing", label: "Racing" },
+  { id: "marks", label: "Marks" },
+  { id: "type", label: "Type" },
 ];
+
+const fontOptions = [
+  "Bahnschrift",
+  "Agency FB",
+  "Impact",
+  "Arial Black",
+  "Haettenschweiler",
+  "Stencil",
+  "Copperplate Gothic Bold",
+  "Segoe Script",
+  "Brush Script MT",
+  "Lucida Handwriting",
+  "Freestyle Script",
+  "Segoe Print",
+];
+
+function fontChoices(currentFont: string): string[] {
+  return fontOptions.includes(currentFont) ? fontOptions : [currentFont, ...fontOptions];
+}

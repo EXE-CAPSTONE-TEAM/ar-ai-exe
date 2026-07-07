@@ -1,5 +1,5 @@
-import { Grid, OrbitControls, TransformControls, useGLTF, useTexture } from "@react-three/drei";
-import { Canvas } from "@react-three/fiber";
+import { Edges, Grid, OrbitControls, TransformControls, useGLTF, useTexture } from "@react-three/drei";
+import { Canvas, createPortal, useThree } from "@react-three/fiber";
 import { Box, Search, Upload } from "lucide-react";
 import { Fragment, Suspense, useEffect, useMemo, useRef } from "react";
 import type { RefObject } from "react";
@@ -19,6 +19,7 @@ type ModelViewerProps = {
   activeLayerId: string | null;
   hiddenLayerIds: string[];
   isSaving: boolean;
+  savingMessage?: string;
   previewErrorMessage: string | null;
   surfaceApplyRequest: number;
   onConfigChange: (config: DesignConfig) => void;
@@ -34,6 +35,7 @@ export function ModelViewer({
   activeLayerId,
   hiddenLayerIds,
   isSaving,
+  savingMessage,
   previewErrorMessage,
   surfaceApplyRequest,
   gizmoMode,
@@ -84,7 +86,7 @@ export function ModelViewer({
           {isSaving ? (
             <div className="viewer-saving-overlay" role="status" aria-live="polite">
               <div className="saving-spinner" aria-hidden="true" />
-              <span>Đang áp sticker/text vào giày...</span>
+              <span>{savingMessage ?? "Đang áp sticker/text vào giày..."}</span>
             </div>
           ) : null}
           {!isSaving && previewErrorMessage ? (
@@ -324,11 +326,7 @@ function ShoeModel({
     const transformedConfig = updateLayerTransform(config, id, isText, pos, rot, scale);
     const snappedConfig = snapLayerToSurface(transformedConfig, id, modelMetrics.center, raycastTargets);
     if (!snappedConfig) {
-      onConfigChange({
-        ...config,
-        stickers: config.stickers.map(s => s.id === id ? { ...s, position: pos, rotation: rot, scale } : s),
-        texts: config.texts.map(t => t.id === id ? { ...t, position: pos, rotation: rot, scale } : t)
-      });
+      onConfigChange(transformedConfig);
       onSurfaceApplyResult("Layer moved outside the shoe surface.");
       return;
     }
@@ -747,20 +745,15 @@ function StickerPlane({
           polygonOffset
           polygonOffsetFactor={-4 - (sticker.renderOrder ?? 0)}
         />
+        {isActive ? <LayerSelectionFrame /> : null}
       </mesh>
       {isActive && !isSaving ? (
-        <TransformControls
-          object={ref as RefObject<THREE.Object3D>}
+        <LayerTransformControls
+          objectRef={ref as RefObject<THREE.Object3D>}
           mode={gizmoMode}
           size={gizmoSize(sticker.scale)}
-          onMouseUp={() => {
-            if (ref.current) {
-              const p = ref.current.position;
-              const r = ref.current.rotation;
-              const s = ref.current.scale;
-              const savedPosition = p.clone().add(modelCenter);
-              onTransformEnd(vectorToTuple(savedPosition), [r.x, r.y, r.z], Math.max(s.x, s.y, s.z));
-            }
+          onCommit={() => {
+            commitLayerTransform(ref.current, modelCenter, onTransformEnd);
           }}
         />
       ) : null}
@@ -819,24 +812,68 @@ function TextPlane({
           polygonOffset
           polygonOffsetFactor={-4 - (layer.renderOrder ?? 0)}
         />
+        {isActive ? <LayerSelectionFrame /> : null}
       </mesh>
       {isActive && !isSaving ? (
-        <TransformControls
-          object={ref as RefObject<THREE.Object3D>}
+        <LayerTransformControls
+          objectRef={ref as RefObject<THREE.Object3D>}
           mode={gizmoMode}
           size={gizmoSize(layer.scale)}
-          onMouseUp={() => {
-            if (ref.current) {
-              const p = ref.current.position;
-              const r = ref.current.rotation;
-              const s = ref.current.scale;
-              const savedPosition = p.clone().add(modelCenter);
-              onTransformEnd(vectorToTuple(savedPosition), [r.x, r.y, r.z], Math.max(s.x, s.y, s.z));
-            }
+          onCommit={() => {
+            commitLayerTransform(ref.current, modelCenter, onTransformEnd);
           }}
         />
       ) : null}
     </Fragment>
+  );
+}
+
+function LayerTransformControls({
+  objectRef,
+  mode,
+  size,
+  onCommit,
+}: {
+  objectRef: RefObject<THREE.Object3D>;
+  mode: "translate" | "rotate" | "scale";
+  size: number;
+  onCommit: () => void;
+}) {
+  const scene = useThree((state) => state.scene);
+
+  return createPortal(
+    <TransformControls
+      object={objectRef}
+      mode={mode}
+      size={size}
+      onMouseUp={onCommit}
+    />,
+    scene,
+  );
+}
+
+function commitLayerTransform(
+  object: THREE.Object3D | null,
+  modelCenter: THREE.Vector3,
+  onTransformEnd: (pos: [number, number, number], rot: [number, number, number], scale: number) => void,
+): void {
+  if (!object) {
+    return;
+  }
+
+  const p = object.position;
+  const r = object.rotation;
+  const s = object.scale;
+  const savedPosition = p.clone().add(modelCenter);
+  onTransformEnd(vectorToTuple(savedPosition), [r.x, r.y, r.z], Math.max(s.x, s.y, s.z));
+}
+
+function LayerSelectionFrame() {
+  return (
+    <>
+      <Edges scale={1.08} color="#111111" renderOrder={1000} />
+      <Edges scale={1.13} color="#ff2a0a" renderOrder={1001} />
+    </>
   );
 }
 
@@ -856,7 +893,7 @@ function textAspect(value: string): number {
 
 // Custom simple clamp/helper functions
 function gizmoSize(scale: number): number {
-  return clamp(scale * 2.25, 0.35, 0.75);
+  return clamp(scale * 3.6, 0.62, 1.2);
 }
 
 function clamp(value: number, min: number, max: number): number {

@@ -78,3 +78,46 @@ class ScanUploadResponse(CamelModel):
     ready_for_processing: bool = Field(alias="readyForProcessing")
     processing_started: bool = Field(alias="processingStarted")
     web_design_url: str = Field(alias="webDesignUrl")
+
+
+class CropVector(CamelModel):
+    x: float = Field(ge=-0.5, le=0.5)
+    y: float = Field(ge=-0.5, le=0.5)
+    z: float = Field(ge=-0.5, le=0.5)
+
+
+class CropSize(CamelModel):
+    x: float = Field(gt=0.01, le=1.0)
+    y: float = Field(gt=0.01, le=1.0)
+    z: float = Field(gt=0.01, le=1.0)
+
+
+class CropRotation(CamelModel):
+    x: float = Field(default=0.0, ge=-180.0, le=180.0)
+    y: float = Field(default=0.0, ge=-180.0, le=180.0)
+    z: float = Field(default=0.0, ge=-180.0, le=180.0)
+
+
+class CropBox(CamelModel):
+    center: CropVector = Field(default_factory=lambda: CropVector(x=0, y=0, z=0))
+    size: CropSize = Field(default_factory=lambda: CropSize(x=1, y=1, z=1))
+    rotation: CropRotation = Field(default_factory=CropRotation)
+    coordinate_space: Literal["normalized"] = Field(default="normalized", alias="coordinateSpace")
+
+
+class SaveKiriProjectRequest(CamelModel):
+    project_name: str = Field(min_length=1, max_length=160, alias="projectName")
+    crop_box: CropBox | None = Field(default=None, alias="cropBox")
+
+
+class KiriStatusResponse(CamelModel):
+    scan_session_id: str = Field(alias="scanSessionId")
+    project_id: str | None = Field(default=None, alias="projectId")
+    status: str
+    provider_status: str | None = Field(default=None, alias="providerStatus")
+    progress: int = Field(ge=0, le=100)
+    preview_url: str | None = Field(default=None, alias="previewUrl")
+    crop_box: CropBox | None = Field(default=None, alias="cropBox")
+    model_asset_id: str | None = Field(default=None, alias="modelAssetId")
+    error_message: str | None = Field(default=None, alias="errorMessage")
+    updated_at: datetime = Field(alias="updatedAt")

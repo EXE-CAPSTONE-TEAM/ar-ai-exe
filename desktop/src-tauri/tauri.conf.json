@@ -3,6 +3,13 @@
   "productName": "KusShoes Editor",
   "version": "0.1.0",
   "identifier": "com.kusshoes.editor",
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["kusshoes-editor"]
+      }
+    }
+  },
   "build": {
     "beforeDevCommand": "npm --prefix ../frontend run dev -- --host 127.0.0.1 --mode desktop",
     "devUrl": "http://127.0.0.1:5173/?desktop=1",
@@ -31,8 +38,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "icon": [
+      "icons/icon.ico"
+    ],
     "resources": [
-      "../dependencies/*",
+      "../dependencies/blender.windows.json",
+      "../dependencies/BLENDER-NOTICE.txt",
+      "../dependencies/tools",
       "../sidecars/*",
       "../../data/3DModel.glb"
     ]

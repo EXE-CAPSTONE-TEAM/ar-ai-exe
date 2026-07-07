@@ -14,75 +14,75 @@ const svgToDataUri = (svgString: string) => {
 
 export const stickerPresets: StickerPreset[] = [
   {
-    id: "preset_flame",
-    label: "Flame",
+    id: "preset_razor_flame",
+    label: "Razor Flame",
     category: "popular",
-    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#ef4444" stroke="#dc2626" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0011 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 11-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 002.5 2.5z"/></svg>`)
+    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path d="M31 5c2 13 17 18 17 35 0 12-8 20-19 20C17 60 8 51 8 39c0-8 4-14 10-20-1 8 3 14 10 16-5-10-3-21 3-30z" fill="#0f172a"/><path d="M35 11c4 10 17 16 17 29 0 14-10 23-23 23C15 63 5 53 5 40c0-10 6-17 13-25-.5 8 2 15 9 19-4-10-2-19 8-23z" fill="none" stroke="#f8fafc" stroke-width="4" stroke-linejoin="round"/><path d="M31 20c6 8 11 13 11 22 0 7-5 12-12 12-8 0-13-5-13-13 0-4 2-8 5-12 1 5 4 8 9 9-2-6-2-12 0-18z" fill="#ef233c"/><path d="M38 16l-8 23 15-4-13 18" fill="none" stroke="#facc15" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`)
   },
   {
-    id: "preset_star",
-    label: "Star",
+    id: "preset_chrome_star",
+    label: "Chrome Star",
     category: "popular",
-    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#fbbf24" stroke="#f59e0b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`)
+    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><polygon points="32 3 39 24 61 24 43 36 50 58 32 45 14 58 21 36 3 24 25 24" fill="#111827" stroke="#f8fafc" stroke-width="4" stroke-linejoin="round"/><polygon points="32 12 36 27 52 28 39 36 44 50 32 41 20 50 25 36 12 28 28 27" fill="#d1d5db"/><path d="M20 50L52 28M12 28h40" stroke="#ef233c" stroke-width="3" stroke-linecap="round"/></svg>`)
   },
   {
-    id: "preset_heart",
-    label: "Heart",
-    category: "popular",
-    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#ec4899" stroke="#db2777" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>`)
+    id: "preset_noir_script",
+    label: "Noir Script",
+    category: "type",
+    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path d="M8 46c13-19 25-29 38-29 7 0 10 4 10 8 0 9-17 11-28 11 8 7 18 9 29 7" fill="none" stroke="#111827" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 46c13-19 25-29 38-29 7 0 10 4 10 8 0 9-17 11-28 11 8 7 18 9 29 7" fill="none" stroke="#f8fafc" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="9" y="38" fill="#ef233c" font-family="Brush Script MT, Segoe Script, cursive" font-size="22" font-weight="700" transform="rotate(-8 9 38)">Noir</text></svg>`)
   },
   {
-    id: "preset_lightning",
-    label: "Zap",
-    category: "symbols",
-    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#eab308" stroke="#ca8a04" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`)
+    id: "preset_racing_13",
+    label: "Racing 13",
+    category: "racing",
+    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path d="M9 13h46l-4 34-19 12-19-12z" fill="#111827" stroke="#f8fafc" stroke-width="4" stroke-linejoin="round"/><path d="M14 17h36l-3 26-15 9-15-9z" fill="#ef233c"/><path d="M18 45l27-29h8L26 45z" fill="#f8fafc" opacity=".9"/><text x="31" y="42" fill="#111827" font-family="Impact, Arial Black, sans-serif" font-size="27" font-weight="900" text-anchor="middle" transform="skewX(-8)">13</text></svg>`)
   },
   {
-    id: "preset_sun",
-    label: "Sun",
-    category: "nature",
-    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#fcd34d" stroke="#f59e0b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`)
+    id: "preset_warning_label",
+    label: "Warning Label",
+    category: "street",
+    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path d="M7 19h50v26H7z" fill="#facc15" stroke="#111827" stroke-width="4" stroke-linejoin="round"/><path d="M7 19l50 26M57 19L7 45" stroke="#111827" stroke-width="5" opacity=".18"/><path d="M14 25h36M14 39h36" stroke="#111827" stroke-width="3"/><text x="32" y="37" fill="#111827" font-family="Impact, Arial Black, sans-serif" font-size="17" font-weight="900" text-anchor="middle">RAW</text></svg>`)
   },
   {
-    id: "preset_moon",
-    label: "Moon",
-    category: "nature",
-    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#cbd5e1" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>`)
+    id: "preset_barbed_wire",
+    label: "Barbed Wire",
+    category: "street",
+    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path d="M5 34c11-10 22-10 33 0 7 6 14 6 21 0" fill="none" stroke="#111827" stroke-width="5" stroke-linecap="round"/><path d="M5 29c11 10 22 10 33 0 7-6 14-6 21 0" fill="none" stroke="#f8fafc" stroke-width="2" stroke-linecap="round"/><path d="M16 22l5 17M25 24l-13 13M40 24l5 17M49 25L36 39" stroke="#ef233c" stroke-width="4" stroke-linecap="round"/></svg>`)
   },
   {
-    id: "preset_cloud",
-    label: "Cloud",
-    category: "nature",
-    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#e0f2fe" stroke="#0ea5e9" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 116.71-9h1.79a4.5 4.5 0 110 9z"/></svg>`)
+    id: "preset_skull_mark",
+    label: "Skull Mark",
+    category: "marks",
+    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path d="M17 28c0-13 8-22 15-22s15 9 15 22c0 9-4 15-10 18v8H27v-8c-6-3-10-9-10-18z" fill="#111827" stroke="#f8fafc" stroke-width="4" stroke-linejoin="round"/><path d="M24 30l7 5-8 3zM40 30l-7 5 8 3z" fill="#f8fafc"/><path d="M29 45h2M34 45h2M31 51v-6M36 51v-6" stroke="#f8fafc" stroke-width="3" stroke-linecap="round"/><path d="M13 53l38-38" stroke="#ef233c" stroke-width="5" stroke-linecap="round"/></svg>`)
   },
   {
-    id: "preset_droplet",
-    label: "Drop",
-    category: "nature",
-    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#bae6fd" stroke="#0284c7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z"/></svg>`)
+    id: "preset_graffiti_drip",
+    label: "Graffiti Drip",
+    category: "type",
+    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><text x="31" y="36" fill="#111827" stroke="#f8fafc" stroke-width="5" font-family="Impact, Arial Black, sans-serif" font-size="24" font-weight="900" text-anchor="middle" transform="rotate(-8 31 36)">DRIP</text><text x="31" y="36" fill="#ef233c" font-family="Impact, Arial Black, sans-serif" font-size="24" font-weight="900" text-anchor="middle" transform="rotate(-8 31 36)">DRIP</text><path d="M20 41v8M31 40v12M45 39v7" stroke="#111827" stroke-width="4" stroke-linecap="round"/></svg>`)
   },
   {
-    id: "preset_smile",
-    label: "Smile",
-    category: "symbols",
-    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#fef08a" stroke="#eab308" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>`)
+    id: "preset_checker_patch",
+    label: "Checker Patch",
+    category: "racing",
+    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path d="M11 13h42v38H11z" fill="#f8fafc" stroke="#111827" stroke-width="4"/><path d="M11 13h14v13H11zM39 13h14v13H39zM25 26h14v13H25zM11 39h14v12H11zM39 39h14v12H39z" fill="#111827"/><path d="M8 52l48-38" stroke="#ef233c" stroke-width="5" stroke-linecap="round"/></svg>`)
   },
   {
-    id: "preset_target",
-    label: "Target",
-    category: "sport",
-    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#fca5a5" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>`)
+    id: "preset_cyber_eye",
+    label: "Cyber Eye",
+    category: "marks",
+    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path d="M5 33l14-16h26l14 16-14 15H19z" fill="#111827" stroke="#f8fafc" stroke-width="4" stroke-linejoin="round"/><circle cx="32" cy="33" r="11" fill="#ef233c"/><circle cx="32" cy="33" r="5" fill="#111827"/><path d="M17 33h-9M56 33h-9M32 18V8M32 58V48" stroke="#facc15" stroke-width="4" stroke-linecap="round"/></svg>`)
   },
   {
-    id: "preset_anchor",
-    label: "Anchor",
-    category: "symbols",
-    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#cbd5e1" stroke="#475569" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="3"/><line x1="12" y1="22" x2="12" y2="8"/><path d="M5 12H2a10 10 0 0020 0h-3"/></svg>`)
+    id: "preset_hard_crown",
+    label: "Hard Crown",
+    category: "street",
+    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path d="M9 46l5-27 13 15 5-23 7 23 12-15 4 27z" fill="#111827" stroke="#f8fafc" stroke-width="4" stroke-linejoin="round"/><path d="M14 46h41v9H14z" fill="#ef233c" stroke="#111827" stroke-width="4"/><path d="M20 45l29-24" stroke="#facc15" stroke-width="4" stroke-linecap="round"/></svg>`)
   },
   {
-    id: "preset_award",
-    label: "Award",
-    category: "sport",
-    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#fde047" stroke="#eab308" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>`)
+    id: "preset_tribal_swoosh",
+    label: "Tribal Swoosh",
+    category: "marks",
+    imageUrl: svgToDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path d="M6 40c18-2 31-13 47-31-3 14-9 25-20 34l18-3c-10 9-23 14-40 15 7-4 12-9 15-15z" fill="#111827" stroke="#f8fafc" stroke-width="4" stroke-linejoin="round"/><path d="M15 45c14-5 25-14 35-29" fill="none" stroke="#ef233c" stroke-width="4" stroke-linecap="round"/><path d="M35 43l16-3" stroke="#facc15" stroke-width="4" stroke-linecap="round"/></svg>`)
   }
 ];

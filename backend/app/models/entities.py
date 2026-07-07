@@ -25,6 +25,10 @@ class ScanStatus:
     UV_UNWRAPPING = "uv_unwrapping"
     TEXTURE_BAKING = "texture_baking"
     EXPORTING = "exporting"
+    KIRI_PROCESSING = "kiri_processing"
+    KIRI_READY = "kiri_ready"
+    CROP_BAKING = "crop_baking"
+    CROP_READY = "crop_ready"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -102,6 +106,18 @@ class JobStatus:
     FAILED = "failed"
 
 
+class KiriTaskStatus:
+    QUEUED = "queued"
+    UPLOADING = "uploading"
+    PROCESSING = "processing"
+    READY_FOR_CROP = "ready_for_crop"
+    CROP_CONFIGURED = "crop_configured"
+    CROP_BAKING = "crop_baking"
+    READY = "ready"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -176,6 +192,32 @@ class ScanSession(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    kiri_task: Mapped["KiriScanTask | None"] = relationship(
+        back_populates="scan_session",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+
+class KiriScanTask(Base):
+    __tablename__ = "kiri_scan_tasks"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("kiri"))
+    scan_session_id: Mapped[str] = mapped_column(
+        ForeignKey("scan_sessions.id"),
+        unique=True,
+        index=True,
+    )
+    provider_serialize: Mapped[str | None] = mapped_column(String(160), nullable=True, unique=True)
+    status: Mapped[str] = mapped_column(String(32), default=KiriTaskStatus.QUEUED, index=True)
+    provider_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_glb_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    crop_box_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    scan_session: Mapped[ScanSession] = relationship(back_populates="kiri_task")
 
 
 class ModelAsset(Base):

@@ -61,6 +61,16 @@ def get_me(current_user: Annotated[User, Depends(get_current_user)]) -> UserResp
     return UserResponse.model_validate(current_user)
 
 
+@router.get("/token", response_model=TokenResponse)
+def get_auth_token(
+    current_user: Annotated[User, Depends(get_current_user)],
+    response: Response,
+) -> TokenResponse:
+    token = create_access_token(current_user.id, {"role": current_user.role})
+    set_auth_cookies(response, token)
+    return TokenResponse(accessToken=token, user=UserResponse.model_validate(current_user))
+
+
 @router.post("/logout", response_model=MessageResponse)
 def logout(response: Response) -> MessageResponse:
     clear_auth_cookies(response)

@@ -16,7 +16,7 @@ from app.models import (
 )
 from app.schemas.model_asset import ModelAssetResponse
 from app.services.asset_versions import AssetVersionFileInput, AssetVersionService
-from app.services.storage import StoredObject, StorageService, get_storage_service
+from app.services.storage import StorageService, StoredObject, get_storage_service
 
 
 @dataclass(frozen=True)

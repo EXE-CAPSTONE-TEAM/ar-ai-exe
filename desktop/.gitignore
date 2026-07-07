@@ -5,3 +5,7 @@ dist/
 *.log
 sidecars/*
 !sidecars/.gitkeep
+dependencies/downloads/
+dependencies/tools/*
+!dependencies/tools/.gitkeep
+!dependencies/tools/README.txt
