@@ -109,6 +109,7 @@ class ProjectService:
             modelAsset=self.editor_model_asset(project, model_asset) if model_asset else None,
             latestDesign=DesignService(self.db).response(latest_design) if latest_design else None,
             permissions=EditorPermissions(canEdit=True, canBake=True, canExport=True),
+            assetManifestUrl=f"/api/projects/{project.id}/asset-manifest",
         )
 
     def latest_model_asset(self, project: Project) -> ModelAsset | None:

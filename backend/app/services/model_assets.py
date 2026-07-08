@@ -5,9 +5,18 @@ from pathlib import Path
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models import AssetStatus, ModelAsset, ProjectStatus, ScanSession, User
+from app.models import (
+    AssetStatus,
+    AssetVersionType,
+    ModelAsset,
+    ProjectStatus,
+    ScanSession,
+    User,
+    new_id,
+)
 from app.schemas.model_asset import ModelAssetResponse
-from app.services.storage import get_storage_service
+from app.services.asset_versions import AssetVersionFileInput, AssetVersionService
+from app.services.storage import StorageService, StoredObject, get_storage_service
 
 
 @dataclass(frozen=True)
@@ -22,9 +31,9 @@ class ModelAssetFiles:
 
 
 class ModelAssetService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, storage: StorageService | None = None):
         self.db = db
-        self.storage = get_storage_service()
+        self.storage = storage or get_storage_service()
 
     def get(self, model_asset_id: str) -> ModelAsset:
         asset = self.db.get(ModelAsset, model_asset_id)
@@ -81,7 +90,16 @@ class ModelAssetService:
         storage_prefix: str | None = None,
         source_type: str = "scan",
     ) -> ModelAsset:
-        prefix = (storage_prefix or f"models/{scan_session_id}").strip("/")
+        scan_session = self.db.get(ScanSession, scan_session_id)
+        model_asset_id = new_id("model")
+        asset_version_id = new_id("assetv") if scan_session and scan_session.project else None
+        if scan_session and scan_session.project and asset_version_id:
+            prefix = (
+                f"projects/{scan_session.project.id}/assets/model/primary/versions/"
+                f"{asset_version_id}"
+            )
+        else:
+            prefix = (storage_prefix or f"models/{scan_session_id}").strip("/")
         glb_object = self.storage.put_bytes(
             f"{prefix}/shoe_preview.glb",
             files.glb.read_bytes(),
@@ -119,6 +137,7 @@ class ModelAssetService:
         )
 
         asset = ModelAsset(
+            id=model_asset_id,
             scan_session_id=scan_session_id,
             status=AssetStatus.READY,
             source_type=source_type,
@@ -152,12 +171,48 @@ class ModelAssetService:
             obj_package_zip_checksum=obj_package_object.checksum,
         )
         self.db.add(asset)
-        scan_session = self.db.get(ScanSession, scan_session_id)
         if scan_session and scan_session.project:
+            AssetVersionService(self.db).publish(
+                project=scan_session.project,
+                asset_type=AssetVersionType.MODEL,
+                logical_key="primary",
+                source_type=source_type,
+                asset_version_id=asset_version_id,
+                legacy_type="model_asset",
+                legacy_id=asset.id,
+                files=[
+                    self._version_file("glb", "shoe_preview.glb", glb_object),
+                    self._version_file("obj", "shoe.obj", obj_object),
+                    self._version_file("mtl", "shoe.mtl", mtl_object),
+                    self._version_file("texture", "shoe_texture.png", texture_object),
+                    self._version_file("metadata", "metadata.json", metadata_object),
+                    self._version_file(
+                        "quality-report", "quality_report.json", quality_object
+                    ),
+                    self._version_file(
+                        "obj-package", "shoe_obj_package.zip", obj_package_object
+                    ),
+                ],
+            )
             scan_session.project.status = ProjectStatus.READY
         self.db.commit()
         self.db.refresh(asset)
         return asset
+
+    @staticmethod
+    def _version_file(
+        file_type: str,
+        canonical_name: str,
+        stored_object: StoredObject,
+    ) -> AssetVersionFileInput:
+        return AssetVersionFileInput(
+            file_type=file_type,
+            canonical_name=canonical_name,
+            storage_key=stored_object.key,
+            content_type=stored_object.content_type,
+            size_bytes=stored_object.size_bytes,
+            checksum=stored_object.checksum,
+        )
 
     def response(self, asset: ModelAsset) -> ModelAssetResponse:
         quality_report: dict = {}

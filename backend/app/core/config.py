@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     openmvs_bin_dir: str = ""
     blender_bin: str = "blender"
     ffmpeg_bin: str = "ffmpeg"
+    kiri_api_token: str = ""
+    kiri_api_base_url: str = "https://api.kiriengine.app/api"
+    kiri_webhook_secret: str = ""
+    kiri_download_allowed_hosts: list[str] = ["kiriengine.app"]
+    kiri_request_timeout_seconds: int = 180
+    kiri_preview_ticket_minutes: int = 5
+    kiri_max_download_size_mb: int = 500
     reconstruction_frame_fps: float = 2.0
     reconstruction_max_frames_per_pass: int = 90
     reconstruction_min_brightness: float = 28.0

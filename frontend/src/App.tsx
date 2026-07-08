@@ -1,19 +1,27 @@
 import {
   AlertTriangle,
   CheckCircle2,
+  Cloud,
   Cpu,
+  Download,
   HardDrive,
+  FolderOpen,
   ImagePlus,
   Info,
   Loader2,
   LogIn,
   Monitor,
   RefreshCw,
+  Save,
   Search,
+  Settings,
   UserPlus,
   Wrench,
+  X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
+import { listen } from "@tauri-apps/api/event";
 
 import { api, designStorageKey } from "./api/client";
 import {
@@ -33,6 +41,7 @@ import { ModelViewer } from "./components/ModelViewer/ModelViewer";
 import { useEditorContext } from "./hooks/useEditorContext";
 import type {
   Design,
+  CloudProject,
   DesignAssetSource,
   DesignConfig,
   DesktopRuntime,
@@ -56,7 +65,9 @@ import {
 
 const MARKETING_LOGIN_URL = import.meta.env.VITE_MARKETING_LOGIN_URL ?? "https://kusshoes.vn/login";
 const DESKTOP_DEMO_PROJECT_ID = import.meta.env.VITE_DESKTOP_DEMO_PROJECT_ID ?? "proj_desktop_demo";
+const DESKTOP_CLOUD_API_BASE_URL = (import.meta.env.VITE_DESKTOP_CLOUD_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
 const DEFAULT_EDITOR_PERMISSIONS: EditorPermissions = { canEdit: true, canBake: true, canExport: true };
+type DesktopApiMode = "local" | "cloud";
 
 export function App() {
   const isDesktopShell = useMemo(() => isDesktopShellLocation(), []);
@@ -65,9 +76,19 @@ export function App() {
   const [desktopRuntime, setDesktopRuntime] = useState<DesktopRuntime | null>(null);
   const [desktopRuntimeError, setDesktopRuntimeError] = useState<string | null>(null);
   const [isDesktopRuntimeLoading, setIsDesktopRuntimeLoading] = useState(isDesktopShell);
+  const [desktopApiMode, setDesktopApiMode] = useState<DesktopApiMode>(() => {
+    const stored = localStorage.getItem("kusshoes-desktop-api-mode");
+    return stored === "cloud" ? "cloud" : "local";
+  });
+  const [desktopCloudReady, setDesktopCloudReady] = useState(false);
+  const [cloudProjects, setCloudProjects] = useState<CloudProject[]>([]);
+  const [isCloudProjectsLoading, setIsCloudProjectsLoading] = useState(false);
+  const cloudProjectsLoadingRef = useRef(false);
   const [editorReadiness, setEditorReadiness] = useState<EditorReadiness | null>(null);
   const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
-  const desktopRuntimeReady = !isDesktopShell || desktopRuntime?.backendStatus === "ready";
+  const desktopRuntimeReady =
+    !isDesktopShell ||
+    (desktopApiMode === "cloud" ? desktopCloudReady : desktopRuntime?.backendStatus === "ready");
   const editorContext = useEditorContext(desktopRuntimeReady ? editorProjectId : null);
   const [user, setUser] = useState<User | null>(null);
   const [scanId, setScanId] = useState(() => new URLSearchParams(window.location.search).get("scanId") ?? "");
@@ -84,6 +105,7 @@ export function App() {
   const [exportPackage, setExportPackage] = useState<ExportPackage | null>(null);
   const [statusMessage, setStatusMessage] = useState("Ready");
   const [isSaving, setIsSaving] = useState(false);
+  const [isBakingPreview, setIsBakingPreview] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
@@ -101,14 +123,107 @@ export function App() {
   const [desktopLaunchError, setDesktopLaunchError] = useState<string | null>(null);
   const [isDesktopDemoOpening, setIsDesktopDemoOpening] = useState(false);
   const [isDesktopImportOpen, setIsDesktopImportOpen] = useState(false);
+  const [isDesktopDetailsOpen, setIsDesktopDetailsOpen] = useState(false);
   const assetPreviewUrlsRef = useRef<Set<string>>(new Set());
+
+  // Handle Tauri Custom Protocol Deep Link and Single Instance
+  useEffect(() => {
+    if (!isDesktopShell) return;
+
+    const handleDeepLinkUrl = (urlStr: string) => {
+      console.log("Caught deep link URL:", urlStr);
+      try {
+        // Expected format: kusshoes-editor://editor/proj_123?token=abc
+        const url = new URL(urlStr.replace("kusshoes-editor://", "http://localhost/"));
+        const pathParts = url.pathname.split("/");
+        const projectId = pathParts[2] || pathParts[1];
+        const token = url.searchParams.get("token");
+
+        if (token) {
+          localStorage.setItem("shoe-customizer-token", token);
+        }
+        localStorage.setItem("kusshoes-desktop-api-mode", "cloud");
+
+        if (projectId) {
+          // Force page reload to apply new token and projectId
+          window.location.href = `/?desktop=1&projectId=${projectId}`;
+        }
+      } catch (err) {
+        console.error("Failed to parse deep link URL:", err);
+      }
+    };
+
+    // 1. Listen for active running deep link events from other single instances
+    let unsubscribeSingleInstance: (() => void) | undefined;
+    listen<string[]>("single-instance-deep-link", (event) => {
+      const args = event.payload;
+      console.log("Single instance args received:", args);
+      const deepLinkArg = args.find((arg) => arg.startsWith("kusshoes-editor://"));
+      if (deepLinkArg) {
+        handleDeepLinkUrl(deepLinkArg);
+      }
+    }).then((unsub) => {
+      unsubscribeSingleInstance = unsub;
+    }).catch((err) => {
+      console.error("Failed to listen to single-instance-deep-link:", err);
+    });
+
+    // 2. Listen to startup deep links using the plugin
+    let unsubscribeDeepLink: (() => void) | undefined;
+    onOpenUrl((urls) => {
+      console.log("Tauri deep link URLs received:", urls);
+      if (urls.length > 0) {
+        handleDeepLinkUrl(urls[0]);
+      }
+    }).then((unsub) => {
+      unsubscribeDeepLink = unsub;
+    }).catch((err) => {
+      console.error("Failed to listen to tauri-plugin-deep-link onOpenUrl:", err);
+    });
+
+    return () => {
+      if (unsubscribeSingleInstance) unsubscribeSingleInstance();
+      if (unsubscribeDeepLink) unsubscribeDeepLink();
+    };
+  }, [isDesktopShell]);
 
   useEffect(() => {
     if (!isDesktopShell) {
       return;
     }
+    if (desktopApiMode === "cloud") {
+      setDesktopRuntime(null);
+      setEditorReadiness(null);
+      if (!DESKTOP_CLOUD_API_BASE_URL) {
+        setDesktopCloudReady(false);
+        setDesktopRuntimeError("VITE_DESKTOP_CLOUD_API_BASE_URL is not configured.");
+        return;
+      }
+      setApiBaseUrl(DESKTOP_CLOUD_API_BASE_URL);
+      setDesktopRuntimeError(null);
+      setDesktopCloudReady(true);
+      setIsDesktopRuntimeLoading(false);
+      return;
+    }
+    setDesktopCloudReady(false);
     void refreshDesktopRuntime();
-  }, [isDesktopShell]);
+  }, [desktopApiMode, isDesktopShell]);
+
+  useEffect(() => {
+    if (!isDesktopShell || desktopApiMode !== "cloud" || !desktopCloudReady || user || !api.hasToken()) {
+      return;
+    }
+    api.me().then(setUser).catch(() => api.logout());
+  }, [desktopApiMode, desktopCloudReady, isDesktopShell, user]);
+
+  useEffect(() => {
+    if (!isDesktopShell || desktopApiMode !== "cloud" || !desktopCloudReady || !user || isProjectEditor) {
+      return;
+    }
+    void loadCloudProjects();
+    const timer = window.setInterval(() => void loadCloudProjects(), 5000);
+    return () => window.clearInterval(timer);
+  }, [desktopApiMode, desktopCloudReady, isDesktopShell, isProjectEditor, user]);
 
   useEffect(() => {
     if (isProjectEditor || isDesktopShell) {
@@ -198,6 +313,7 @@ export function App() {
     desktopRuntime?.blenderStatus === "installed";
   const isEditorBusy =
     isSaving ||
+    isBakingPreview ||
     isExporting ||
     isImporting ||
     isDesktopRuntimeLoading ||
@@ -245,6 +361,35 @@ export function App() {
       setEditorReadiness(await api.getEditorReadiness());
     } catch {
       setEditorReadiness(null);
+    }
+  }
+
+  function changeDesktopApiMode(mode: DesktopApiMode) {
+    if (mode === desktopApiMode) {
+      return;
+    }
+    api.logout();
+    setUser(null);
+    setCloudProjects([]);
+    setDesktopLaunchError(null);
+    localStorage.setItem("kusshoes-desktop-api-mode", mode);
+    setDesktopApiMode(mode);
+  }
+
+  async function loadCloudProjects() {
+    if (cloudProjectsLoadingRef.current) {
+      return;
+    }
+    cloudProjectsLoadingRef.current = true;
+    setIsCloudProjectsLoading(true);
+    try {
+      setCloudProjects(await api.listProjects());
+      setDesktopLaunchError(null);
+    } catch (error) {
+      setDesktopLaunchError(messageFromError(error));
+    } finally {
+      cloudProjectsLoadingRef.current = false;
+      setIsCloudProjectsLoading(false);
     }
   }
 
@@ -580,25 +725,82 @@ export function App() {
     return { ...designConfig, stickers };
   }
 
-  async function saveDesign() {
+  async function persistDesignDraft(): Promise<Design | null> {
     if (!modelAsset || !config) {
-      return;
+      return null;
     }
-    if (isProjectEditor && (!editorPermissions.canEdit || !editorPermissions.canBake)) {
-      setStatusMessage("FORBIDDEN: You do not have permission to save or bake this design.");
+    if (isProjectEditor && !editorPermissions.canEdit) {
+      setStatusMessage("FORBIDDEN: You do not have permission to save this design.");
+      return null;
+    }
+
+    const draftConfig = withEditorMetadata(await prepareBakeConfig(config));
+    const savedDesign =
+      isProjectEditor && editorProjectId
+        ? await editorClient.saveDesign(editorProjectId, draftConfig, designName)
+        : design
+          ? await api.updateDesign(design.id, designName, draftConfig)
+          : await api.createDesign(modelAsset.id, designName, draftConfig);
+    const hydratedConfig = normalizeFixedMaterial(await hydrateDesignAssetPreviewUrls(savedDesign.designConfig));
+
+    setDesign(savedDesign);
+    setDesignName(savedDesign.name);
+    setConfig(hydratedConfig);
+    setSavedConfigFingerprint(configFingerprint(savedDesign.designConfig));
+    setPreviewErrorMessage(savedDesign.previewStatus === "failed" ? savedDesign.previewErrorMessage : null);
+    setExportPackage(null);
+    setExportMessage(null);
+    if (!isProjectEditor) {
+      localStorage.setItem(designStorageKey(modelAsset.id), savedDesign.id);
+    }
+    await loadBakedPreview(savedDesign);
+    return savedDesign;
+  }
+
+  async function saveDesign() {
+    if (isSaving || isBakingPreview) {
       return null;
     }
 
     setIsSaving(true);
     setStatusMessage("SAVING_DRAFT");
     try {
-      const bakeConfig = withEditorMetadata(await prepareBakeConfig(config));
-      const savedDesign =
-        isProjectEditor && editorProjectId
-          ? await editorClient.saveDesign(editorProjectId, bakeConfig, designName)
-          : design
-            ? await api.updateDesign(design.id, designName, bakeConfig)
-            : await api.createDesign(modelAsset.id, designName, bakeConfig);
+      const savedDesign = await persistDesignDraft();
+      if (savedDesign) {
+        setStatusMessage("DRAFT_SAVED");
+      }
+      return savedDesign;
+    } catch (error) {
+      setStatusMessage(messageFromError(error));
+      return null;
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function bakePreview() {
+    if (isSaving || isBakingPreview || !modelAsset || !config) {
+      return null;
+    }
+    if (isProjectEditor && (!editorPermissions.canEdit || !editorPermissions.canBake)) {
+      setStatusMessage("FORBIDDEN: You do not have permission to bake this design.");
+      return null;
+    }
+    if (!canUsePreviewRenderer) {
+      const message = "Preview renderer cần cài đặt trước khi bake preview. Draft của bạn vẫn có thể lưu riêng.";
+      setPreviewErrorMessage(message);
+      setStatusMessage(message);
+      return null;
+    }
+
+    setIsBakingPreview(true);
+    setStatusMessage("SAVING_DRAFT");
+    try {
+      const savedDesign = await persistDesignDraft();
+      if (!savedDesign) {
+        return null;
+      }
+
       const job = isProjectEditor
         ? await editorClient.bakeDesign(savedDesign.id)
         : await api.bakeDesign(savedDesign.id);
@@ -609,10 +811,9 @@ export function App() {
       const refreshedDesign = isProjectEditor
         ? await editorClient.getDesign(savedDesign.id)
         : await api.getDesign(savedDesign.id);
-
       setDesign(refreshedDesign);
       setDesignName(refreshedDesign.name);
-      setConfig(await hydrateDesignAssetPreviewUrls(refreshedDesign.designConfig));
+      setConfig(normalizeFixedMaterial(await hydrateDesignAssetPreviewUrls(refreshedDesign.designConfig)));
       setSavedConfigFingerprint(configFingerprint(refreshedDesign.designConfig));
       if (!isProjectEditor) {
         localStorage.setItem(designStorageKey(modelAsset.id), refreshedDesign.id);
@@ -634,7 +835,7 @@ export function App() {
       setStatusMessage(messageFromError(error));
       return null;
     } finally {
-      setIsSaving(false);
+      setIsBakingPreview(false);
     }
   }
 
@@ -670,12 +871,18 @@ export function App() {
   }
 
   async function exportDesign() {
-    if (isSaving || isExporting) {
+    if (isSaving || isBakingPreview || isExporting) {
       return;
     }
     if (isProjectEditor && !editorPermissions.canExport) {
       setExportMessage("You do not have permission to export this design.");
       setStatusMessage("FORBIDDEN: You do not have permission to export this design.");
+      return;
+    }
+    if (!canUsePreviewRenderer) {
+      const message = "Preview renderer cần cài đặt trước khi export.";
+      setExportMessage(message);
+      setStatusMessage(message);
       return;
     }
 
@@ -684,7 +891,7 @@ export function App() {
     setStatusMessage("EXPORTING");
     try {
       const hasUnsavedConfig = config ? configFingerprint(config) !== savedConfigFingerprint : false;
-      const savedDesign = !design || hasUnsavedConfig ? await saveDesign() : design;
+      const savedDesign = !design || hasUnsavedConfig ? await persistDesignDraft() : design;
       const activeDesignId =
         savedDesign?.id ??
         (isProjectEditor ? design?.id : modelAsset && localStorage.getItem(designStorageKey(modelAsset.id)));
@@ -715,7 +922,7 @@ export function App() {
   }
 
   async function downloadExport() {
-    if (!exportPackage || isExporting) {
+    if (!exportPackage || isSaving || isBakingPreview || isExporting) {
       return;
     }
     setIsExporting(true);
@@ -789,64 +996,117 @@ export function App() {
     }
   }
 
+  const isDesktopEditorLayout = isDesktopShell && isProjectEditor && Boolean(user);
+
   return (
-    <AppShell user={user} onLogout={logout}>
+    <AppShell
+      user={user}
+      onLogout={logout}
+      hideHeader={isDesktopEditorLayout}
+      className={isDesktopEditorLayout ? "desktop-editor-shell" : ""}
+    >
       <main className="workspace" id="main-workspace">
         {isDesktopShell && !isProjectEditor ? (
           <div className="desktop-launcher-layout">
-            <DesktopRuntimePanel
-              runtime={desktopRuntime}
-              editorReadiness={editorReadiness}
-              installProgress={installProgress}
-              isLoading={isDesktopRuntimeLoading}
-              errorMessage={desktopRuntimeError}
-              onRefresh={refreshDesktopRuntime}
-              onRestartBackend={restartDesktopRuntimeBackend}
-              onInstallRenderer={installPreviewRenderer}
-              onOpenDiagnostics={openDesktopDiagnostics}
-              onCopyDiagnostics={copyDesktopDiagnostics}
-            />
-            <div className="desktop-launcher-stack">
-              <DesktopProjectLauncher
-                value={desktopProjectInput}
-                errorMessage={desktopLaunchError}
-                demoProjectId={DESKTOP_DEMO_PROJECT_ID}
-                isDemoOpening={isDesktopDemoOpening}
-                isImportOpen={isDesktopImportOpen}
-                backendReady={desktopRuntimeReady}
-                onValueChange={(value) => {
-                  setDesktopProjectInput(value);
-                  setDesktopLaunchError(null);
-                }}
-                onSubmit={openDesktopProject}
-                onOpenDemo={openDesktopDemoProject}
-                onToggleImport={() => setIsDesktopImportOpen((current) => !current)}
+            {desktopApiMode === "local" ? (
+              <DesktopRuntimePanel
+                runtime={desktopRuntime}
+                editorReadiness={editorReadiness}
+                installProgress={installProgress}
+                isLoading={isDesktopRuntimeLoading}
+                errorMessage={desktopRuntimeError}
+                onRefresh={refreshDesktopRuntime}
+                onRestartBackend={restartDesktopRuntimeBackend}
+                onInstallRenderer={installPreviewRenderer}
+                onOpenDiagnostics={openDesktopDiagnostics}
+                onCopyDiagnostics={copyDesktopDiagnostics}
               />
-              {isDesktopImportOpen ? (
-                <section className="desktop-import-card">
-                  {canUsePreviewRenderer ? (
-                    <ModelImportPanel
-                      isBusy={isImporting || !desktopRuntimeReady}
-                      onImport={importDesktopModel}
-                    />
-                  ) : (
-                    <div className="desktop-import-blocked">
-                      <Wrench size={20} aria-hidden="true" />
-                      <div>
-                        <h2>Preview renderer cần cài đặt</h2>
-                        <p>
-                          Import GLB/OBJ cần renderer local để chuẩn hóa model trước khi mở trong editor.
-                          Bạn vẫn có thể mở demo project để review giao diện trước.
-                        </p>
-                      </div>
-                      <button type="button" className="primary-button" onClick={installPreviewRenderer}>
-                        <Wrench size={16} aria-hidden="true" />
-                        Cài Preview renderer
-                      </button>
-                    </div>
-                  )}
-                </section>
-              ) : null}
+            ) : (
+              <CloudConnectionPanel
+                apiBaseUrl={DESKTOP_CLOUD_API_BASE_URL}
+                isReady={desktopCloudReady}
+                user={user}
+                errorMessage={desktopRuntimeError}
+                onLogout={logout}
+              />
+            )}
+            <div className="desktop-launcher-stack">
+              <DesktopApiModeSelector
+                value={desktopApiMode}
+                onChange={changeDesktopApiMode}
+              />
+              {desktopApiMode === "cloud" ? (
+                !desktopCloudReady ? (
+                  <EditorRouteState state="ERROR" message={desktopRuntimeError ?? "Cloud API is not configured."} />
+                ) : !user ? (
+                  <AuthPanel
+                    mode={authMode}
+                    name={authName}
+                    email={authEmail}
+                    password={authPassword}
+                    isBusy={isAuthBusy}
+                    statusMessage={friendlyInlineMessage(statusMessage)}
+                    onModeChange={setAuthMode}
+                    onNameChange={setAuthName}
+                    onEmailChange={setAuthEmail}
+                    onPasswordChange={setAuthPassword}
+                    onSubmit={submitAuth}
+                    onDemoAuth={useDemoAuth}
+                    showDemo={false}
+                  />
+                ) : (
+                  <CloudProjectLauncher
+                    projects={cloudProjects}
+                    isLoading={isCloudProjectsLoading}
+                    errorMessage={desktopLaunchError}
+                    onRefresh={loadCloudProjects}
+                    onOpen={(projectId) => openDesktopProjectId(projectId)}
+                  />
+                )
+              ) : (
+                <>
+                  <DesktopProjectLauncher
+                    value={desktopProjectInput}
+                    errorMessage={desktopLaunchError}
+                    demoProjectId={DESKTOP_DEMO_PROJECT_ID}
+                    isDemoOpening={isDesktopDemoOpening}
+                    isImportOpen={isDesktopImportOpen}
+                    backendReady={desktopRuntimeReady}
+                    onValueChange={(value) => {
+                      setDesktopProjectInput(value);
+                      setDesktopLaunchError(null);
+                    }}
+                    onSubmit={openDesktopProject}
+                    onOpenDemo={openDesktopDemoProject}
+                    onToggleImport={() => setIsDesktopImportOpen((current) => !current)}
+                  />
+                  {isDesktopImportOpen ? (
+                    <section className="desktop-import-card">
+                      {canUsePreviewRenderer ? (
+                        <ModelImportPanel
+                          isBusy={isImporting || !desktopRuntimeReady}
+                          onImport={importDesktopModel}
+                        />
+                      ) : (
+                        <div className="desktop-import-blocked">
+                          <Wrench size={20} aria-hidden="true" />
+                          <div>
+                            <h2>Preview renderer cần cài đặt</h2>
+                            <p>
+                              Import GLB/OBJ cần renderer local để chuẩn hóa model trước khi mở trong editor.
+                              Bạn vẫn có thể mở demo project để review giao diện trước.
+                            </p>
+                          </div>
+                          <button type="button" className="primary-button" onClick={installPreviewRenderer}>
+                            <Wrench size={16} aria-hidden="true" />
+                            Cài Preview renderer
+                          </button>
+                        </div>
+                      )}
+                    </section>
+                  ) : null}
+                </>
+              )}
             </div>
           </div>
         ) : isProjectEditor && !user ? (
@@ -869,6 +1129,165 @@ export function App() {
             onSubmit={submitAuth}
             onDemoAuth={useDemoAuth}
           />
+        ) : isDesktopShell && isProjectEditor ? (
+          <section className="desktop-customize-shell" aria-label="Customize shoe design">
+            <header className="desktop-editor-topbar">
+              <div className="desktop-brand-lockup" aria-label="KusShoes desktop">
+                <img className="desktop-brand-logo" src="/logo.png" alt="KusShoes" />
+                <nav className="desktop-brand-nav" aria-label="Desktop sections">
+                  <span>Studio</span>
+                  <span>Customize</span>
+                  <span>Export</span>
+                </nav>
+              </div>
+              <div className="desktop-project-title">
+                <span className="studio-eyebrow">
+                  <Monitor size={14} aria-hidden="true" />
+                  Desktop Studio
+                </span>
+                <h1>{editorContext.context?.project.name ?? designName ?? "KusShoes project"}</h1>
+              </div>
+              <div className={`desktop-save-status ${desktopEditorStatusTone({
+                isSaving,
+                isBakingPreview,
+                isExporting,
+                isSaved,
+                hasBakedPreview: Boolean(previewModelUrl),
+                canUsePreviewRenderer,
+                previewErrorMessage,
+              })}`}>
+                {desktopEditorStatusLabel({
+                  isSaving,
+                  isBakingPreview,
+                  isExporting,
+                  isSaved,
+                  hasBakedPreview: Boolean(previewModelUrl),
+                  canUsePreviewRenderer,
+                  previewErrorMessage,
+                })}
+              </div>
+              <div className="desktop-topbar-actions">
+                <button
+                  type="button"
+                  disabled={isSaving || isBakingPreview || isExporting || !editorPermissions.canEdit}
+                  onClick={saveDesign}
+                >
+                  <Save size={16} aria-hidden="true" />
+                  Save Draft
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    isSaving ||
+                    isBakingPreview ||
+                    isExporting ||
+                    !editorPermissions.canEdit ||
+                    !editorPermissions.canBake ||
+                    !canUsePreviewRenderer
+                  }
+                  onClick={bakePreview}
+                >
+                  <Cpu size={16} aria-hidden="true" />
+                  Bake Preview
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={isSaving || isBakingPreview || isExporting || !editorPermissions.canExport || !canUsePreviewRenderer}
+                  onClick={exportDesign}
+                >
+                  <Download size={16} aria-hidden="true" />
+                  Export
+                </button>
+                <button
+                  type="button"
+                  className="desktop-icon-button"
+                  aria-label="Open project details and diagnostics"
+                  onClick={() => setIsDesktopDetailsOpen(true)}
+                >
+                  <Settings size={17} aria-hidden="true" />
+                </button>
+              </div>
+            </header>
+
+            <div className="desktop-editor-body">
+              <section className="desktop-stage" aria-label="3D design preview">
+                <EditorStatusNotice message={statusMessage} isBusy={isEditorBusy} compact />
+                <ModelViewer
+                  modelUrl={activeModelUrl}
+                  config={config}
+                  activeLayerId={activeLayerId}
+                  gizmoMode={gizmoMode}
+                  hiddenLayerIds={hiddenLayerIds}
+                  isSaving={isSaving || isBakingPreview}
+                  savingMessage={isBakingPreview ? "Baking preview..." : "Saving draft..."}
+                  previewErrorMessage={friendlyPreviewErrorMessage}
+                  surfaceApplyRequest={surfaceApplyRequest}
+                  onConfigChange={handleConfigChange}
+                  onActiveLayerChange={setActiveLayerId}
+                  onMeshBoundsUpdate={setMeshBounds}
+                  onSurfaceApplyResult={setStatusMessage}
+                />
+              </section>
+              <section className="desktop-tools-sidebar" aria-label="Design tools">
+                <EditorPanels
+                  config={config}
+                  modelAsset={modelAsset}
+                  designName={designName}
+                  isSaving={isSaving}
+                  isBakingPreview={isBakingPreview}
+                  isExporting={isExporting}
+                  canEdit={editorPermissions.canEdit}
+                  canBake={editorPermissions.canBake && canUsePreviewRenderer}
+                  canExport={editorPermissions.canExport && canUsePreviewRenderer}
+                  exportMessage={friendlyExportMessage}
+                  exportPackage={exportPackage}
+                  activeLayerId={activeLayerId}
+                  meshBounds={meshBounds}
+                  gizmoMode={gizmoMode}
+                  onNameChange={setDesignName}
+                  onConfigChange={handleConfigChange}
+                  onActiveLayerChange={setActiveLayerId}
+                  onApplyActiveLayerToSurface={applyActiveLayerToSurface}
+                  onGizmoModeChange={setGizmoMode}
+                  onSave={saveDesign}
+                  onBakePreview={bakePreview}
+                  onExport={exportDesign}
+                  onDownload={downloadExport}
+                  onDownloadModelFile={downloadModelFile}
+                  onUploadDesignAsset={uploadDesignAssetWithPreview}
+                  simplified
+                />
+              </section>
+            </div>
+
+            <DesktopDetailsDrawer
+              isOpen={isDesktopDetailsOpen}
+              onClose={() => setIsDesktopDetailsOpen(false)}
+              runtime={desktopRuntime}
+              editorReadiness={editorReadiness}
+              installProgress={installProgress}
+              isLoading={isDesktopRuntimeLoading}
+              errorMessage={desktopRuntimeError}
+              scanSession={scanSession}
+              modelAsset={modelAsset}
+              config={config}
+              designName={designName}
+              activeLayerId={activeLayerId}
+              meshBounds={meshBounds}
+              isSaved={isSaved}
+              hasBakedPreview={Boolean(previewModelUrl)}
+              hasExportPackage={Boolean(exportPackage)}
+              projectId={editorProjectId ?? ""}
+              routeState={editorContext.state}
+              permissions={editorPermissions}
+              onRefresh={refreshDesktopRuntime}
+              onRestartBackend={restartDesktopRuntimeBackend}
+              onInstallRenderer={installPreviewRenderer}
+              onOpenDiagnostics={openDesktopDiagnostics}
+              onCopyDiagnostics={copyDesktopDiagnostics}
+            />
+          </section>
         ) : (
           <>
             <section className="toolbar-band">
@@ -956,7 +1375,8 @@ export function App() {
                 activeLayerId={activeLayerId}
                 gizmoMode={gizmoMode}
                 hiddenLayerIds={hiddenLayerIds}
-                isSaving={isSaving}
+                isSaving={isSaving || isBakingPreview}
+                savingMessage={isBakingPreview ? "Đang bake preview..." : "Đang lưu draft..."}
                 previewErrorMessage={friendlyPreviewErrorMessage}
                 surfaceApplyRequest={surfaceApplyRequest}
                 onConfigChange={handleConfigChange}
@@ -969,6 +1389,7 @@ export function App() {
                 modelAsset={modelAsset}
                 designName={designName}
                 isSaving={isSaving}
+                isBakingPreview={isBakingPreview}
                 isExporting={isExporting}
                 canEdit={!isProjectEditor || editorPermissions.canEdit}
                 canBake={(!isProjectEditor || editorPermissions.canBake) && canUsePreviewRenderer}
@@ -984,6 +1405,7 @@ export function App() {
                 onApplyActiveLayerToSurface={applyActiveLayerToSurface}
                 onGizmoModeChange={setGizmoMode}
                 onSave={saveDesign}
+                onBakePreview={bakePreview}
                 onExport={exportDesign}
                 onDownload={downloadExport}
                 onDownloadModelFile={downloadModelFile}
@@ -1011,13 +1433,13 @@ function EditorRouteState({ state, message }: { state: string; message: string }
   );
 }
 
-function EditorStatusNotice({ message, isBusy }: { message: string; isBusy: boolean }) {
+function EditorStatusNotice({ message, isBusy, compact = false }: { message: string; isBusy: boolean; compact?: boolean }) {
   const notice = noticeFromStatus(message, isBusy);
   const role = notice.tone === "error" ? "alert" : "status";
   const ariaLive = notice.tone === "error" ? "assertive" : "polite";
 
   return (
-    <section className={`editor-status-notice ${notice.tone}`} role={role} aria-live={ariaLive}>
+    <section className={`editor-status-notice ${notice.tone} ${compact ? "compact" : ""}`} role={role} aria-live={ariaLive}>
       <span className="editor-status-icon">
         {notice.tone === "loading" ? (
           <Loader2 size={20} aria-hidden="true" />
@@ -1202,6 +1624,241 @@ function RuntimeStatusItem({
   );
 }
 
+type DesktopDetailsDrawerProps = {
+  isOpen: boolean;
+  onClose: () => void;
+  runtime: DesktopRuntime | null;
+  editorReadiness: EditorReadiness | null;
+  installProgress: InstallProgress | null;
+  isLoading: boolean;
+  errorMessage: string | null;
+  scanSession: ScanSession | null;
+  modelAsset: ModelAsset | null;
+  config: DesignConfig | null;
+  designName: string;
+  activeLayerId: string | null;
+  meshBounds: { center: [number, number, number]; size: [number, number, number] } | null;
+  isSaved: boolean;
+  hasBakedPreview: boolean;
+  hasExportPackage: boolean;
+  projectId: string;
+  routeState: string;
+  permissions: EditorPermissions;
+  onRefresh: () => void;
+  onRestartBackend: () => void;
+  onInstallRenderer: () => void;
+  onOpenDiagnostics: () => void;
+  onCopyDiagnostics: () => void;
+};
+
+function DesktopDetailsDrawer({
+  isOpen,
+  onClose,
+  runtime,
+  editorReadiness,
+  installProgress,
+  isLoading,
+  errorMessage,
+  scanSession,
+  modelAsset,
+  config,
+  designName,
+  activeLayerId,
+  meshBounds,
+  isSaved,
+  hasBakedPreview,
+  hasExportPackage,
+  projectId,
+  routeState,
+  permissions,
+  onRefresh,
+  onRestartBackend,
+  onInstallRenderer,
+  onOpenDiagnostics,
+  onCopyDiagnostics,
+}: DesktopDetailsDrawerProps) {
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <div className="desktop-details-overlay" role="presentation" onMouseDown={onClose}>
+      <aside
+        className="desktop-details-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Project details and diagnostics"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="desktop-details-header">
+          <div>
+            <span className="studio-eyebrow">
+              <Info size={14} aria-hidden="true" />
+              Project Details
+            </span>
+            <h2>{designName || "Untitled design"}</h2>
+          </div>
+          <button type="button" className="desktop-icon-button" aria-label="Close details" onClick={onClose}>
+            <X size={18} aria-hidden="true" />
+          </button>
+        </header>
+
+        <div className="desktop-details-content">
+          <ProjectRouteSummary
+            projectId={projectId}
+            state={routeState}
+            canEdit={permissions.canEdit}
+            canBake={permissions.canBake}
+            canExport={permissions.canExport}
+          />
+          <MetadataPanel
+            scanSession={scanSession}
+            modelAsset={modelAsset}
+            config={config}
+            designName={designName}
+            activeLayerId={activeLayerId}
+            meshBounds={meshBounds}
+            isSaved={isSaved}
+            hasBakedPreview={hasBakedPreview}
+            hasExportPackage={hasExportPackage}
+          />
+          <DesktopRuntimePanel
+            runtime={runtime}
+            editorReadiness={editorReadiness}
+            installProgress={installProgress}
+            isLoading={isLoading}
+            errorMessage={errorMessage}
+            onRefresh={onRefresh}
+            onRestartBackend={onRestartBackend}
+            onInstallRenderer={onInstallRenderer}
+            onOpenDiagnostics={onOpenDiagnostics}
+            onCopyDiagnostics={onCopyDiagnostics}
+          />
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function DesktopApiModeSelector({
+  value,
+  onChange,
+}: {
+  value: DesktopApiMode;
+  onChange: (mode: DesktopApiMode) => void;
+}) {
+  return (
+    <div className="desktop-api-mode" role="tablist" aria-label="Desktop data source">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={value === "local"}
+        className={value === "local" ? "active" : ""}
+        onClick={() => onChange("local")}
+      >
+        <HardDrive size={16} aria-hidden="true" />
+        Local
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={value === "cloud"}
+        className={value === "cloud" ? "active" : ""}
+        onClick={() => onChange("cloud")}
+      >
+        <Cloud size={16} aria-hidden="true" />
+        Cloud
+      </button>
+    </div>
+  );
+}
+
+function CloudConnectionPanel({
+  apiBaseUrl,
+  isReady,
+  user,
+  errorMessage,
+  onLogout,
+}: {
+  apiBaseUrl: string;
+  isReady: boolean;
+  user: User | null;
+  errorMessage: string | null;
+  onLogout: () => void;
+}) {
+  return (
+    <section className="desktop-runtime-panel">
+      <div className="desktop-launcher-title">
+        <span className="desktop-launcher-icon"><Cloud size={22} aria-hidden="true" /></span>
+        <div>
+          <h2>Cloud workspace</h2>
+          <p className="desktop-cloud-endpoint">{apiBaseUrl || "Not configured"}</p>
+        </div>
+      </div>
+      <span className={`status-line ${isReady ? "success-text" : "danger-text"}`}>
+        {isReady ? "Cloud API ready" : errorMessage ?? "Cloud API unavailable"}
+      </span>
+      {user ? (
+        <div className="desktop-cloud-account">
+          <span>{user.name}</span>
+          <small>{user.email}</small>
+          <button type="button" onClick={onLogout}>Sign out</button>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function CloudProjectLauncher({
+  projects,
+  isLoading,
+  errorMessage,
+  onRefresh,
+  onOpen,
+}: {
+  projects: CloudProject[];
+  isLoading: boolean;
+  errorMessage: string | null;
+  onRefresh: () => void;
+  onOpen: (projectId: string) => void;
+}) {
+  return (
+    <section className="auth-form desktop-launcher desktop-cloud-projects">
+      <header className="desktop-cloud-projects-header">
+        <div>
+          <h2>Cloud projects</h2>
+          <span>{projects.length} projects</span>
+        </div>
+        <button type="button" className="desktop-icon-button" aria-label="Refresh projects" onClick={onRefresh}>
+          <RefreshCw size={17} className={isLoading ? "spin" : ""} aria-hidden="true" />
+        </button>
+      </header>
+      <div className="desktop-cloud-project-list">
+        {projects.map((project) => (
+          <div className="desktop-cloud-project-row" key={project.id}>
+            <FolderOpen size={18} aria-hidden="true" />
+            <div>
+              <strong>{project.name}</strong>
+              <span>{project.status.replaceAll("_", " ")}</span>
+            </div>
+            <button
+              type="button"
+              className="desktop-icon-button"
+              aria-label={`Open ${project.name}`}
+              disabled={project.status !== "ready"}
+              onClick={() => onOpen(project.id)}
+            >
+              <Monitor size={17} aria-hidden="true" />
+            </button>
+          </div>
+        ))}
+        {!isLoading && projects.length === 0 ? <span className="status-line">No cloud projects yet.</span> : null}
+      </div>
+      {errorMessage ? <span className="status-line danger-text">{errorMessage}</span> : null}
+    </section>
+  );
+}
+
 type DesktopProjectLauncherProps = {
   value: string;
   errorMessage: string | null;
@@ -1284,6 +1941,7 @@ type AuthPanelProps = {
   onPasswordChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onDemoAuth: () => void;
+  showDemo?: boolean;
 };
 
 function AuthPanel({
@@ -1299,6 +1957,7 @@ function AuthPanel({
   onPasswordChange,
   onSubmit,
   onDemoAuth,
+  showDemo = true,
 }: AuthPanelProps) {
   return (
     <section className="auth-panel">
@@ -1345,9 +2004,11 @@ function AuthPanel({
             {mode === "login" ? <LogIn size={16} aria-hidden="true" /> : <UserPlus size={16} aria-hidden="true" />}
             {mode === "login" ? "Login" : "Create account"}
           </button>
-          <button type="button" disabled={isBusy} onClick={onDemoAuth}>
-            Demo
-          </button>
+          {showDemo ? (
+            <button type="button" disabled={isBusy} onClick={onDemoAuth}>
+              Demo
+            </button>
+          ) : null}
         </div>
         <span className="status-line">{statusMessage}</span>
       </form>
@@ -1679,6 +2340,10 @@ function scanStatusLabel(status: string): string {
     uv_unwrapping: "Preparing UVs",
     texture_baking: "Baking texture",
     exporting: "Exporting model files",
+    kiri_processing: "Processing with Kiri Engine",
+    kiri_ready: "Ready for crop",
+    crop_baking: "Applying crop",
+    crop_ready: "Cloud model ready",
     completed: "Completed",
     failed: "Failed",
   };
@@ -1692,6 +2357,54 @@ function formatResource(resource: { available: number | null; required: number; 
   return `${resource.available.toFixed(1)}/${resource.required.toFixed(1)} ${resource.unit}`;
 }
 
+type DesktopEditorStatusInput = {
+  isSaving: boolean;
+  isBakingPreview: boolean;
+  isExporting: boolean;
+  isSaved: boolean;
+  hasBakedPreview: boolean;
+  canUsePreviewRenderer: boolean;
+  previewErrorMessage: string | null;
+};
+
+function desktopEditorStatusLabel(status: DesktopEditorStatusInput): string {
+  if (status.isSaving) {
+    return "Saving...";
+  }
+  if (status.isBakingPreview) {
+    return "Baking preview...";
+  }
+  if (status.isExporting) {
+    return "Exporting...";
+  }
+  if (!status.canUsePreviewRenderer) {
+    return "Renderer needs setup";
+  }
+  if (status.previewErrorMessage) {
+    return "Preview needs attention";
+  }
+  if (status.hasBakedPreview) {
+    return "Preview ready";
+  }
+  if (status.isSaved) {
+    return "Draft saved";
+  }
+  return "Unsaved changes";
+}
+
+function desktopEditorStatusTone(status: DesktopEditorStatusInput): "ready" | "working" | "warning" | "neutral" {
+  if (status.isSaving || status.isBakingPreview || status.isExporting) {
+    return "working";
+  }
+  if (!status.canUsePreviewRenderer || status.previewErrorMessage) {
+    return "warning";
+  }
+  if (status.hasBakedPreview || status.isSaved) {
+    return "ready";
+  }
+  return "neutral";
+}
+
 function friendlyRendererMessage(editorReadiness: EditorReadiness | null, runtime: DesktopRuntime | null): string {
   if (editorReadiness?.previewRenderer.available || runtime?.blenderStatus === "installed") {
     return "Preview renderer đã sẵn sàng để bake preview và export.";
@@ -1699,7 +2412,7 @@ function friendlyRendererMessage(editorReadiness: EditorReadiness | null, runtim
   if (runtime?.blenderStatus === "failed" || editorReadiness?.previewRenderer.status === "failed") {
     return "Ứng dụng chưa chuẩn bị được Preview renderer. Vui lòng thử cài lại hoặc mở Logs để gửi diagnostics cho team.";
   }
-  return "Preview renderer cần cài đặt để Save Draft, bake preview và export. Bạn vẫn có thể mở model và xem demo trước.";
+  return "Preview renderer cần cài đặt để bake preview, import GLB/OBJ và export. Save Draft vẫn hoạt động khi renderer chưa sẵn sàng.";
 }
 
 function runtimeStatusLabel(status: string): string {

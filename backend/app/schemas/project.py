@@ -73,6 +73,7 @@ class EditorContextResponse(CamelModel):
     model_asset: EditorModelAsset | None = Field(default=None, alias="modelAsset")
     latest_design: DesignResponse | None = Field(default=None, alias="latestDesign")
     permissions: EditorPermissions
+    asset_manifest_url: str | None = Field(default=None, alias="assetManifestUrl")
 
 
 class ProjectDesignCreate(CamelModel):

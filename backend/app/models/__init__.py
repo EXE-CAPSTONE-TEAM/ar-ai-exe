@@ -2,6 +2,11 @@
 
 from app.models.entities import (
     AssetStatus,
+    AssetVersion,
+    AssetVersionFile,
+    AssetVersionLegacyLink,
+    AssetVersionStatus,
+    AssetVersionType,
     Design,
     DesignAsset,
     DesignPreviewStatus,
@@ -11,6 +16,8 @@ from app.models.entities import (
     Job,
     JobStatus,
     JobType,
+    KiriScanTask,
+    KiriTaskStatus,
     ModelAsset,
     Project,
     ProjectSourceType,
@@ -19,10 +26,16 @@ from app.models.entities import (
     ScanSource,
     ScanStatus,
     User,
+    new_id,
 )
 
 __all__ = [
     "AssetStatus",
+    "AssetVersion",
+    "AssetVersionFile",
+    "AssetVersionLegacyLink",
+    "AssetVersionStatus",
+    "AssetVersionType",
     "Design",
     "DesignAsset",
     "DesignPreviewStatus",
@@ -32,6 +45,8 @@ __all__ = [
     "Job",
     "JobStatus",
     "JobType",
+    "KiriScanTask",
+    "KiriTaskStatus",
     "ModelAsset",
     "Project",
     "ProjectSourceType",
@@ -40,4 +55,5 @@ __all__ = [
     "ScanSource",
     "ScanStatus",
     "User",
+    "new_id",
 ]

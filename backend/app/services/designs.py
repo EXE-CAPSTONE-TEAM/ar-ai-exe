@@ -100,7 +100,7 @@ class DesignService:
             id=design.id,
             userId=design.user_id,
             projectId=design.project_id,
-            modelAssetId=design.model_asset_id,
+            modelAssetId=design.model_asset_id or "",
             name=design.name,
             status=design.status,
             designConfig=self.read_config(design),
@@ -157,7 +157,7 @@ class DesignService:
                 shutil.rmtree(preview_dir)
             preview_dir.mkdir(parents=True, exist_ok=True)
 
-            asset = self.db.get(ModelAsset, design.model_asset_id)
+            asset = self.db.get(ModelAsset, design.model_asset_id) if design.model_asset_id else None
             if not asset:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
