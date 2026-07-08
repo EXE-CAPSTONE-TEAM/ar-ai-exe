@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import HTTPException, Request, status
@@ -69,10 +70,28 @@ async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONR
     )
 
 
+def _safe_input(input_value: Any) -> Any:
+    if input_value is None or isinstance(input_value, (str, int, float, bool, list, tuple, dict)):
+        try:
+            json.dumps(input_value)
+            return input_value
+        except (TypeError, ValueError):
+            return repr(input_value)
+    try:
+        json.dumps(input_value, default=str)
+        return str(input_value)
+    except (TypeError, ValueError):
+        return repr(input_value)
+
+
 async def validation_exception_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+    safe_errors = [
+        {**err, "input": _safe_input(err.get("input"))}
+        for err in exc.errors()
+    ]
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        content=error_payload("INVALID_REQUEST", "Request validation failed.", {"errors": exc.errors()}),
+        content=error_payload("INVALID_REQUEST", "Request validation failed.", {"errors": safe_errors}),
     )
 
 
