@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import get_settings
+from app.core.path_safety import safe_child_path
 from app.services.blender_service import BlenderService
 from app.services.command_runner import CommandRunner
 from app.services.placeholders import PLACEHOLDER_PNG
@@ -96,11 +97,12 @@ class MeshCleanupService:
         options: MeshCleanupOptions | None = None,
     ) -> MeshCleanupReport:
         output_dir.mkdir(parents=True, exist_ok=True)
-        work_dir = output_dir / "_mesh_cleanup"
+        output_dir = output_dir.resolve()
+        work_dir = safe_child_path(output_dir, "_mesh_cleanup", label="mesh cleanup work directory")
         work_dir.mkdir(parents=True, exist_ok=True)
-        script_path = work_dir / "editor_ready_cleanup.py"
-        options_path = work_dir / "mesh_cleanup_options.json"
-        report_path = work_dir / "mesh_cleanup_report.json"
+        script_path = safe_child_path(work_dir, "editor_ready_cleanup.py", label="cleanup script path")
+        options_path = safe_child_path(work_dir, "mesh_cleanup_options.json", label="cleanup options path")
+        report_path = safe_child_path(work_dir, "mesh_cleanup_report.json", label="cleanup report path")
         active_options = options or self.options
 
         self._write_cleanup_script(script_path)
@@ -134,12 +136,14 @@ class MeshCleanupService:
         return MeshCleanupReport.from_payload(json.loads(report_path.read_text(encoding="utf-8")))
 
     def _ensure_canonical_files(self, output_dir: Path, texture_path: Path | None) -> None:
+        output_dir = output_dir.resolve()
         for name in ["shoe_preview.glb", "shoe.obj"]:
-            if not (output_dir / name).is_file():
+            canonical_path = safe_child_path(output_dir, name, label=f"{name} path")
+            if not canonical_path.is_file():
                 raise RuntimeError(f"Blender mesh cleanup did not create {name}.")
 
-        mtl_path = output_dir / "shoe.mtl"
-        texture_output = output_dir / "shoe_texture.png"
+        mtl_path = safe_child_path(output_dir, "shoe.mtl", label="material output path")
+        texture_output = safe_child_path(output_dir, "shoe_texture.png", label="texture output path")
         if not texture_output.is_file():
             if texture_path and texture_path.is_file() and texture_path.suffix.lower() == ".png":
                 shutil.copyfile(texture_path, texture_output)

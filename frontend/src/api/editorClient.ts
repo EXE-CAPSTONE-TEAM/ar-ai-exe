@@ -1,7 +1,7 @@
 import type { Design, DesignConfig, EditorContext, ExportPackage, Job, User } from "../types";
+import { storedAccessToken } from "./authStorage";
 import { apiUrl } from "./runtimeConfig";
 
-const TOKEN_STORAGE_KEY = "shoe-customizer-token";
 const CSRF_COOKIE_NAME = "kusshoes_csrf_token";
 
 export class EditorApiError extends Error {
@@ -97,7 +97,7 @@ async function readError(response: Response): Promise<{ code: string; message: s
 }
 
 function authHeader(): Record<string, string> {
-  const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+  const token = storedAccessToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 

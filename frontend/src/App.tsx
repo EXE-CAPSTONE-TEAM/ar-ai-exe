@@ -2244,13 +2244,20 @@ function setScanIdInUrl(scanSessionId: string) {
 
 function projectIdFromEditorPath(pathname: string): string | null {
   const match = pathname.match(/^\/editor\/([^/?#]+)/);
-  return match ? decodeURIComponent(match[1]) : null;
+  if (!match) {
+    return null;
+  }
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
 }
 
 function editorProjectIdFromLocation(isDesktopShell: boolean): string | null {
   const pathProjectId = projectIdFromEditorPath(window.location.pathname);
   if (pathProjectId) {
-    return pathProjectId;
+    return sanitizeProjectId(pathProjectId);
   }
   if (!isDesktopShell) {
     return null;
@@ -2292,11 +2299,12 @@ function projectIdFromEditorInput(value: string): string | null {
 }
 
 function openDesktopProjectId(projectId: string): void {
-  const url = new URL(window.location.href);
-  url.searchParams.set("desktop", "1");
-  url.searchParams.set("projectId", projectId);
-  url.hash = "";
-  window.location.assign(url.toString());
+  const safeProjectId = sanitizeProjectId(projectId);
+  if (!safeProjectId) {
+    return;
+  }
+  const params = new URLSearchParams({ desktop: "1", projectId: safeProjectId });
+  window.location.assign(`/?${params.toString()}`);
 }
 
 function sanitizeProjectId(value: string): string | null {
@@ -2306,7 +2314,8 @@ function sanitizeProjectId(value: string): string | null {
 
 function loginRedirectUrl(): string {
   const url = new URL(MARKETING_LOGIN_URL);
-  url.searchParams.set("redirect", window.location.href);
+  const currentUrl = new URL(window.location.href);
+  url.searchParams.set("redirect", `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
   return url.toString();
 }
 

@@ -27,6 +27,20 @@ flowchart TD
     G --> H["Summarize changed files, verification, risks, and next steps"]
 ```
 
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `kiet-ta/ar-ai-exe`. Skills should use the `gh` CLI for create / view / list / comment / close. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles mapped 1:1 to default label strings (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context repo: read `CONTEXT.md` at the repo root and consult `docs/adr/` for prior decisions. See `docs/agents/domain.md`.
+
 ## Operating Rules
 
 - Respect the boundaries of `backend/` (FastAPI/Python), `frontend/` (React/Vite/TS), `desktop/` (Tauri shell for the existing frontend editor), `mobile/`, `docs/`, and `.agents/skills/`.
