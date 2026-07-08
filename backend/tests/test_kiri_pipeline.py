@@ -13,12 +13,21 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.core.security import create_kiri_preview_ticket, decode_kiri_preview_ticket
 from app.db.database import Base
-from app.models import KiriScanTask, KiriTaskStatus, Project, ScanSession, ScanStatus, User
+from app.models import (
+    AssetVersionType,
+    KiriScanTask,
+    KiriTaskStatus,
+    Project,
+    ScanSession,
+    ScanStatus,
+    User,
+)
 from app.schemas.scan import CropBox
-from app.services.kiri_client import KiriApiClient, KiriError
-from app.services.kiri_pipeline import KiriPipelineService
+from app.services.asset_versions import AssetVersionService
 from app.services.command_runner import CommandResult
 from app.services.crop_baker import CropBakeService
+from app.services.kiri_client import KiriApiClient, KiriError
+from app.services.kiri_pipeline import KiriPipelineService
 from app.services.mesh_cleanup import MeshCleanupReport
 from app.services.scan_sessions import ScanSessionService
 from app.services.storage import StoredObject, checksum_bytes
@@ -163,11 +172,22 @@ def test_save_project_bakes_crop_and_creates_canonical_model_asset() -> None:
         service.bake_saved_project(task.scan_session_id)
 
         db.refresh(task)
+        version = AssetVersionService(db).latest_published(
+            task.scan_session.project_id,
+            AssetVersionType.MODEL,
+        )
+        assert version is not None
         assert task.status == KiriTaskStatus.READY
         assert task.scan_session.status == ScanStatus.CROP_READY
         assert task.scan_session.model_asset is not None
-        assert storage.exists(f"models/{task.scan_session_id}/shoe_preview.glb")
         assert crop_baker.calls == 1
+        assert all(
+            item.storage_key.startswith(
+                f"projects/{task.scan_session.project_id}/assets/model/primary/versions/{version.id}/"
+            )
+            for item in version.files
+        )
+        assert not storage.exists(f"models/{task.scan_session_id}/shoe_preview.glb")
 
 
 def test_scan_session_ownership_is_required_for_kiri_routes() -> None:
@@ -302,5 +322,5 @@ class MemoryStorage:
     def create_signed_url(self, key: str, expires_in: int = 300) -> str | None:
         return None
 
-    def local_path(self, key: str):
+    def local_path(self, key: str) -> Path | None:
         return None

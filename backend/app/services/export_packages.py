@@ -24,7 +24,7 @@ class ExportPackageService:
         self.storage = get_storage_service()
 
     def create(self, design: Design) -> ExportPackage:
-        asset = self.db.get(ModelAsset, design.model_asset_id)
+        asset = self.db.get(ModelAsset, design.model_asset_id) if design.model_asset_id else None
         if not asset:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model asset not found.")
 
@@ -75,7 +75,7 @@ class ExportPackageService:
                 design.user_id,
             )
         ).bake(glb_path, export_dir, design_config)
-        self._write_production_notes(design, production_notes_path, decals_baked)
+        self._write_production_notes(design, asset, production_notes_path, decals_baked)
 
         zip_path = export_dir / f"{export_package.id}.zip"
         self._zip_export(export_dir, zip_path)
@@ -212,8 +212,14 @@ class ExportPackageService:
                 "image/png",
             )
 
-    def _write_production_notes(self, design: Design, path: Path, decals_baked: bool = False) -> None:
-        metadata = self._read_scan_metadata(design.model_asset)
+    def _write_production_notes(
+        self,
+        design: Design,
+        asset: ModelAsset,
+        path: Path,
+        decals_baked: bool = False,
+    ) -> None:
+        metadata = self._read_scan_metadata(asset)
         design_config = DesignService(self.db).read_config(design)
         shoe = metadata.get("shoe", {})
         measurements = metadata.get("measurements", {})

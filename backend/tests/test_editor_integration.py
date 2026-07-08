@@ -108,6 +108,7 @@ def test_editor_context_returns_project_model_and_latest_design(monkeypatch) -> 
     assert context.latest_design is not None
     assert context.latest_design.id == "design_001"
     assert context.permissions.can_edit is True
+    assert context.asset_manifest_url == "/api/projects/proj_001/asset-manifest"
 
 
 def test_run_job_marks_bake_job_completed(monkeypatch) -> None:

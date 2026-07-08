@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -56,6 +56,19 @@ class ProjectSourceType:
 class AssetStatus:
     UPLOADED = "uploaded"
     PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class AssetVersionType:
+    MODEL = "model"
+    PREVIEW = "preview"
+    TEXTURE = "texture"
+    EXPORT = "export"
+
+
+class AssetVersionStatus:
+    PUBLISHED = "published"
     READY = "ready"
     FAILED = "failed"
 
@@ -139,6 +152,7 @@ class Project(Base):
     scan_sessions: Mapped[list["ScanSession"]] = relationship(back_populates="project")
     designs: Mapped[list["Design"]] = relationship(back_populates="project")
     jobs: Mapped[list["Job"]] = relationship(back_populates="project")
+    asset_versions: Mapped[list["AssetVersion"]] = relationship(back_populates="project")
 
 
 class ScanSession(Base):
@@ -251,13 +265,109 @@ class ModelAsset(Base):
     designs: Mapped[list["Design"]] = relationship(back_populates="model_asset")
 
 
+class AssetVersion(Base):
+    __tablename__ = "asset_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "asset_type",
+            "logical_key",
+            "version_number",
+            name="uq_asset_versions_project_type_key_number",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("assetv"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), index=True)
+    asset_type: Mapped[str] = mapped_column(String(32), index=True)
+    logical_key: Mapped[str] = mapped_column(String(120), default="primary", index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(32), default=AssetVersionStatus.READY, index=True)
+    source_type: Mapped[str] = mapped_column(String(32), default="generated", index=True)
+    parent_asset_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("asset_versions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+    project: Mapped[Project] = relationship(back_populates="asset_versions")
+    parent: Mapped["AssetVersion | None"] = relationship(
+        back_populates="children",
+        remote_side=[id],
+    )
+    children: Mapped[list["AssetVersion"]] = relationship(back_populates="parent")
+    files: Mapped[list["AssetVersionFile"]] = relationship(
+        back_populates="asset_version",
+        cascade="all, delete-orphan",
+    )
+    legacy_links: Mapped[list["AssetVersionLegacyLink"]] = relationship(
+        back_populates="asset_version",
+        cascade="all, delete-orphan",
+    )
+
+
+class AssetVersionFile(Base):
+    __tablename__ = "asset_version_files"
+    __table_args__ = (
+        UniqueConstraint(
+            "asset_version_id",
+            "file_type",
+            name="uq_asset_version_files_version_type",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("assetfile"))
+    asset_version_id: Mapped[str] = mapped_column(
+        ForeignKey("asset_versions.id", ondelete="CASCADE"), index=True
+    )
+    file_type: Mapped[str] = mapped_column(String(32), index=True)
+    canonical_name: Mapped[str] = mapped_column(String(180))
+    storage_key: Mapped[str] = mapped_column(Text)
+    content_type: Mapped[str] = mapped_column(String(120))
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+    asset_version: Mapped[AssetVersion] = relationship(back_populates="files")
+
+
+class AssetVersionLegacyLink(Base):
+    __tablename__ = "asset_version_legacy_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "legacy_type",
+            "legacy_id",
+            name="uq_asset_version_legacy_links_legacy_identity",
+        ),
+        UniqueConstraint(
+            "asset_version_id",
+            "legacy_type",
+            name="uq_asset_version_legacy_links_version_type",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("assetlink"))
+    asset_version_id: Mapped[str] = mapped_column(
+        ForeignKey("asset_versions.id", ondelete="CASCADE"), index=True
+    )
+    legacy_type: Mapped[str] = mapped_column(String(32), index=True)
+    legacy_id: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+    asset_version: Mapped[AssetVersion] = relationship(back_populates="legacy_links")
+
+
 class Design(Base):
     __tablename__ = "designs"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("design"))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
-    model_asset_id: Mapped[str] = mapped_column(ForeignKey("model_assets.id"), index=True)
+    model_asset_id: Mapped[str | None] = mapped_column(
+        ForeignKey("model_assets.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    base_asset_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("asset_versions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(160))
     design_config_path: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(32), default=DesignStatus.DRAFT, index=True)
@@ -273,7 +383,8 @@ class Design(Base):
 
     user: Mapped[User] = relationship(back_populates="designs")
     project: Mapped[Project | None] = relationship(back_populates="designs")
-    model_asset: Mapped[ModelAsset] = relationship(back_populates="designs")
+    model_asset: Mapped[ModelAsset | None] = relationship(back_populates="designs")
+    base_asset_version: Mapped[AssetVersion | None] = relationship()
     export_packages: Mapped[list["ExportPackage"]] = relationship(back_populates="design")
 
 
