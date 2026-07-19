@@ -1,8 +1,8 @@
 # ar-ai-exe Monorepo - Production Readiness Roadmap
 
-**Document Version:** 1.0  
-**Created:** July 8, 2026  
-**Status:** Pre-Production Review  
+**Document Version:** 1.0
+**Created:** July 8, 2026
+**Status:** Pre-Production Review
 
 ---
 
@@ -110,7 +110,7 @@ app.add_middleware(
 // frontend/src/api/client.ts
 class ApiClient {
   private baseUrl: string;
-  
+
   constructor() {
     this.baseUrl = import.meta.env.VITE_API_BASE_URL;
   }
@@ -122,11 +122,11 @@ class ApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
     });
-    
+
     if (!response.ok) {
       throw new ApiError(await response.json());
     }
-    
+
     // Token sẽ được set trong httpOnly cookie bởi backend
     const data = await response.json();
     this.setAccessToken(data.access_token); // Chỉ access token vào memory
@@ -173,7 +173,7 @@ class ApiClient {
         method: 'POST',
         credentials: 'include',
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         this.setAccessToken(data.access_token);
@@ -216,7 +216,7 @@ class ApiClient {
 class BackendApi {
   // Thay vì hardcode:
   // static const String _baseUrl = 'http://172.16.1.232:8000';
-  
+
   // Sử dụng environment config:
   static String get baseUrl {
     const configuredUrl = String.fromEnvironment(
@@ -225,7 +225,7 @@ class BackendApi {
     );
     return configuredUrl;
   }
-  
+
   // Hoặc sử dụng shared_preferences để user có thể thay đổi:
   static Future<String> getBaseUrl() async {
     final prefs = await SharedPreferences.getInstance();
@@ -408,7 +408,7 @@ from loguru import logger
 def notify_failure(job, *args, **kwargs):
     """Called when job fails"""
     error_message = str(job.exc_info[1]) if job.exc_info else "Unknown error"
-    
+
     logger.error(
         f"Job failed: {job.id}",
         extra={
@@ -417,7 +417,7 @@ def notify_failure(job, *args, **kwargs):
             "error": error_message,
         }
     )
-    
+
     # Send to monitoring
     sentry_sdk.capture_message(
         f"RQ Job Failed: {job.func_name}",
@@ -426,7 +426,7 @@ def notify_failure(job, *args, **kwargs):
             "error": error_message,
         }
     )
-    
+
     # Optional: Send to Slack/Discord
     # send_alert_to_oncall(f"Job {job.id} failed: {error_message}")
 
@@ -450,13 +450,13 @@ def on_job_success(job, *args, **kwargs):
 class AppErrorWidget extends StatelessWidget {
   final String message;
   final VoidCallback? onRetry;
-  
+
   const AppErrorWidget({
     super.key,
     required this.message,
     this.onRetry,
   });
-  
+
   @override
   Widget build(BuildContext context) {
     return Center(
@@ -527,11 +527,11 @@ fn main() {
         } else {
             "Unknown panic".to_string()
         };
-        
+
         let location = panic_info.location()
             .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
             .unwrap_or_else(|| "unknown".to_string());
-        
+
         // Write to crash log
         let crash_log = format!(
             "[{}] PANIC at {}: {}\n",
@@ -539,7 +539,7 @@ fn main() {
             location,
             message
         );
-        
+
         if let Ok(mut file) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -548,11 +548,11 @@ fn main() {
             use std::io::Write;
             let _ = file.write_all(crash_log.as_bytes());
         }
-        
+
         // TODO: Upload to crash reporting service
         eprintln!("{}", crash_log);
     }));
-    
+
     tauri::Builder::default()
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -612,12 +612,12 @@ describe('ApiClient', () => {
     it('should store access token in memory', async () => {
       // Test token handling
     });
-    
+
     it('should reject invalid credentials', async () => {
       // Test error handling
     });
   });
-  
+
   describe('refreshToken', () => {
     it('should auto-refresh on 401', async () => {
       // Test auto-refresh
@@ -681,7 +681,7 @@ mod tests {
     fn test_backend_url_parsing() {
         // Test URL parsing logic
     }
-    
+
     #[test]
     fn test_port_scanning() {
         // Test port detection
@@ -788,40 +788,40 @@ jobs:
     strategy:
       matrix:
         platform: [macos-latest, ubuntu-22.04, windows-latest]
-    
+
     runs-on: ${{ matrix.platform }}
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          
+
       - name: Install Frontend Dependencies
         run: npm ci
         working-directory: frontend
-        
+
       - name: Build Frontend
         run: npm run build:desktop
         working-directory: frontend
-        
+
       - name: Setup Rust
         uses: dtolnay/rust-action@stable
         with:
           components: rustfmt, clippy
-          
+
       - name: Install Tauri CLI
         run: cargo install tauri-cli
         working-directory: desktop
-        
+
       - name: Build Tauri App
         run: npm run build
         working-directory: desktop
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -855,7 +855,7 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
         request_id_var.set(request_id)
-        
+
         with logger.contextualize(request_id=request_id):
             logger.info(
                 "Request started",
@@ -865,9 +865,9 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
                     "client": request.client.host if request.client else None,
                 }
             )
-            
+
             response = await call_next(request)
-            
+
             logger.info(
                 "Request completed",
                 extra={
@@ -875,7 +875,7 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
                     "duration_ms": 0,  # Calculate actual duration
                 }
             )
-            
+
             response.headers["X-Request-ID"] = request_id
             return response
 ```
@@ -896,9 +896,9 @@ async def health_check(db: Session = Depends(get_db)):
         "storage": await check_storage(),
         "reconstruction_toolchain": await check_toolchain(),
     }
-    
+
     all_healthy = all(c["status"] == "healthy" for c in checks.values())
-    
+
     return {
         "status": "healthy" if all_healthy else "degraded",
         "version": VERSION,
@@ -923,7 +923,7 @@ Sentry.init({
     Sentry.browserTracingIntegration(),
   ],
   tracesSampleRate: 0.1,
-  
+
   // Ignore common noise
   ignoreErrors: [
     'ResizeObserver loop completed with undelivered notifications',
@@ -943,10 +943,10 @@ import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Initialize Crashlytics
   FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterError;
-  
+
   runApp(const MyApp());
 }
 ```
@@ -994,9 +994,9 @@ mobile/lib/
 ```dart
 class RetryInterceptor extends Interceptor {
   final Dio dio;
-  
+
   RetryInterceptor(this.dio);
-  
+
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) async {
     if (_shouldRetry(err)) {
@@ -1010,13 +1010,13 @@ class RetryInterceptor extends Interceptor {
     }
     handler.next(err);
   }
-  
+
   bool _shouldRetry(DioException err) {
     return err.type == DioExceptionType.connectionTimeout ||
            err.type == DioExceptionType.receiveTimeout ||
            (err.response?.statusCode == 503);
   }
-  
+
   Future<Response> _retry(RequestOptions options) async {
     return dio.fetch(options);
   }
@@ -1077,7 +1077,7 @@ Week 1: Critical Security Fixes
 ├── Frontend: Token Security (2 days)
 └── Mobile: Remove Hardcoded URL (0.5 day)
 
-Week 2: Error Handling & Stability  
+Week 2: Error Handling & Stability
 ├── Frontend: Error Boundary (1 day)
 ├── Frontend: App.tsx Refactor (5 days)
 ├── Backend: Worker Notifications (1 day)
@@ -1237,7 +1237,7 @@ desktop/
 ## Contact
 
 - Backend: Backend Team Lead
-- Frontend: Frontend Team Lead  
+- Frontend: Frontend Team Lead
 - Mobile: Mobile Team Lead
 - Desktop: Desktop Team Lead
 - DevOps: Infrastructure Team

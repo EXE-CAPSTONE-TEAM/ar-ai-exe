@@ -1,8 +1,0 @@
-docs(agents): link skill config to docs/agents
-
-Add the canonical `## Agent skills` block so engineering skills can pick up
-the project's issue tracker (GitHub), triage label vocabulary, and
-single-context domain docs (CONTEXT.md) without re-deriving them from
-.git/config each time.
-
-- AGENTS.md: add Issue tracker / Triage labels / Domain docs section
