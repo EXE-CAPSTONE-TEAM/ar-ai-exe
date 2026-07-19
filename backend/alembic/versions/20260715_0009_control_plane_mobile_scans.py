@@ -1,7 +1,7 @@
 """Add canonical control-plane identity to mobile scan sessions.
 
 Revision ID: 20260715_0009
-Revises: 20260628_0008
+Revises: 20260708_0010
 Create Date: 2026-07-15
 """
 
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 
 revision: str = "20260715_0009"
-down_revision: str | None = "20260628_0008"
+down_revision: str | None = "20260708_0010"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
