@@ -22,10 +22,7 @@ from app.api.control_plane_mobile import (
 )
 from app.api.scan_sessions import scan_response
 from app.core.config import Settings
-from app.core.control_plane_scan_tokens import (
-    create_control_plane_scan_token,
-    decode_control_plane_scan_token,
-)
+from app.core.control_plane_scan_tokens import decode_control_plane_scan_token
 from app.core.scan_identity import ControlPlaneScanPrincipal
 from app.db.database import Base
 from app.models import ScanSession
