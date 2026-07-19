@@ -1,4 +1,4 @@
-package com.example.shoe_visual_customizer_mobile
+package vn.kusshoes.mobile
 
 import io.flutter.embedding.android.FlutterActivity
 

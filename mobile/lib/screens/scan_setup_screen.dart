@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../models/scan_metadata.dart';
+import '../services/backend_api.dart';
 import 'camera_scan_screen.dart';
 
 class ScanSetupScreen extends StatefulWidget {
-  const ScanSetupScreen({super.key});
+  const ScanSetupScreen({required this.api, super.key});
+
+  final BackendApi api;
 
   @override
   State<ScanSetupScreen> createState() => _ScanSetupScreenState();
@@ -177,6 +180,7 @@ class _ScanSetupScreenState extends State<ScanSetupScreen> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => CameraScanScreen(
+          api: widget.api,
           metadata: metadata,
           pass: ScanPass.sideOrbit,
         ),

@@ -108,7 +108,7 @@ class _ScanHomeScreenState extends State<ScanHomeScreen> {
 
   void _openSetup() {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const ScanSetupScreen()),
+      MaterialPageRoute(builder: (_) => ScanSetupScreen(api: _api)),
     );
   }
 }

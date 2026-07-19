@@ -1,14 +1,27 @@
 from typing import Annotated
 
 import jwt
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Body,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.scan_deps import ScanActor, get_scan_actor
 from app.core.config import get_settings
+from app.core.scan_identity import ControlPlaneScanPrincipal
 from app.core.security import decode_kiri_preview_ticket
 from app.db.database import get_db
-from app.models import KiriTaskStatus, ScanSession, ScanStatus, User
+from app.models import KiriTaskStatus, ScanSession, ScanStatus
 from app.schemas.scan import (
     ScanMetadata,
     CropBox,
@@ -45,23 +58,38 @@ ACTIVE_PROCESSING_STATUSES = {
 
 
 def scan_response(scan_session: ScanSession, model_asset_id: str | None) -> ScanSessionResponse:
-    payload = ScanSessionResponse.model_validate(scan_session).model_dump()
-    payload["model_asset_id"] = model_asset_id
-    payload["uploaded_passes"] = ScanSessionService.uploaded_passes(scan_session)
-    payload["required_passes"] = ScanSessionService.required_passes_for(scan_session)
-    if not payload.get("web_design_url"):
-        payload["web_design_url"] = (
-            f"{get_settings().web_app_base_url.rstrip('/')}/editor/{scan_session.project_id}"
-            if scan_session.project_id
+    user_id = scan_session.control_plane_user_id or scan_session.user_id
+    project_id = scan_session.control_plane_project_id or scan_session.project_id
+    if not user_id:
+        raise RuntimeError("Scan session owner invariant is violated.")
+    web_design_url = scan_session.web_design_url
+    if not web_design_url:
+        web_design_url = (
+            f"{get_settings().web_app_base_url.rstrip('/')}/editor/{project_id}"
+            if project_id
             else f"{get_settings().web_app_base_url.rstrip('/')}/design?scanId={scan_session.id}"
         )
-    return ScanSessionResponse.model_validate(payload)
+    return ScanSessionResponse(
+        id=scan_session.id,
+        userId=user_id,
+        projectId=project_id,
+        status=scan_session.status,
+        sourceType=scan_session.source_type,
+        importName=scan_session.import_name,
+        errorMessage=scan_session.error_message,
+        modelAssetId=model_asset_id,
+        webDesignUrl=web_design_url,
+        uploadedPasses=ScanSessionService.uploaded_passes(scan_session),
+        requiredPasses=ScanSessionService.required_passes_for(scan_session),
+        createdAt=scan_session.created_at,
+        updatedAt=scan_session.updated_at,
+    )
 
 
 def status_response(scan_session: ScanSession, service: ScanSessionService) -> ScanStatusResponse:
     return ScanStatusResponse(
         id=scan_session.id,
-        projectId=scan_session.project_id,
+        projectId=scan_session.control_plane_project_id or scan_session.project_id,
         status=scan_session.status,
         errorMessage=scan_session.error_message,
         sourceType=scan_session.source_type,
@@ -79,15 +107,27 @@ def status_response(scan_session: ScanSession, service: ScanSessionService) -> S
 
 @router.post("", response_model=ScanSessionResponse, status_code=status.HTTP_201_CREATED)
 def create_scan_session(
-    current_user: Annotated[User, Depends(get_current_user)],
+    scan_actor: Annotated[ScanActor, Depends(get_scan_actor)],
     db: Annotated[Session, Depends(get_db)],
     payload: Annotated[ScanSessionCreate | None, Body()] = None,
 ) -> ScanSessionResponse:
-    scan_session = ScanSessionService(db).create(
-        current_user,
-        payload.metadata if payload else None,
-        payload.project_id if payload else None,
-    )
+    service = ScanSessionService(db)
+    if isinstance(scan_actor, ControlPlaneScanPrincipal):
+        if payload and payload.project_id and payload.project_id != scan_actor.project_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Scan token does not grant access to that project.",
+            )
+        scan_session = service.create_control_plane(
+            scan_actor,
+            payload.metadata if payload else None,
+        )
+    else:
+        scan_session = service.create(
+            scan_actor,
+            payload.metadata if payload else None,
+            payload.project_id if payload else None,
+        )
     return scan_response(scan_session, None)
 
 
@@ -95,13 +135,13 @@ def create_scan_session(
 async def upload_video(
     scan_session_id: str,
     background_tasks: BackgroundTasks,
-    current_user: Annotated[User, Depends(get_current_user)],
+    scan_actor: Annotated[ScanActor, Depends(get_scan_actor)],
     db: Annotated[Session, Depends(get_db)],
     metadata: Annotated[str, Form()],
     video: Annotated[UploadFile, File()],
 ) -> ScanUploadResponse:
     service = ScanSessionService(db)
-    scan_session = service.get_for_user(scan_session_id, current_user)
+    scan_session = service.get_for_actor(scan_session_id, scan_actor)
     parsed_metadata = parse_metadata(metadata)
     saved_session = service.save_upload(
         scan_session=scan_session,
@@ -125,13 +165,13 @@ async def upload_video(
 async def upload_video_pass(
     scan_session_id: str,
     pass_type: str,
-    current_user: Annotated[User, Depends(get_current_user)],
+    scan_actor: Annotated[ScanActor, Depends(get_scan_actor)],
     db: Annotated[Session, Depends(get_db)],
     video: Annotated[UploadFile, File()],
     metadata: Annotated[str | None, Form()] = None,
 ) -> ScanUploadResponse:
     service = ScanSessionService(db)
-    scan_session = service.get_for_user(scan_session_id, current_user)
+    scan_session = service.get_for_actor(scan_session_id, scan_actor)
     parsed_metadata = parse_metadata(metadata) if metadata else None
     normalized_pass = service.normalize_pass_type(pass_type)
     saved_session = service.save_pass_upload(
@@ -156,22 +196,22 @@ async def upload_video_pass(
 @router.get("/{scan_session_id}", response_model=ScanSessionResponse)
 def get_scan_session(
     scan_session_id: str,
-    current_user: Annotated[User, Depends(get_current_user)],
+    scan_actor: Annotated[ScanActor, Depends(get_scan_actor)],
     db: Annotated[Session, Depends(get_db)],
 ) -> ScanSessionResponse:
     service = ScanSessionService(db)
-    scan_session = service.get_for_user(scan_session_id, current_user)
+    scan_session = service.get_for_actor(scan_session_id, scan_actor)
     return scan_response(scan_session, service.get_model_asset_id(scan_session.id))
 
 
 @router.get("/{scan_session_id}/status", response_model=ScanStatusResponse)
 def get_scan_status(
     scan_session_id: str,
-    current_user: Annotated[User, Depends(get_current_user)],
+    scan_actor: Annotated[ScanActor, Depends(get_scan_actor)],
     db: Annotated[Session, Depends(get_db)],
 ) -> ScanStatusResponse:
     service = ScanSessionService(db)
-    scan_session = service.get_for_user(scan_session_id, current_user)
+    scan_session = service.get_for_actor(scan_session_id, scan_actor)
     return status_response(scan_session, service)
 
 
@@ -179,10 +219,10 @@ def get_scan_status(
 def process_scan_with_kiri(
     scan_session_id: str,
     background_tasks: BackgroundTasks,
-    current_user: Annotated[User, Depends(get_current_user)],
+    scan_actor: Annotated[ScanActor, Depends(get_scan_actor)],
     db: Annotated[Session, Depends(get_db)],
 ) -> KiriStatusResponse:
-    scan_session = ScanSessionService(db).get_for_user(scan_session_id, current_user)
+    scan_session = ScanSessionService(db).get_for_actor(scan_session_id, scan_actor)
     service = KiriPipelineService(db)
     task = service.create_task(scan_session)
     if task.status == KiriTaskStatus.QUEUED:
@@ -193,10 +233,10 @@ def process_scan_with_kiri(
 @router.get("/{scan_session_id}/kiri/status", response_model=KiriStatusResponse)
 def get_kiri_status(
     scan_session_id: str,
-    current_user: Annotated[User, Depends(get_current_user)],
+    scan_actor: Annotated[ScanActor, Depends(get_scan_actor)],
     db: Annotated[Session, Depends(get_db)],
 ) -> KiriStatusResponse:
-    ScanSessionService(db).get_for_user(scan_session_id, current_user)
+    ScanSessionService(db).get_for_actor(scan_session_id, scan_actor)
     service = KiriPipelineService(db)
     task = service.refresh(service.require_task(scan_session_id))
     return service.response(task)
@@ -206,10 +246,10 @@ def get_kiri_status(
 def configure_kiri_crop(
     scan_session_id: str,
     payload: CropBox,
-    current_user: Annotated[User, Depends(get_current_user)],
+    scan_actor: Annotated[ScanActor, Depends(get_scan_actor)],
     db: Annotated[Session, Depends(get_db)],
 ) -> KiriStatusResponse:
-    ScanSessionService(db).get_for_user(scan_session_id, current_user)
+    ScanSessionService(db).get_for_actor(scan_session_id, scan_actor)
     service = KiriPipelineService(db)
     return service.response(service.set_crop(service.require_task(scan_session_id), payload))
 
@@ -219,10 +259,10 @@ def save_kiri_project(
     scan_session_id: str,
     payload: SaveKiriProjectRequest,
     background_tasks: BackgroundTasks,
-    current_user: Annotated[User, Depends(get_current_user)],
+    scan_actor: Annotated[ScanActor, Depends(get_scan_actor)],
     db: Annotated[Session, Depends(get_db)],
 ) -> KiriStatusResponse:
-    ScanSessionService(db).get_for_user(scan_session_id, current_user)
+    ScanSessionService(db).get_for_actor(scan_session_id, scan_actor)
     service = KiriPipelineService(db)
     task = service.queue_save(
         service.require_task(scan_session_id),
@@ -243,9 +283,13 @@ def get_kiri_preview(
     try:
         ticket_scan_id = decode_kiri_preview_ticket(ticket)
     except jwt.InvalidTokenError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid preview ticket.") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid preview ticket."
+        ) from exc
     if ticket_scan_id != scan_session_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid preview ticket.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid preview ticket."
+        )
     service = KiriPipelineService(db)
     task = service.require_task(scan_session_id)
     if not task.source_glb_path:
@@ -266,17 +310,20 @@ def get_kiri_preview(
 def process_scan(
     scan_session_id: str,
     background_tasks: BackgroundTasks,
-    current_user: Annotated[User, Depends(get_current_user)],
+    scan_actor: Annotated[ScanActor, Depends(get_scan_actor)],
     db: Annotated[Session, Depends(get_db)],
 ) -> ScanStatusResponse:
     service = ScanSessionService(db)
-    scan_session = service.get_for_user(scan_session_id, current_user)
+    scan_session = service.get_for_actor(scan_session_id, scan_actor)
     if not service.is_ready_for_processing(scan_session):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Upload both required shoe videos before starting processing.",
         )
-    if scan_session.status in ACTIVE_PROCESSING_STATUSES or scan_session.status == ScanStatus.COMPLETED:
+    if (
+        scan_session.status in ACTIVE_PROCESSING_STATUSES
+        or scan_session.status == ScanStatus.COMPLETED
+    ):
         return status_response(scan_session, service)
 
     readiness = ReconstructionToolchainService().check()

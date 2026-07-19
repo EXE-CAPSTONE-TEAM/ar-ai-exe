@@ -246,6 +246,7 @@ export type Design = {
   modelAssetId: string;
   name: string;
   status: DesignStatus | string;
+  revision: number;
   designConfig: DesignConfig;
   previewGlbUrl: string | null;
   previewStatus: PreviewStatus;

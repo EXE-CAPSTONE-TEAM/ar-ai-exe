@@ -4,6 +4,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
 import '../models/scan_metadata.dart';
+import '../services/backend_api.dart';
 import '../widgets/scan_guide_overlay.dart';
 import 'upload_progress_screen.dart';
 
@@ -38,12 +39,14 @@ enum ScanPass {
 
 class CameraScanScreen extends StatefulWidget {
   const CameraScanScreen({
+    required this.api,
     required this.metadata,
     required this.pass,
     this.sideVideoFile,
     super.key,
   });
 
+  final BackendApi api;
   final ScanMetadata metadata;
   final ScanPass pass;
   final XFile? sideVideoFile;
@@ -162,6 +165,7 @@ class _CameraScanScreenState extends State<CameraScanScreen> {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (_) => CameraScanScreen(
+            api: widget.api,
             metadata: widget.metadata,
             pass: ScanPass.topOrbit,
             sideVideoFile: video,
@@ -179,6 +183,7 @@ class _CameraScanScreenState extends State<CameraScanScreen> {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => UploadProgressScreen(
+          api: widget.api,
           metadata: widget.metadata,
           sideVideoFile: sideVideoFile,
           topVideoFile: video,

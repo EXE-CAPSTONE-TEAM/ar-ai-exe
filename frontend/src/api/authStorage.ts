@@ -1,9 +1,10 @@
 const TOKEN_STORAGE_KEY = "shoe-customizer-token";
 const ACCESS_TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]+$/;
 const MAX_ACCESS_TOKEN_LENGTH = 4096;
+let memoryAccessToken: string | null = null;
 
 export function storedAccessToken(): string | null {
-  const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+  const token = memoryAccessToken ?? localStorage.getItem(TOKEN_STORAGE_KEY);
   if (!token) {
     return null;
   }
@@ -16,10 +17,21 @@ export function storedAccessToken(): string | null {
 }
 
 export function storeAccessToken(accessToken: string): void {
+  memoryAccessToken = null;
   localStorage.setItem(TOKEN_STORAGE_KEY, sanitizeAccessToken(accessToken));
 }
 
+export function storeEphemeralAccessToken(accessToken: string): void {
+  memoryAccessToken = sanitizeAccessToken(accessToken);
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
+export function hasEphemeralAccessToken(): boolean {
+  return memoryAccessToken !== null;
+}
+
 export function clearAccessToken(): void {
+  memoryAccessToken = null;
   localStorage.removeItem(TOKEN_STORAGE_KEY);
 }
 

@@ -1,10 +1,14 @@
+import hmac
+import uuid
 from pathlib import Path
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.scan_identity import ControlPlaneScanPrincipal
 from app.models import (
     ModelAsset,
     Project,
@@ -17,7 +21,7 @@ from app.models import (
 )
 from app.schemas.scan import ScanMetadata
 from app.services.scan_metadata import scan_metadata_bytes
-from app.services.storage import get_storage_service
+from app.services.storage import StorageService, get_storage_service
 
 
 class ScanSessionService:
@@ -31,10 +35,10 @@ class ScanSessionService:
         "top_orbit": "top_orbit",
     }
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, storage: StorageService | None = None):
         self.db = db
         self.settings = get_settings()
-        self.storage = get_storage_service()
+        self.storage = storage or get_storage_service()
 
     def create(
         self,
@@ -68,15 +72,113 @@ class ScanSessionService:
         self.db.refresh(scan_session)
         return scan_session
 
+    def create_control_plane(
+        self,
+        principal: ControlPlaneScanPrincipal,
+        metadata: ScanMetadata | None = None,
+    ) -> ScanSession:
+        existing = self.db.scalar(
+            select(ScanSession).where(ScanSession.control_plane_project_id == principal.project_id)
+        )
+        if existing:
+            return self._require_matching_control_plane(existing, principal)
+
+        scan_session = ScanSession(
+            id=f"scan_cp_{uuid.UUID(principal.project_id).hex}",
+            user_id=None,
+            project_id=None,
+            control_plane_user_id=principal.user_id,
+            control_plane_project_id=principal.project_id,
+            control_plane_completion_token=principal.completion_token,
+            control_plane_project_name=principal.project_name,
+            web_design_url=principal.web_project_url,
+        )
+        self.db.add(scan_session)
+        if metadata:
+            metadata_object = self.storage.put_bytes(
+                self._metadata_key(scan_session.id),
+                scan_metadata_bytes(metadata),
+                "application/json",
+            )
+            scan_session.metadata_path = metadata_object.key
+            scan_session.metadata_size_bytes = metadata_object.size_bytes
+            scan_session.metadata_content_type = metadata_object.content_type
+            scan_session.metadata_checksum = metadata_object.checksum
+
+        try:
+            self.db.commit()
+        except IntegrityError:
+            self.db.rollback()
+            existing = self.db.scalar(
+                select(ScanSession).where(
+                    ScanSession.control_plane_project_id == principal.project_id
+                )
+            )
+            if existing:
+                return self._require_matching_control_plane(existing, principal)
+            raise
+        self.db.refresh(scan_session)
+        return scan_session
+
     def get_for_user(self, scan_session_id: str, user: User) -> ScanSession:
         scan_session = self.db.get(ScanSession, scan_session_id)
         if not scan_session or scan_session.user_id != user.id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan session not found.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Scan session not found."
+            )
+        return scan_session
+
+    def get_for_actor(
+        self,
+        scan_session_id: str,
+        actor: User | ControlPlaneScanPrincipal,
+    ) -> ScanSession:
+        if isinstance(actor, User):
+            return self.get_for_user(scan_session_id, actor)
+        scan_session = self.db.get(ScanSession, scan_session_id)
+        if (
+            not scan_session
+            or scan_session.control_plane_user_id != actor.user_id
+            or scan_session.control_plane_project_id != actor.project_id
+            or not scan_session.control_plane_completion_token
+            or not hmac.compare_digest(
+                scan_session.control_plane_completion_token,
+                actor.completion_token,
+            )
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Scan session not found.",
+            )
         return scan_session
 
     def get_model_asset_id(self, scan_session_id: str) -> str | None:
-        asset = self.db.scalar(select(ModelAsset).where(ModelAsset.scan_session_id == scan_session_id))
+        scan_session = self.db.get(ScanSession, scan_session_id)
+        if scan_session and scan_session.control_plane_model_asset_id:
+            return scan_session.control_plane_model_asset_id
+        asset = self.db.scalar(
+            select(ModelAsset).where(ModelAsset.scan_session_id == scan_session_id)
+        )
         return asset.id if asset else None
+
+    @staticmethod
+    def _require_matching_control_plane(
+        scan_session: ScanSession,
+        principal: ControlPlaneScanPrincipal,
+    ) -> ScanSession:
+        if (
+            scan_session.control_plane_user_id != principal.user_id
+            or not scan_session.control_plane_completion_token
+            or not hmac.compare_digest(
+                scan_session.control_plane_completion_token,
+                principal.completion_token,
+            )
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This canonical project already has a different scan session.",
+            )
+        return scan_session
 
     @classmethod
     def uploaded_passes(cls, scan_session: ScanSession) -> list[str]:
@@ -93,7 +195,9 @@ class ScanSessionService:
     def is_ready_for_processing(cls, scan_session: ScanSession) -> bool:
         if scan_session.source_type == ScanSource.IMPORT:
             return scan_session.status == ScanStatus.COMPLETED
-        return all(pass_type in cls.uploaded_passes(scan_session) for pass_type in cls.required_passes)
+        return all(
+            pass_type in cls.uploaded_passes(scan_session) for pass_type in cls.required_passes
+        )
 
     @classmethod
     def required_passes_for(cls, scan_session: ScanSession) -> list[str]:
@@ -172,7 +276,9 @@ class ScanSessionService:
 
         scan_session.web_design_url = self.web_design_url(scan_session.id, scan_session.project_id)
         scan_session.status = (
-            ScanStatus.UPLOADED if self.is_ready_for_processing(scan_session) else ScanStatus.WAITING_FOR_UPLOADS
+            ScanStatus.UPLOADED
+            if self.is_ready_for_processing(scan_session)
+            else ScanStatus.WAITING_FOR_UPLOADS
         )
         if scan_session.project:
             scan_session.project.status = ProjectStatus.PROCESSING
@@ -229,7 +335,9 @@ class ScanSessionService:
         if project_id:
             project = self.db.get(Project, project_id)
             if not project or project.user_id != user.id:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Project not found."
+                )
             return project
 
         project = Project(

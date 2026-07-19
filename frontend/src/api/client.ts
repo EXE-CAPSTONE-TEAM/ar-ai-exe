@@ -15,6 +15,7 @@ import type {
   User,
 } from "../types";
 import { clearAccessToken, storeAccessToken, storedAccessToken } from "./authStorage";
+import { getActiveEditorSession } from "./editorLaunch";
 import { apiUrl, getApiBaseUrl } from "./runtimeConfig";
 
 const CSRF_COOKIE_NAME = "kusshoes_csrf_token";
@@ -53,6 +54,9 @@ async function errorMessage(response: Response): Promise<string> {
     if (payload?.error?.message) {
       return String(payload.error.message);
     }
+    if (typeof payload.message === "string") {
+      return payload.message;
+    }
     return typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
   } catch {
     return response.statusText;
@@ -88,6 +92,70 @@ function downloadBlob(blob: Blob, filename: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+async function uploadEditorDesignAsset(
+  file: File,
+  sourceType: DesignAssetSource,
+): Promise<DesignAsset> {
+  const allowedContentTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
+  if (!allowedContentTypes.has(file.type)) {
+    throw new ApiError("KusStudio supports PNG, JPEG, or WebP design assets.", 400);
+  }
+  if (file.size < 1 || file.size > 5 * 1024 * 1024) {
+    throw new ApiError("Design assets must be between 1 byte and 5 MiB.", 400);
+  }
+
+  const upload = await request<{
+    upload_url: string;
+    asset_id: string;
+    expires_in: number;
+  }>("/api/v1/editor/assets/upload-url", {
+    method: "POST",
+    body: JSON.stringify({
+      asset_type: "sticker",
+      filename: file.name,
+      content_type: file.type,
+    }),
+  });
+  const signedUrl = new URL(upload.upload_url);
+  if (
+    (signedUrl.protocol !== "https:" && signedUrl.protocol !== "http:") ||
+    signedUrl.username ||
+    signedUrl.password
+  ) {
+    throw new ApiError("KusShoes returned an invalid asset upload URL.", 502);
+  }
+  const uploaded = await fetch(signedUrl, {
+    method: "PUT",
+    credentials: "omit",
+    headers: { "Content-Type": file.type },
+    body: file,
+  });
+  if (!uploaded.ok) {
+    throw new ApiError("Unable to upload the design asset.", uploaded.status);
+  }
+
+  const asset = await request<{
+    id: string;
+    original_filename: string | null;
+    file_size_bytes: number | null;
+    mime_type: string | null;
+    created_at: string;
+  }>("/api/v1/editor/assets/confirm", {
+    method: "POST",
+    body: JSON.stringify({ asset_id: upload.asset_id, file_size_bytes: file.size }),
+  });
+  return {
+    id: asset.id,
+    sourceType,
+    fileName: asset.original_filename ?? file.name,
+    contentType: asset.mime_type ?? file.type,
+    sizeBytes: asset.file_size_bytes ?? file.size,
+    checksum: "",
+    downloadUrl: `/api/v1/editor/assets/${asset.id}/content`,
+    createdAt: asset.created_at,
+  };
+}
+
 export const api = {
   get baseUrl(): string {
     return getApiBaseUrl();
@@ -98,7 +166,9 @@ export const api = {
   },
 
   logout(): void {
+    const wasEditorSession = Boolean(getActiveEditorSession());
     clearAccessToken();
+    if (wasEditorSession) return;
     void fetch(apiUrl("/api/auth/logout"), {
       method: "POST",
       credentials: "include",
@@ -191,6 +261,9 @@ export const api = {
   },
 
   async uploadDesignAsset(file: File, sourceType: DesignAssetSource): Promise<DesignAsset> {
+    if (getActiveEditorSession()) {
+      return uploadEditorDesignAsset(file, sourceType);
+    }
     const form = new FormData();
     form.append("file", file);
     form.append("sourceType", sourceType);
@@ -208,7 +281,8 @@ export const api = {
   },
 
   async fetchDesignAssetBlobUrl(assetId: string): Promise<string> {
-    const response = await fetch(apiUrl(`/api/design-assets/${assetId}/download`), {
+    const path = getActiveEditorSession() ? `/api/v1/editor/assets/${assetId}/content` : `/api/design-assets/${assetId}/download`;
+    const response = await fetch(apiUrl(path), {
       credentials: "include",
       headers: authHeader(),
     });

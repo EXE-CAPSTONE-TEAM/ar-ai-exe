@@ -52,6 +52,25 @@ class Settings(BaseSettings):
     rq_job_timeout_seconds: int = 7200
     enable_inline_bake_fallback: bool = False
 
+    # Stateless control-plane bake worker. Capabilities carry short-lived
+    # storage access; this service never receives object-store credentials.
+    control_plane_service_token: str = ""
+    worker_allowed_storage_origins: list[str] = []
+    worker_request_timeout_seconds: int = 600
+    worker_max_source_size_mb: int = 500
+    worker_max_asset_size_mb: int = 5
+    worker_max_output_size_mb: int = 2048
+    worker_max_concurrent_bakes: int = 1
+
+    # Outbound bridge to the canonical KusShoes control plane.
+    # Never share this credential with the inbound bake worker token.
+    control_plane_api_base_url: str = ""
+    control_plane_mobile_service_token: str = ""
+    control_plane_mobile_request_timeout_seconds: int = 30
+    control_plane_scan_token_minutes: int = 360
+    control_plane_allowed_storage_origins: list[str] = []
+    control_plane_max_output_size_mb: int = 500
+
     enable_real_reconstruction: bool = True
     colmap_bin: str = "colmap"
     openmvs_bin_dir: str = ""

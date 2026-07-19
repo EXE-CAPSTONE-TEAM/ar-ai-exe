@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import tempfile
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 from fastapi import HTTPException, status
@@ -22,6 +23,7 @@ from app.models import (
 )
 from app.schemas.scan import CropBox, KiriStatusResponse
 from app.services.command_runner import CommandRunner
+from app.services.control_plane_mobile import ControlPlaneMobileClient
 from app.services.crop_baker import CropBakeService
 from app.services.file_helpers import write_json
 from app.services.kiri_client import KiriApiClient, KiriError
@@ -45,6 +47,7 @@ class KiriPipelineService:
         runner: CommandRunner | None = None,
         crop_baker: CropBakeService | None = None,
         mesh_cleanup: MeshCleanupService | None = None,
+        control_plane: ControlPlaneMobileClient | None = None,
     ) -> None:
         self.db = db
         self.settings = get_settings()
@@ -53,13 +56,17 @@ class KiriPipelineService:
         self.runner = runner or CommandRunner()
         self.crop_baker = crop_baker or CropBakeService()
         self.mesh_cleanup = mesh_cleanup or MeshCleanupService()
+        self.control_plane = control_plane or ControlPlaneMobileClient()
         self.asset_service = ModelAssetService(db, storage=self.storage)
         self.scan_service = ScanSessionService(db)
 
     def create_task(self, scan_session: ScanSession) -> KiriScanTask:
         existing = self.get_task(scan_session.id)
         if existing:
-            if existing.status in {KiriTaskStatus.FAILED, KiriTaskStatus.EXPIRED} and not existing.source_glb_path:
+            if (
+                existing.status in {KiriTaskStatus.FAILED, KiriTaskStatus.EXPIRED}
+                and not existing.source_glb_path
+            ):
                 existing.provider_serialize = None
                 existing.provider_status = None
                 existing.status = KiriTaskStatus.QUEUED
@@ -99,7 +106,9 @@ class KiriPipelineService:
     def require_task(self, scan_session_id: str) -> KiriScanTask:
         task = self.get_task(scan_session_id)
         if not task:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Kiri task not found.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Kiri task not found."
+            )
         return task
 
     def start_processing(self, scan_session_id: str) -> None:
@@ -172,9 +181,17 @@ class KiriPipelineService:
         self.db.refresh(task)
         return task
 
-    def queue_save(self, task: KiriScanTask, project_name: str, crop_box: CropBox | None) -> KiriScanTask:
+    def queue_save(
+        self, task: KiriScanTask, project_name: str, crop_box: CropBox | None
+    ) -> KiriScanTask:
         if task.status == KiriTaskStatus.READY:
             return task
+        normalized_project_name = project_name.strip()
+        if task.scan_session.control_plane_project_id and len(normalized_project_name) > 100:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Canonical project name must contain at most 100 characters.",
+            )
         if crop_box:
             task.crop_box_json = crop_box.model_dump_json(by_alias=True)
         if not task.crop_box_json or not task.source_glb_path:
@@ -191,8 +208,10 @@ class KiriPipelineService:
         task.status = KiriTaskStatus.CROP_BAKING
         task.error_message = None
         task.scan_session.status = ScanStatus.CROP_BAKING
+        if task.scan_session.control_plane_project_id:
+            task.scan_session.control_plane_project_name = normalized_project_name
         if task.scan_session.project:
-            task.scan_session.project.name = project_name.strip()
+            task.scan_session.project.name = normalized_project_name
             task.scan_session.project.status = ProjectStatus.PROCESSING
         self.db.commit()
         self.db.refresh(task)
@@ -207,6 +226,7 @@ class KiriPipelineService:
                 select(ModelAsset).where(ModelAsset.scan_session_id == scan_session_id)
             )
             if existing:
+                self._publish_control_plane_model(task, existing)
                 self._mark_ready(task)
                 return
             crop_box = self.crop_box(task)
@@ -244,7 +264,7 @@ class KiriPipelineService:
                 )
                 package_path = model_dir / "shoe_obj_package.zip"
                 self._zip_obj_package(model_dir, package_path)
-                self.asset_service.create_from_files(
+                existing = self.asset_service.create_from_files(
                     scan_session_id,
                     ModelAssetFiles(
                         glb=model_dir / "shoe_preview.glb",
@@ -257,22 +277,27 @@ class KiriPipelineService:
                     ),
                     source_type=ProjectSourceType.SCAN,
                 )
+            self._publish_control_plane_model(task, existing)
             self._mark_ready(task)
         except Exception as exc:
             self._fail(task, str(exc) or "Kiri crop bake failed.")
 
     def response(self, task: KiriScanTask) -> KiriStatusResponse:
         crop_box = self.crop_box(task)
-        model_asset_id = task.scan_session.model_asset.id if task.scan_session.model_asset else None
+        model_asset_id = task.scan_session.control_plane_model_asset_id
+        if not model_asset_id and task.scan_session.model_asset:
+            model_asset_id = task.scan_session.model_asset.id
+        project_id = task.scan_session.control_plane_project_id or task.scan_session.project_id
         preview_url = None
-        if task.source_glb_path and task.status not in {KiriTaskStatus.FAILED, KiriTaskStatus.EXPIRED}:
+        if task.source_glb_path and task.status not in {
+            KiriTaskStatus.FAILED,
+            KiriTaskStatus.EXPIRED,
+        }:
             ticket = create_kiri_preview_ticket(task.scan_session_id)
-            preview_url = (
-                f"/api/scan-sessions/{task.scan_session_id}/kiri/preview?ticket={ticket}"
-            )
+            preview_url = f"/api/scan-sessions/{task.scan_session_id}/kiri/preview?ticket={ticket}"
         return KiriStatusResponse(
             scanSessionId=task.scan_session_id,
-            projectId=task.scan_session.project_id,
+            projectId=project_id,
             status=task.status,
             providerStatus=task.provider_status,
             progress=self.progress(task.status),
@@ -317,8 +342,7 @@ class KiriPipelineService:
                 "-i",
                 str(top_path),
                 "-filter_complex",
-                f"[0:v]{scale_filter}[v0];[1:v]{scale_filter}[v1];"
-                "[v0][v1]concat=n=2:v=1:a=0[outv]",
+                f"[0:v]{scale_filter}[v0];[1:v]{scale_filter}[v1];[v0][v1]concat=n=2:v=1:a=0[outv]",
                 "-map",
                 "[outv]",
                 "-t",
@@ -372,7 +396,9 @@ class KiriPipelineService:
                         candidates.append(item)
                 if not candidates:
                     raise KiriError("Kiri ZIP does not contain a GLB model.")
-                candidate = sorted(candidates, key=lambda item: (len(item.filename), item.filename))[0]
+                candidate = sorted(
+                    candidates, key=lambda item: (len(item.filename), item.filename)
+                )[0]
                 glb_bytes = archive.read(candidate)
         except zipfile.BadZipFile as exc:
             raise KiriError("Kiri returned an invalid model ZIP.") from exc
@@ -391,6 +417,41 @@ class KiriPipelineService:
                 "quality_report.json",
             ]:
                 archive.write(model_dir / name, name)
+
+    def _publish_control_plane_model(
+        self,
+        task: KiriScanTask,
+        model_asset: ModelAsset,
+    ) -> None:
+        scan_session = task.scan_session
+        project_id = scan_session.control_plane_project_id
+        if not project_id:
+            return
+        if (
+            not scan_session.control_plane_user_id
+            or not scan_session.control_plane_completion_token
+        ):
+            raise RuntimeError("Canonical scan ownership is incomplete.")
+        if scan_session.control_plane_model_asset_id and scan_session.control_plane_published_at:
+            return
+        if not model_asset.glb_size_bytes:
+            raise RuntimeError("Generated GLB size metadata is missing.")
+
+        result = self.control_plane.publish_glb(
+            completion_token=scan_session.control_plane_completion_token,
+            expected_project_id=project_id,
+            project_name=scan_session.control_plane_project_name or "Untitled shoe scan",
+            web_project_url=scan_session.web_design_url or "",
+            file_size_bytes=model_asset.glb_size_bytes,
+            chunks=self.storage.iter_bytes(model_asset.glb_path),
+        )
+        if result.project_id != project_id or result.status != "ready":
+            raise RuntimeError("Control-plane publish result is inconsistent.")
+
+        scan_session.control_plane_model_asset_id = result.model_asset_id
+        scan_session.control_plane_published_at = datetime.now(UTC).replace(tzinfo=None)
+        scan_session.web_design_url = result.web_project_url
+        self.db.commit()
 
     def _mark_ready(self, task: KiriScanTask) -> None:
         task.status = KiriTaskStatus.READY

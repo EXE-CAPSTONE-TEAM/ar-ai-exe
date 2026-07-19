@@ -7,12 +7,14 @@ import 'kiri_crop_screen.dart';
 
 class UploadProgressScreen extends StatefulWidget {
   const UploadProgressScreen({
+    required this.api,
     required this.metadata,
     required this.sideVideoFile,
     required this.topVideoFile,
     super.key,
   });
 
+  final BackendApi api;
   final ScanMetadata metadata;
   final XFile sideVideoFile;
   final XFile topVideoFile;
@@ -22,7 +24,7 @@ class UploadProgressScreen extends StatefulWidget {
 }
 
 class _UploadProgressScreenState extends State<UploadProgressScreen> {
-  final _api = BackendApi();
+  BackendApi get _api => widget.api;
   double _progress = 0;
   int _step = 0;
   String _message = 'Preparing upload';
@@ -44,9 +46,13 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
       _uploading = true;
       _progress = 0;
       _step = 0;
-      _message = 'Creating scan session';
+      _message = 'Preparing project';
     });
     try {
+      await _api.beginScan(
+        projectName: '${widget.metadata.type} scan',
+      );
+      _safeSetState(() => _message = 'Creating scan session');
       final scanSessionId =
           await _api.createScanSession(metadata: widget.metadata);
       _safeSetState(() {
@@ -83,6 +89,7 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (_) => KiriCropScreen(
+            api: widget.api,
             scanSessionId: result.scanSessionId,
             initialStatus: kiriStatus,
           ),

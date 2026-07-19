@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Blanket usesCleartextTraffic is disabled for the release build. This scopes
+  plain-http back on for LAN dev testing only (host machine + emulator
+  loopback) so backend_api.dart's KUSSHOES_BASE_URL/COMPUTE_BASE_URL can point
+  at an http:// dev server without shipping cleartext for prod domains.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">172.16.1.232</domain>
+    </domain-config>
+</network-security-config>

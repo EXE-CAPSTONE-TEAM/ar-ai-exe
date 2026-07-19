@@ -1,0 +1,7 @@
+fix(ci): restrict sonarcloud fail step to workflow_dispatch only
+
+The "Fail workflow" step was triggering for pull_request events targeting
+main because github.ref == refs/heads/main is true for PRs too. This broke
+the dev->main PR pipeline. Now the step only fires on workflow_dispatch
+on main, matching the original intent: fail only when a developer manually
+triggers the scan (not on automated PR checks).

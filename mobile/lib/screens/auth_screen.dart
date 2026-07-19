@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../app/app_shell.dart';
 import '../services/backend_api.dart';
+import 'otp_verify_screen.dart';
+
+const _seededAdminEmail = 'admin@kusshoes.vn';
+const _seededAdminPassword = 'Admin@12345';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({
@@ -20,6 +24,7 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   final _api = BackendApi();
   final _nameController = TextEditingController();
+  final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isRegister = false;
@@ -29,6 +34,7 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _usernameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -66,6 +72,13 @@ class _AuthScreenState extends State<AuthScreen> {
                       decoration: const InputDecoration(labelText: 'Name'),
                     ),
                   if (_isRegister) const SizedBox(height: 12),
+                  if (_isRegister)
+                    TextField(
+                      controller: _usernameController,
+                      textInputAction: TextInputAction.next,
+                      decoration: const InputDecoration(labelText: 'Username'),
+                    ),
+                  if (_isRegister) const SizedBox(height: 12),
                   TextField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
@@ -87,9 +100,9 @@ class _AuthScreenState extends State<AuthScreen> {
                   ),
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
-                    onPressed: _isBusy ? null : _demoLogin,
+                    onPressed: _isBusy ? null : _seededAdminLogin,
                     icon: const Icon(Icons.science_outlined),
-                    label: const Text('Use local demo'),
+                    label: const Text('Use seeded admin (local)'),
                   ),
                   if (_error != null) ...[
                     const SizedBox(height: 14),
@@ -113,18 +126,20 @@ class _AuthScreenState extends State<AuthScreen> {
     });
     try {
       if (_isRegister) {
-        await _api.register(
+        final pending = await _api.register(
           name: _nameController.text.trim(),
+          username: _usernameController.text.trim(),
           email: _emailController.text.trim(),
           password: _passwordController.text,
         );
+        _openOtpVerify(pending.userId, pending.email);
       } else {
         await _api.login(
           email: _emailController.text.trim(),
           password: _passwordController.text,
         );
+        _openScanner();
       }
-      _openScanner();
     } catch (error) {
       setState(() => _error = 'Authentication failed: $error');
     } finally {
@@ -134,16 +149,19 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
-  Future<void> _demoLogin() async {
+  Future<void> _seededAdminLogin() async {
     setState(() {
       _isBusy = true;
       _error = null;
     });
     try {
-      await _api.demoLogin();
+      await _api.login(
+        email: _seededAdminEmail,
+        password: _seededAdminPassword,
+      );
       _openScanner();
     } catch (error) {
-      setState(() => _error = 'Demo login failed: $error');
+      setState(() => _error = 'Seeded admin login failed: $error');
     } finally {
       if (mounted) {
         setState(() => _isBusy = false);
@@ -160,6 +178,23 @@ class _AuthScreenState extends State<AuthScreen> {
         builder: (_) => AppShell(
           themeMode: widget.themeMode,
           onThemeModeChanged: widget.onThemeModeChanged ?? (_) {},
+        ),
+      ),
+    );
+  }
+
+  void _openOtpVerify(String userId, String email) {
+    if (!mounted) {
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => OtpVerifyScreen(
+          api: _api,
+          userId: userId,
+          email: email,
+          themeMode: widget.themeMode,
+          onThemeModeChanged: widget.onThemeModeChanged,
         ),
       ),
     );

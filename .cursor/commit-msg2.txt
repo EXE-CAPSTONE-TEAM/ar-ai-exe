@@ -1,0 +1,15 @@
+fix(security): sanitize validation error inputs before serializing
+
+ValidationExceptionHandler previously forwarded the raw `input` value from
+Pydantic into the JSON response payload. When the value is not JSON
+serializable (e.g. an UploadFile, a custom object, or anything else Pydantic
+could not coerce), FastAPI attempted to render the response and raised
+TypeError, leaking 500-style behavior to clients and exposing internal types
+in the meantime. Sanitize each `input` field with a JSON-safe coercion so
+the handler always returns a serializable 422 envelope.
+
+- backend/app/core/errors.py: introduce _safe_input coercion and route the
+  validation handler through it
+- backend/tests/test_validation_error_safety.py: silence unused-variable lint
+
+Regression coverage: test_validation_error_response_is_json_serializable.

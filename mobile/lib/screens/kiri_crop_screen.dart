@@ -9,11 +9,13 @@ import '../services/backend_api.dart';
 
 class KiriCropScreen extends StatefulWidget {
   const KiriCropScreen({
+    required this.api,
     required this.scanSessionId,
     required this.initialStatus,
     super.key,
   });
 
+  final BackendApi api;
   final String scanSessionId;
   final KiriStatus initialStatus;
 
@@ -22,7 +24,7 @@ class KiriCropScreen extends StatefulWidget {
 }
 
 class _KiriCropScreenState extends State<KiriCropScreen> {
-  final _api = BackendApi();
+  BackendApi get _api => widget.api;
   final _projectNameController = TextEditingController(text: 'My shoe scan');
   Timer? _pollTimer;
   late KiriStatus _status;

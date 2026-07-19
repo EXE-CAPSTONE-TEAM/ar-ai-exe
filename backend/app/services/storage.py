@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -22,6 +23,8 @@ class StorageService(Protocol):
     def put_bytes(self, key: str, data: bytes, content_type: str) -> StoredObject: ...
 
     def get_bytes(self, key: str) -> bytes: ...
+
+    def iter_bytes(self, key: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]: ...
 
     def exists(self, key: str) -> bool: ...
 
@@ -61,8 +64,21 @@ class LocalStorageService:
     def get_bytes(self, key: str) -> bytes:
         path = self._resolve(key)
         if not path.exists() or not path.is_file():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stored object not found.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Stored object not found."
+            )
         return path.read_bytes()
+
+    def iter_bytes(self, key: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+        path = self._resolve(key)
+        if not path.exists() or not path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Stored object not found.",
+            )
+        with path.open("rb") as stream:
+            while chunk := stream.read(max(1, chunk_size)):
+                yield chunk
 
     def exists(self, key: str) -> bool:
         return self._resolve(key).is_file()
@@ -121,8 +137,27 @@ class S3StorageService:
         try:
             response = self.client.get_object(Bucket=self.bucket, Key=safe_key)
         except Exception as exc:  # boto3 raises service-specific exceptions dynamically
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stored object not found.") from exc
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Stored object not found."
+            ) from exc
         return response["Body"].read()
+
+    def iter_bytes(self, key: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+        safe_key = normalize_key(key)
+        try:
+            response = self.client.get_object(Bucket=self.bucket, Key=safe_key)
+        except Exception as exc:  # boto3 raises service-specific exceptions dynamically
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Stored object not found.",
+            ) from exc
+        body = response["Body"]
+        try:
+            for chunk in body.iter_chunks(chunk_size=max(1, chunk_size)):
+                if chunk:
+                    yield chunk
+        finally:
+            body.close()
 
     def exists(self, key: str) -> bool:
         safe_key = normalize_key(key)

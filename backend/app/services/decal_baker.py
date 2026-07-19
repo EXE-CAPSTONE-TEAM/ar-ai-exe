@@ -18,12 +18,15 @@ from app.services.command_runner import CommandRunner
 from app.services.customization_zones import require_customizable_target_name
 
 
-DATA_URI_RE = re.compile(r"^data:(?P<mime>image/(?:png|jpe?g|svg\+xml))(?P<meta>[^,]*),(?P<data>.*)$", re.I | re.S)
+DATA_URI_RE = re.compile(
+    r"^data:(?P<mime>image/(?:png|jpe?g|webp|svg\+xml))(?P<meta>[^,]*),(?P<data>.*)$", re.I | re.S
+)
 MIME_EXTENSIONS = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
     "image/jpg": ".jpg",
     "image/svg+xml": ".svg",
+    "image/webp": ".webp",
 }
 MAX_STICKERS = 50
 MAX_STICKER_BYTES = 5 * 1024 * 1024
@@ -38,9 +41,15 @@ class DecalBakeService:
         self.runner = CommandRunner()
         self.asset_resolver = asset_resolver
 
-    def bake(self, source_glb: Path, output_dir: Path, design_config: dict[str, Any]) -> bool:
+    def bake(
+        self,
+        source_glb: Path,
+        output_dir: Path,
+        design_config: dict[str, Any],
+        force_material_bake: bool = False,
+    ) -> bool:
         decals = self._prepare_decals(output_dir, design_config)
-        if not decals:
+        if not decals and not force_material_bake:
             return False
 
         work_dir = output_dir / "_work"
@@ -102,7 +111,9 @@ class DecalBakeService:
                 )
         return True
 
-    def _prepare_decals(self, output_dir: Path, design_config: dict[str, Any]) -> list[dict[str, Any]]:
+    def _prepare_decals(
+        self, output_dir: Path, design_config: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         decals = [
             *self._prepare_stickers(output_dir, design_config),
             *self._prepare_texts(output_dir, design_config),
@@ -123,7 +134,9 @@ class DecalBakeService:
             "metallic": self._number(material.get("metallic"), 0.0, minimum=0.0, maximum=1.0),
         }
 
-    def _prepare_stickers(self, output_dir: Path, design_config: dict[str, Any]) -> list[dict[str, Any]]:
+    def _prepare_stickers(
+        self, output_dir: Path, design_config: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         raw_stickers = design_config.get("stickers", [])
         if not isinstance(raw_stickers, list):
             raise HTTPException(
@@ -189,12 +202,12 @@ class DecalBakeService:
             }
             if normal:
                 decal["normal"] = normal
-            prepared.append(
-                decal
-            )
+            prepared.append(decal)
         return prepared
 
-    def _prepare_texts(self, output_dir: Path, design_config: dict[str, Any]) -> list[dict[str, Any]]:
+    def _prepare_texts(
+        self, output_dir: Path, design_config: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         raw_texts = design_config.get("texts", [])
         if not isinstance(raw_texts, list):
             raise HTTPException(
@@ -257,7 +270,9 @@ class DecalBakeService:
                     "targetMeshName": target_mesh_name,
                     "width": width,
                     "height": height,
-                    "offset": self._number(text_layer.get("offset"), 0.004, minimum=0.0, maximum=0.1),
+                    "offset": self._number(
+                        text_layer.get("offset"), 0.004, minimum=0.0, maximum=0.1
+                    ),
                     "projectionDepth": self._number(
                         text_layer.get("projectionDepth"),
                         max(scale * 1.5, 0.05),
@@ -273,7 +288,9 @@ class DecalBakeService:
                 prepared.append(decal)
                 continue
 
-            image_path = self._write_text_svg(value, font, color, stickers_dir, f"{index:03d}_{text_id}")
+            image_path = self._write_text_svg(
+                value, font, color, stickers_dir, f"{index:03d}_{text_id}"
+            )
 
             decal = {
                 "id": text_id,
@@ -304,7 +321,9 @@ class DecalBakeService:
             prepared.append(decal)
         return prepared
 
-    def _write_sticker_image(self, image_url: str, output_dir: Path, basename: str) -> tuple[Path, str]:
+    def _write_sticker_image(
+        self, image_url: str, output_dir: Path, basename: str
+    ) -> tuple[Path, str]:
         match = DATA_URI_RE.match(image_url.strip())
         if not match:
             raise HTTPException(
@@ -344,7 +363,9 @@ class DecalBakeService:
         image_path.write_bytes(data)
         return image_path, mime_type
 
-    def _write_asset_image(self, asset_id: str, output_dir: Path, basename: str) -> tuple[Path, str]:
+    def _write_asset_image(
+        self, asset_id: str, output_dir: Path, basename: str
+    ) -> tuple[Path, str]:
         resolver = getattr(self, "asset_resolver", None)
         if resolver is None:
             raise HTTPException(
@@ -430,7 +451,10 @@ class DecalBakeService:
     def _vec3(self, value: Any, default: list[float]) -> list[float]:
         if not isinstance(value, list | tuple) or len(value) != 3:
             return default
-        return [self._number(item, fallback, minimum=-100.0, maximum=100.0) for item, fallback in zip(value, default)]
+        return [
+            self._number(item, fallback, minimum=-100.0, maximum=100.0)
+            for item, fallback in zip(value, default)
+        ]
 
     def _normal(self, value: Any) -> list[float] | None:
         if not isinstance(value, list | tuple) or len(value) != 3:
@@ -443,7 +467,7 @@ class DecalBakeService:
 
     def _write_blender_script(self, path: Path) -> None:
         path.write_text(
-            r'''
+            r"""
 import json
 import math
 import pathlib
@@ -1099,6 +1123,6 @@ try:
 except Exception:
     traceback.print_exc()
     sys.exit(1)
-'''.lstrip(),
+""".lstrip(),
             encoding="utf-8",
         )

@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -157,10 +157,38 @@ class Project(Base):
 
 class ScanSession(Base):
     __tablename__ = "scan_sessions"
+    __table_args__ = (
+        CheckConstraint(
+            "("
+            "user_id IS NOT NULL AND "
+            "control_plane_user_id IS NULL AND "
+            "control_plane_project_id IS NULL AND "
+            "control_plane_completion_token IS NULL"
+            ") OR ("
+            "user_id IS NULL AND "
+            "control_plane_user_id IS NOT NULL AND "
+            "control_plane_project_id IS NOT NULL AND "
+            "control_plane_completion_token IS NOT NULL"
+            ")",
+            name="ck_scan_sessions_owner_plane",
+        ),
+        UniqueConstraint(
+            "control_plane_project_id",
+            name="uq_scan_sessions_control_plane_project_id",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("scan"))
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
-    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    project_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.id"), nullable=True, index=True
+    )
+    control_plane_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    control_plane_project_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    control_plane_completion_token: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    control_plane_model_asset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    control_plane_project_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    control_plane_published_at: Mapped[datetime | None] = mapped_column(nullable=True)
     status: Mapped[str] = mapped_column(String(32), default=ScanStatus.CREATED, index=True)
     source_type: Mapped[str] = mapped_column(String(32), default=ScanSource.SCAN, index=True)
     import_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
@@ -185,7 +213,7 @@ class ScanSession(Base):
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    user: Mapped[User] = relationship(back_populates="scan_sessions")
+    user: Mapped[User | None] = relationship(back_populates="scan_sessions")
     project: Mapped[Project | None] = relationship(back_populates="scan_sessions")
     model_asset: Mapped["ModelAsset | None"] = relationship(
         back_populates="scan_session",
@@ -278,7 +306,9 @@ class AssetVersion(Base):
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("assetv"))
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), index=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="RESTRICT"), index=True
+    )
     asset_type: Mapped[str] = mapped_column(String(32), index=True)
     logical_key: Mapped[str] = mapped_column(String(120), default="primary", index=True)
     version_number: Mapped[int] = mapped_column(Integer)
@@ -315,7 +345,9 @@ class AssetVersionFile(Base):
         ),
     )
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("assetfile"))
+    id: Mapped[str] = mapped_column(
+        String(64), primary_key=True, default=lambda: new_id("assetfile")
+    )
     asset_version_id: Mapped[str] = mapped_column(
         ForeignKey("asset_versions.id", ondelete="CASCADE"), index=True
     )
@@ -345,7 +377,9 @@ class AssetVersionLegacyLink(Base):
         ),
     )
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("assetlink"))
+    id: Mapped[str] = mapped_column(
+        String(64), primary_key=True, default=lambda: new_id("assetlink")
+    )
     asset_version_id: Mapped[str] = mapped_column(
         ForeignKey("asset_versions.id", ondelete="CASCADE"), index=True
     )
@@ -361,7 +395,9 @@ class Design(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("design"))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
-    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
+    project_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.id"), nullable=True, index=True
+    )
     model_asset_id: Mapped[str | None] = mapped_column(
         ForeignKey("model_assets.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -375,7 +411,9 @@ class Design(Base):
     preview_glb_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     preview_glb_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
     preview_glb_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    preview_status: Mapped[str] = mapped_column(String(32), default=DesignPreviewStatus.NONE, index=True)
+    preview_status: Mapped[str] = mapped_column(
+        String(32), default=DesignPreviewStatus.NONE, index=True
+    )
     preview_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     preview_updated_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
@@ -430,8 +468,12 @@ class Job(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: new_id("job"))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
-    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
-    design_id: Mapped[str | None] = mapped_column(ForeignKey("designs.id"), nullable=True, index=True)
+    project_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.id"), nullable=True, index=True
+    )
+    design_id: Mapped[str | None] = mapped_column(
+        ForeignKey("designs.id"), nullable=True, index=True
+    )
     type: Mapped[str] = mapped_column(String(32), index=True)
     status: Mapped[str] = mapped_column(String(32), default=JobStatus.QUEUED, index=True)
     progress: Mapped[int] = mapped_column(Integer, default=0)

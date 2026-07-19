@@ -31,7 +31,13 @@ import {
   restartDesktopBackend,
 } from "./api/desktopRuntime";
 import type { ModelImportPayload } from "./api/client";
-import { editorClient } from "./api/editorClient";
+import { EditorApiError, editorClient } from "./api/editorClient";
+import type { DesignConflictPayload } from "./api/editorClient";
+import {
+  clearEditorLaunchSession,
+  completeEditorLaunch,
+  getKusShoesApiBaseUrl,
+} from "./api/editorLaunch";
 import { setApiBaseUrl } from "./api/runtimeConfig";
 import { EditorPanels } from "./components/Editor/EditorPanels";
 import { AppShell } from "./components/Layout/AppShell";
@@ -71,7 +77,7 @@ type DesktopApiMode = "local" | "cloud";
 
 export function App() {
   const isDesktopShell = useMemo(() => isDesktopShellLocation(), []);
-  const editorProjectId = useMemo(() => editorProjectIdFromLocation(isDesktopShell), [isDesktopShell]);
+  const [editorProjectId, setEditorProjectId] = useState(() => editorProjectIdFromLocation(isDesktopShell));
   const isProjectEditor = Boolean(editorProjectId);
   const [desktopRuntime, setDesktopRuntime] = useState<DesktopRuntime | null>(null);
   const [desktopRuntimeError, setDesktopRuntimeError] = useState<string | null>(null);
@@ -99,6 +105,11 @@ export function App() {
   const [bakedLayerIds, setBakedLayerIds] = useState<string[]>([]);
   const [savedConfigFingerprint, setSavedConfigFingerprint] = useState<string | null>(null);
   const [design, setDesign] = useState<Design | null>(null);
+  const [designConflict, setDesignConflict] = useState<{
+    payload: DesignConflictPayload;
+    rejectedConfig: DesignConfig;
+    rejectedName: string;
+  } | null>(null);
   const [previewErrorMessage, setPreviewErrorMessage] = useState<string | null>(null);
   const [designName, setDesignName] = useState("Untitled shoe design");
   const [config, setConfig] = useState<DesignConfig | null>(null);
@@ -126,64 +137,77 @@ export function App() {
   const [isDesktopDetailsOpen, setIsDesktopDetailsOpen] = useState(false);
   const assetPreviewUrlsRef = useRef<Set<string>>(new Set());
 
-  // Handle Tauri Custom Protocol Deep Link and Single Instance
+  // Deep links carry only an opaque, one-time ticket. Bearer credentials never enter URLs or storage.
   useEffect(() => {
     if (!isDesktopShell) return;
 
-    const handleDeepLinkUrl = (urlStr: string) => {
-      console.log("Caught deep link URL:", urlStr);
-      try {
-        // Expected format: kusshoes-editor://editor/proj_123?token=abc
-        const url = new URL(urlStr.replace("kusshoes-editor://", "http://localhost/"));
-        const pathParts = url.pathname.split("/");
-        const projectId = pathParts[2] || pathParts[1];
-        const token = url.searchParams.get("token");
+    let disposed = false;
+    let launchInProgress = false;
+    let launchCompleted = false;
 
-        if (token) {
-          localStorage.setItem("shoe-customizer-token", token);
+    const reportListenerError = (error: unknown) => {
+      if (disposed || launchCompleted) return;
+      const message = friendlyInlineMessage(messageFromError(error));
+      setDesktopLaunchError(`Desktop launch listener failed: ${message}`);
+    };
+
+    const handleDeepLinkUrl = async (urlValue: string) => {
+      if (launchInProgress || launchCompleted) return;
+      launchInProgress = true;
+      setDesktopLaunchError(null);
+      setStatusMessage("AUTH_CHECKING");
+      try {
+        const session = await completeEditorLaunch(urlValue);
+        if (disposed) {
+          api.logout();
+          clearEditorLaunchSession();
+          return;
         }
         localStorage.setItem("kusshoes-desktop-api-mode", "cloud");
-
-        if (projectId) {
-          // Force page reload to apply new token and projectId
-          window.location.href = `/?desktop=1&projectId=${projectId}`;
+        setApiBaseUrl(getKusShoesApiBaseUrl());
+        setDesktopApiMode("cloud");
+        setEditorProjectId(session.projectId);
+        const params = new URLSearchParams({ desktop: "1", projectId: session.projectId });
+        window.history.replaceState({}, "", `/?${params.toString()}`);
+        setStatusMessage("PROJECT_LOADING");
+        launchCompleted = true;
+      } catch (error) {
+        if (!disposed) {
+          const message = friendlyInlineMessage(messageFromError(error));
+          setDesktopLaunchError(message);
+          setStatusMessage(message);
         }
-      } catch (err) {
-        console.error("Failed to parse deep link URL:", err);
+      } finally {
+        launchInProgress = false;
       }
     };
 
-    // 1. Listen for active running deep link events from other single instances
     let unsubscribeSingleInstance: (() => void) | undefined;
-    listen<string[]>("single-instance-deep-link", (event) => {
-      const args = event.payload;
-      console.log("Single instance args received:", args);
-      const deepLinkArg = args.find((arg) => arg.startsWith("kusshoes-editor://"));
-      if (deepLinkArg) {
-        handleDeepLinkUrl(deepLinkArg);
-      }
-    }).then((unsub) => {
-      unsubscribeSingleInstance = unsub;
-    }).catch((err) => {
-      console.error("Failed to listen to single-instance-deep-link:", err);
-    });
+    void listen<string[]>("single-instance-deep-link", (event) => {
+      const deepLinkArg = event.payload.find((arg) => arg.startsWith("kusshoes-editor://"));
+      if (deepLinkArg) void handleDeepLinkUrl(deepLinkArg);
+    })
+      .then((unsubscribe) => {
+        if (disposed) unsubscribe();
+        else unsubscribeSingleInstance = unsubscribe;
+      })
+      .catch(reportListenerError);
 
-    // 2. Listen to startup deep links using the plugin
     let unsubscribeDeepLink: (() => void) | undefined;
-    onOpenUrl((urls) => {
-      console.log("Tauri deep link URLs received:", urls);
-      if (urls.length > 0) {
-        handleDeepLinkUrl(urls[0]);
-      }
-    }).then((unsub) => {
-      unsubscribeDeepLink = unsub;
-    }).catch((err) => {
-      console.error("Failed to listen to tauri-plugin-deep-link onOpenUrl:", err);
-    });
+    void onOpenUrl((urls) => {
+      const deepLinkUrl = urls.find((value) => value.startsWith("kusshoes-editor://"));
+      if (deepLinkUrl) void handleDeepLinkUrl(deepLinkUrl);
+    })
+      .then((unsubscribe) => {
+        if (disposed) unsubscribe();
+        else unsubscribeDeepLink = unsubscribe;
+      })
+      .catch(reportListenerError);
 
     return () => {
-      if (unsubscribeSingleInstance) unsubscribeSingleInstance();
-      if (unsubscribeDeepLink) unsubscribeDeepLink();
+      disposed = true;
+      unsubscribeSingleInstance?.();
+      unsubscribeDeepLink?.();
     };
   }, [isDesktopShell]);
 
@@ -194,27 +218,33 @@ export function App() {
     if (desktopApiMode === "cloud") {
       setDesktopRuntime(null);
       setEditorReadiness(null);
-      if (!DESKTOP_CLOUD_API_BASE_URL) {
+      try {
+        const cloudApiBaseUrl = isProjectEditor
+          ? getKusShoesApiBaseUrl()
+          : DESKTOP_CLOUD_API_BASE_URL;
+        if (!cloudApiBaseUrl) {
+          throw new Error("The desktop cloud API URL is not configured.");
+        }
+        setApiBaseUrl(cloudApiBaseUrl);
+        setDesktopRuntimeError(null);
+        setDesktopCloudReady(true);
+      } catch (error) {
         setDesktopCloudReady(false);
-        setDesktopRuntimeError("VITE_DESKTOP_CLOUD_API_BASE_URL is not configured.");
-        return;
+        setDesktopRuntimeError(friendlyInlineMessage(messageFromError(error)));
       }
-      setApiBaseUrl(DESKTOP_CLOUD_API_BASE_URL);
-      setDesktopRuntimeError(null);
-      setDesktopCloudReady(true);
       setIsDesktopRuntimeLoading(false);
       return;
     }
     setDesktopCloudReady(false);
     void refreshDesktopRuntime();
-  }, [desktopApiMode, isDesktopShell]);
+  }, [desktopApiMode, isDesktopShell, isProjectEditor]);
 
   useEffect(() => {
-    if (!isDesktopShell || desktopApiMode !== "cloud" || !desktopCloudReady || user || !api.hasToken()) {
+    if (!isDesktopShell || desktopApiMode !== "cloud" || !desktopCloudReady || isProjectEditor || user || !api.hasToken()) {
       return;
     }
     api.me().then(setUser).catch(() => api.logout());
-  }, [desktopApiMode, desktopCloudReady, isDesktopShell, user]);
+  }, [desktopApiMode, desktopCloudReady, isDesktopShell, isProjectEditor, user]);
 
   useEffect(() => {
     if (!isDesktopShell || desktopApiMode !== "cloud" || !desktopCloudReady || !user || isProjectEditor) {
@@ -511,6 +541,12 @@ export function App() {
   function logout() {
     api.logout();
     setUser(null);
+    clearEditorLaunchSession();
+    setEditorProjectId(null);
+    if (isDesktopShell) {
+      const params = new URLSearchParams({ desktop: "1" });
+      window.history.replaceState({}, "", `/?${params.toString()}`);
+    }
     setScanSession(null);
     setModelAsset(null);
     setModelUrl(null);
@@ -737,7 +773,7 @@ export function App() {
     const draftConfig = withEditorMetadata(await prepareBakeConfig(config));
     const savedDesign =
       isProjectEditor && editorProjectId
-        ? await editorClient.saveDesign(editorProjectId, draftConfig, designName)
+        ? await editorClient.saveDesign(editorProjectId, draftConfig, designName, design?.revision ?? 0)
         : design
           ? await api.updateDesign(design.id, designName, draftConfig)
           : await api.createDesign(modelAsset.id, designName, draftConfig);
@@ -771,11 +807,54 @@ export function App() {
       }
       return savedDesign;
     } catch (error) {
+      if (error instanceof EditorApiError && error.code === "DESIGN_REVISION_CONFLICT" && error.conflict && config) {
+        setDesignConflict({ payload: error.conflict, rejectedConfig: config, rejectedName: designName });
+        setStatusMessage("DESIGN_CONFLICT: Thiết kế đã được lưu ở nơi khác. Chọn tải lại hoặc giữ bản nháp của bạn.");
+        return null;
+      }
       setStatusMessage(messageFromError(error));
       return null;
     } finally {
       setIsSaving(false);
     }
+  }
+
+  async function resolveConflictReloadLatest() {
+    if (!designConflict || !editorProjectId) {
+      return;
+    }
+    try {
+      const latest = await editorClient.getDesign(editorProjectId);
+      setDesign(latest);
+      setDesignName(latest.name);
+      setConfig(normalizeFixedMaterial(await hydrateDesignAssetPreviewUrls(latest.designConfig)));
+      setSavedConfigFingerprint(configFingerprint(latest.designConfig));
+      setDesignConflict(null);
+      setStatusMessage("DESIGN_RELOADED");
+    } catch (error) {
+      setStatusMessage(messageFromError(error));
+    }
+  }
+
+  function resolveConflictKeepLocal() {
+    if (!designConflict || !editorProjectId) {
+      return;
+    }
+    const key = `kus-conflict-draft:${editorProjectId}:${Date.now()}`;
+    try {
+      window.localStorage.setItem(
+        key,
+        JSON.stringify({
+          designConfig: designConflict.rejectedConfig,
+          name: designConflict.rejectedName,
+          savedAt: new Date().toISOString(),
+        }),
+      );
+      setStatusMessage(`DRAFT_KEPT_LOCALLY: Bản nháp của bạn đã được lưu tại "${key}". Tải lại rồi áp dụng lại thủ công.`);
+    } catch (error) {
+      setStatusMessage(messageFromError(error));
+    }
+    setDesignConflict(null);
   }
 
   async function bakePreview() {
@@ -1213,6 +1292,13 @@ export function App() {
             <div className="desktop-editor-body">
               <section className="desktop-stage" aria-label="3D design preview">
                 <EditorStatusNotice message={statusMessage} isBusy={isEditorBusy} compact />
+                {designConflict && (
+                  <DesignConflictBanner
+                    payload={designConflict.payload}
+                    onReload={resolveConflictReloadLatest}
+                    onKeepLocal={resolveConflictKeepLocal}
+                  />
+                )}
                 <ModelViewer
                   modelUrl={activeModelUrl}
                   config={config}
@@ -1341,6 +1427,13 @@ export function App() {
             </section>
 
             <EditorStatusNotice message={statusMessage} isBusy={isEditorBusy} />
+            {designConflict && (
+              <DesignConflictBanner
+                payload={designConflict.payload}
+                onReload={resolveConflictReloadLatest}
+                onKeepLocal={resolveConflictKeepLocal}
+              />
+            )}
 
             {isDesktopShell && (
               <DesktopRuntimePanel
@@ -1454,6 +1547,42 @@ function EditorStatusNotice({ message, isBusy, compact = false }: { message: str
       <div className="editor-status-copy">
         <h2>{notice.title}</h2>
         <p>{notice.detail}</p>
+      </div>
+    </section>
+  );
+}
+
+function DesignConflictBanner({
+  payload,
+  onReload,
+  onKeepLocal,
+}: {
+  payload: DesignConflictPayload;
+  onReload: () => void;
+  onKeepLocal: () => void;
+}) {
+  return (
+    <section className="editor-status-notice error design-conflict-banner" role="alert" aria-live="assertive">
+      <span className="editor-status-icon">
+        <AlertTriangle size={20} aria-hidden="true" />
+      </span>
+      <div className="editor-status-copy">
+        <h2>Thiết kế đã bị thay đổi ở nơi khác</h2>
+        <p>
+          Bản mới nhất là phiên bản {payload.currentRevision} (cập nhật lúc{" "}
+          {new Date(payload.currentUpdatedAt).toLocaleString()}). Chọn tải lại bản mới nhất, hoặc
+          giữ bản nháp của bạn để tự áp dụng lại sau.
+        </p>
+        <div className="design-conflict-actions">
+          <button type="button" onClick={onReload}>
+            <RefreshCw size={16} aria-hidden="true" />
+            Tải lại bản mới nhất
+          </button>
+          <button type="button" onClick={onKeepLocal}>
+            <HardDrive size={16} aria-hidden="true" />
+            Giữ bản nháp của tôi
+          </button>
+        </div>
       </div>
     </section>
   );
