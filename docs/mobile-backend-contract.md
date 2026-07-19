@@ -1,8 +1,8 @@
 # Mobile ↔ Backend Configuration Specification
 
-**Document Version:** 1.0  
-**Created:** July 8, 2026  
-**Status:** Active  
+**Document Version:** 1.0
+**Created:** July 8, 2026
+**Status:** Active
 **Last Updated:** July 8, 2026
 
 ---
@@ -63,10 +63,10 @@ ALLOWED_ORIGINS = [
     # Production mobile apps
     "https://kusshoes.vn",
     "https://www.kusshoes.vn",
-    
+
     # Staging
     "https://staging.kusshoes.vn",
-    
+
     # Local development (chỉ dev)
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -658,5 +658,5 @@ model_assets (created after processing)
 
 ---
 
-*Document maintained by: Backend Team*  
+*Document maintained by: Backend Team*
 *Last review: July 8, 2026*
