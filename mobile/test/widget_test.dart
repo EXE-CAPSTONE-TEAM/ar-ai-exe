@@ -30,6 +30,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Shoe Scanner'), findsOneWidget);
-    expect(find.text('Use local demo'), findsOneWidget);
+    expect(find.text('Use seeded admin (local)'), findsOneWidget);
   });
 }
