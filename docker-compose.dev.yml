@@ -21,6 +21,9 @@ services:
     restart: unless-stopped
     env_file:
       - ./deploy/backend.dev.env
+    # Presigned URL do KusShoes cấp trỏ tới MinIO chạy ở compose khác trên host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./backend/app:/app/app
       - ./backend/alembic:/app/alembic
