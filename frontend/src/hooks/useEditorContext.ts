@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { EditorApiError, editorClient } from "../api/editorClient";
 import type { EditorContext, User } from "../types";
@@ -17,6 +17,11 @@ export function useEditorContext(projectId: string | null) {
   const [user, setUser] = useState<User | null>(null);
   const [context, setContext] = useState<EditorContext | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  const reload = useCallback(() => {
+    setReloadToken((current) => current + 1);
+  }, []);
 
   useEffect(() => {
     if (!projectId) {
@@ -66,7 +71,7 @@ export function useEditorContext(projectId: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, reloadToken]);
 
-  return { state, user, context, errorMessage };
+  return { state, user, context, errorMessage, reload };
 }

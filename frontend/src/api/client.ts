@@ -156,6 +156,55 @@ async function uploadEditorDesignAsset(
   };
 }
 
+const SOURCE_MODEL_MAX_BYTES = 500 * 1024 * 1024;
+
+/**
+ * Import thủ công model 3D gốc cho project KusShoes (tạm thời đứng thay luồng
+ * scan mobile). KusShoes chỉ cho phép khi project chưa có model canonical.
+ */
+async function importEditorSourceModel(file: File): Promise<void> {
+  if (!/\.glb$/i.test(file.name)) {
+    throw new ApiError("KusShoes chỉ nhận file .glb làm model gốc của project.", 400);
+  }
+  if (file.size < 1 || file.size > SOURCE_MODEL_MAX_BYTES) {
+    throw new ApiError("File GLB phải nằm trong khoảng 1 byte đến 500 MiB.", 400);
+  }
+
+  const upload = await request<{
+    upload_url: string;
+    asset_id: string;
+  }>("/api/v1/editor/assets/upload-url", {
+    method: "POST",
+    body: JSON.stringify({
+      asset_type: "source_model",
+      filename: file.name,
+      content_type: "model/gltf-binary",
+    }),
+  });
+  const signedUrl = new URL(upload.upload_url);
+  if (
+    (signedUrl.protocol !== "https:" && signedUrl.protocol !== "http:") ||
+    signedUrl.username ||
+    signedUrl.password
+  ) {
+    throw new ApiError("KusShoes returned an invalid asset upload URL.", 502);
+  }
+  const uploaded = await fetch(signedUrl, {
+    method: "PUT",
+    credentials: "omit",
+    headers: { "Content-Type": "model/gltf-binary" },
+    body: file,
+  });
+  if (!uploaded.ok) {
+    throw new ApiError("Không upload được model GLB lên KusShoes.", uploaded.status);
+  }
+
+  await request<unknown>("/api/v1/editor/assets/confirm", {
+    method: "POST",
+    body: JSON.stringify({ asset_id: upload.asset_id, file_size_bytes: file.size }),
+  });
+}
+
 export const api = {
   get baseUrl(): string {
     return getApiBaseUrl();
@@ -258,6 +307,14 @@ export const api = {
       throw new ApiError(await errorMessage(response), response.status);
     }
     return response.json() as Promise<ModelImportResponse>;
+  },
+
+  /** Import model gốc cho project cloud (KusShoes) — xem docs/integration-runbook.md. */
+  async importProjectSourceModel(file: File): Promise<void> {
+    if (!getActiveEditorSession()) {
+      throw new ApiError("Chức năng này chỉ dùng khi KusStudio mở project từ KusShoes.", 400);
+    }
+    return importEditorSourceModel(file);
   },
 
   async uploadDesignAsset(file: File, sourceType: DesignAssetSource): Promise<DesignAsset> {

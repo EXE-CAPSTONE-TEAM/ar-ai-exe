@@ -43,6 +43,7 @@ import { EditorPanels } from "./components/Editor/EditorPanels";
 import { AppShell } from "./components/Layout/AppShell";
 import { MetadataPanel } from "./components/MetadataPanel/MetadataPanel";
 import { ModelImportPanel } from "./components/ModelImport/ModelImportPanel";
+import { SourceModelImportCard } from "./components/ModelImport/SourceModelImportCard";
 import { ModelViewer } from "./components/ModelViewer/ModelViewer";
 import { useEditorContext } from "./hooks/useEditorContext";
 import type {
@@ -134,6 +135,7 @@ export function App() {
   const [desktopLaunchError, setDesktopLaunchError] = useState<string | null>(null);
   const [isDesktopDemoOpening, setIsDesktopDemoOpening] = useState(false);
   const [isDesktopImportOpen, setIsDesktopImportOpen] = useState(false);
+  const [sourceImportError, setSourceImportError] = useState<string | null>(null);
   const [isDesktopDetailsOpen, setIsDesktopDetailsOpen] = useState(false);
   const assetPreviewUrlsRef = useRef<Set<string>>(new Set());
 
@@ -656,6 +658,27 @@ export function App() {
     }
   }
 
+  /**
+   * Import thủ công model gốc vào project KusShoes (thay cho luồng scan mobile).
+   * KusShoes chỉ nhận khi project chưa có model canonical.
+   */
+  async function importProjectSourceModel(file: File) {
+    setIsImporting(true);
+    setSourceImportError(null);
+    setStatusMessage("Đang import model 3D vào project KusShoes.");
+    try {
+      await api.importProjectSourceModel(file);
+      setStatusMessage("Đã import model. Đang tải lại project.");
+      editorContext.reload();
+    } catch (error) {
+      const message = friendlyInlineMessage(messageFromError(error));
+      setSourceImportError(message);
+      setStatusMessage(message);
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
   async function importModel(payload: ModelImportPayload) {
     setIsImporting(true);
     setStatusMessage("Importing model");
@@ -1076,6 +1099,12 @@ export function App() {
   }
 
   const isDesktopEditorLayout = isDesktopShell && isProjectEditor && Boolean(user);
+  // Project cloud chưa có model gốc → cho import thủ công ngay trong KusStudio.
+  const needsSourceModelImport =
+    isProjectEditor &&
+    Boolean(editorContext.context) &&
+    !editorContext.context?.modelAsset &&
+    editorPermissions.canEdit;
 
   return (
     <AppShell
@@ -1292,6 +1321,13 @@ export function App() {
             <div className="desktop-editor-body">
               <section className="desktop-stage" aria-label="3D design preview">
                 <EditorStatusNotice message={statusMessage} isBusy={isEditorBusy} compact />
+                {needsSourceModelImport && (
+                  <SourceModelImportCard
+                    isBusy={isImporting}
+                    errorMessage={sourceImportError}
+                    onImport={importProjectSourceModel}
+                  />
+                )}
                 {designConflict && (
                   <DesignConflictBanner
                     payload={designConflict.payload}
@@ -1393,13 +1429,22 @@ export function App() {
                   </div>
                 </div>
                 {isProjectEditor ? (
-                  <ProjectRouteSummary
-                    projectId={editorProjectId ?? ""}
-                    state={editorContext.state}
-                    canEdit={editorPermissions.canEdit}
-                    canBake={editorPermissions.canBake}
-                    canExport={editorPermissions.canExport}
-                  />
+                  <>
+                    <ProjectRouteSummary
+                      projectId={editorProjectId ?? ""}
+                      state={editorContext.state}
+                      canEdit={editorPermissions.canEdit}
+                      canBake={editorPermissions.canBake}
+                      canExport={editorPermissions.canExport}
+                    />
+                    {needsSourceModelImport && (
+                      <SourceModelImportCard
+                        isBusy={isImporting}
+                        errorMessage={sourceImportError}
+                        onImport={importProjectSourceModel}
+                      />
+                    )}
+                  </>
                 ) : (
                   <>
                     <div className="scan-loader">
