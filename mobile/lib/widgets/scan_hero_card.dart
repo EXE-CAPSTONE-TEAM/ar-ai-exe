@@ -12,10 +12,10 @@ class ScanHeroCard extends StatelessWidget {
       aspectRatio: 0.76,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF101010) : const Color(0xFFFFF4ED),
+          color: isDark ? AppTheme.darkCard : const Color(0xFFFFF4ED),
           borderRadius: BorderRadius.circular(26),
           border: Border.all(
-            color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFFFC5AC),
+            color: isDark ? AppTheme.darkCardBorder : const Color(0xFFFFC5AC),
             width: 1.4,
           ),
         ),
@@ -28,59 +28,68 @@ class ScanHeroCard extends StatelessWidget {
               alignment: const Alignment(0, -0.82),
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xE60C0C0C) : Colors.white,
+                  color: isDark ? const Color(0xEE0A0A0C) : Colors.white,
                   borderRadius: BorderRadius.circular(999),
                   border: Border.all(
                     color: isDark
-                        ? const Color(0xFF444444)
+                        ? const Color(0x40FF5A36)
                         : const Color(0xFFFFC5AC),
-                    width: 1.6,
+                    width: 1.4,
                   ),
+                  boxShadow: [
+                    if (isDark)
+                      BoxShadow(
+                        color: AppTheme.orange.withValues(alpha: 0.12),
+                        blurRadius: 16,
+                      ),
+                  ],
                 ),
                 child: Padding(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   child: Text(
-                    'Align your shoe inside the frame\nand rotate 360°',
+                    'ĐẶT ĐÔI GIÀY VÀO KHUNG VÀ XOAY 360°',
                     textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          height: 1.35,
-                          fontWeight: FontWeight.w900,
-                        ),
+                    style: AppTheme.headingFont(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.8,
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
                   ),
                 ),
               ),
             ),
             Positioned(
-              left: 20,
-              right: 20,
-              bottom: 20,
+              left: 18,
+              right: 18,
+              bottom: 18,
               child: Row(
                 children: [
                   const CircleAvatar(
-                      radius: 6, backgroundColor: AppTheme.orange),
-                  const SizedBox(width: 9),
+                      radius: 5, backgroundColor: AppTheme.statusScanned),
+                  const SizedBox(width: 8),
                   Text(
-                    'LIVE · DEPTH ON',
-                    style: TextStyle(
+                    'RADAR 360° · AI SENSING',
+                    style: AppTheme.monoFont(
+                      fontSize: 10.5,
                       color: Theme.of(context)
                           .colorScheme
                           .onSurface
-                          .withValues(alpha: 0.64),
-                      letterSpacing: 2,
-                      fontWeight: FontWeight.w700,
+                          .withValues(alpha: 0.7),
+                      letterSpacing: 1.4,
                     ),
                   ),
                   const Spacer(),
                   Text(
-                    '1080P · 60FPS',
-                    style: TextStyle(
+                    '720P / 1080P',
+                    style: AppTheme.monoFont(
+                      fontSize: 10.5,
                       color: Theme.of(context)
                           .colorScheme
                           .onSurface
-                          .withValues(alpha: 0.64),
-                      letterSpacing: 2,
-                      fontWeight: FontWeight.w700,
+                          .withValues(alpha: 0.7),
+                      letterSpacing: 1.4,
                     ),
                   ),
                 ],
@@ -146,21 +155,22 @@ class _ScanFramePainter extends CustomPainter {
     );
 
     _drawCorners(canvas, size);
-    _drawFoot(canvas, size);
+    _draw360OrbitRing(canvas, size);
+    _drawSneakerContour(canvas, size);
 
-    final center = Paint()..color = AppTheme.orange.withValues(alpha: 0.85);
-    canvas.drawCircle(Offset(size.width * 0.5, size.height * 0.52), 6, center);
+    final center = Paint()..color = AppTheme.orange.withValues(alpha: 0.9);
+    canvas.drawCircle(Offset(size.width * 0.5, size.height * 0.50), 4.5, center);
   }
 
   void _drawCorners(Canvas canvas, Size size) {
     final paint = Paint()
       ..color = AppTheme.orange
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.2
+      ..strokeWidth = 2.8
       ..strokeCap = StrokeCap.square;
-    const inset = 22.0;
-    const len = 22.0;
-    const radius = 18.0;
+    const inset = 18.0;
+    const len = 20.0;
+    const radius = 14.0;
 
     final path = Path()
       ..moveTo(inset, inset + len)
@@ -189,34 +199,104 @@ class _ScanFramePainter extends CustomPainter {
     canvas.drawPath(path, paint);
   }
 
-  void _drawFoot(Canvas canvas, Size size) {
-    final foot = Path()
-      ..moveTo(size.width * 0.43, size.height * 0.79)
-      ..cubicTo(size.width * 0.35, size.height * 0.68, size.width * 0.34,
-          size.height * 0.44, size.width * 0.36, size.height * 0.33)
-      ..cubicTo(size.width * 0.39, size.height * 0.20, size.width * 0.48,
-          size.height * 0.20, size.width * 0.56, size.height * 0.22)
-      ..cubicTo(size.width * 0.67, size.height * 0.27, size.width * 0.68,
-          size.height * 0.45, size.width * 0.70, size.height * 0.62)
-      ..cubicTo(size.width * 0.72, size.height * 0.80, size.width * 0.61,
-          size.height * 0.86, size.width * 0.50, size.height * 0.84)
-      ..cubicTo(size.width * 0.47, size.height * 0.83, size.width * 0.45,
-          size.height * 0.82, size.width * 0.43, size.height * 0.79);
+  void _draw360OrbitRing(Canvas canvas, Size size) {
+    final center = Offset(size.width * 0.5, size.height * 0.53);
+    final rect = Rect.fromCenter(
+      center: center,
+      width: size.width * 0.82,
+      height: size.height * 0.44,
+    );
 
-    final paint = Paint()
-      ..color = AppTheme.orange.withValues(alpha: 0.72)
+    final orbitPaint = Paint()
+      ..color = AppTheme.orange.withValues(alpha: 0.35)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.5
-      ..strokeCap = StrokeCap.round;
+      ..strokeWidth = 1.4;
 
-    for (final metric in foot.computeMetrics()) {
+    // Draw dashed elliptical orbit
+    final ellipsePath = Path()..addOval(rect);
+    for (final metric in ellipsePath.computeMetrics()) {
       var distance = 0.0;
       while (distance < metric.length) {
-        final segment = metric.extractPath(distance, distance + 8);
-        canvas.drawPath(segment, paint);
-        distance += 16;
+        final segment = metric.extractPath(distance, distance + 6);
+        canvas.drawPath(segment, orbitPaint);
+        distance += 14;
       }
     }
+
+    // 4 Cardinal tick marks on the orbit
+    final tickPaint = Paint()
+      ..color = AppTheme.orange
+      ..strokeWidth = 2.2;
+    canvas.drawLine(
+        Offset(center.dx, rect.top - 5), Offset(center.dx, rect.top + 5), tickPaint);
+    canvas.drawLine(Offset(center.dx, rect.bottom - 5),
+        Offset(center.dx, rect.bottom + 5), tickPaint);
+    canvas.drawLine(Offset(rect.left - 5, center.dy),
+        Offset(rect.left + 5, center.dy), tickPaint);
+    canvas.drawLine(Offset(rect.right - 5, center.dy),
+        Offset(rect.right + 5, center.dy), tickPaint);
+  }
+
+  void _drawSneakerContour(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    // Sneaker Profile Silhouette Path
+    final sneaker = Path()
+      // Heel bottom
+      ..moveTo(w * 0.22, h * 0.58)
+      // Sole baseline
+      ..lineTo(w * 0.76, h * 0.58)
+      // Toe spring curve
+      ..cubicTo(w * 0.82, h * 0.56, w * 0.84, h * 0.51, w * 0.80, h * 0.46)
+      // Toe box cap
+      ..cubicTo(w * 0.75, h * 0.42, w * 0.68, h * 0.42, w * 0.62, h * 0.44)
+      // Vamp & Eyestay up to collar
+      ..lineTo(w * 0.47, h * 0.33)
+      // Tongue & Ankle Collar
+      ..cubicTo(w * 0.42, h * 0.32, w * 0.35, h * 0.33, w * 0.32, h * 0.38)
+      // Heel collar down to counter
+      ..cubicTo(w * 0.30, h * 0.42, w * 0.21, h * 0.47, w * 0.20, h * 0.53)
+      // Back of heel to sole
+      ..cubicTo(w * 0.19, h * 0.56, w * 0.20, h * 0.58, w * 0.22, h * 0.58);
+
+    // Sole cushion accent line
+    final soleAccent = Path()
+      ..moveTo(w * 0.21, h * 0.60)
+      ..lineTo(w * 0.77, h * 0.60)
+      ..cubicTo(w * 0.80, h * 0.59, w * 0.81, h * 0.57, w * 0.78, h * 0.56)
+      ..lineTo(w * 0.21, h * 0.56)
+      ..close();
+
+    final glowPaint = Paint()
+      ..color = AppTheme.orange.withValues(alpha: 0.88)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0
+      ..strokeCap = StrokeCap.round;
+
+    final fillSolePaint = Paint()
+      ..color = AppTheme.orange.withValues(alpha: 0.16)
+      ..style = PaintingStyle.fill;
+
+    canvas.drawPath(soleAccent, fillSolePaint);
+
+    // Render dashed sneaker contour
+    for (final metric in sneaker.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        final segment = metric.extractPath(distance, distance + 10);
+        canvas.drawPath(segment, glowPaint);
+        distance += 18;
+      }
+    }
+
+    // Draw sneaker lace notches
+    final lacePaint = Paint()
+      ..color = AppTheme.orange.withValues(alpha: 0.75)
+      ..strokeWidth = 2.0;
+    canvas.drawLine(Offset(w * 0.49, h * 0.38), Offset(w * 0.55, h * 0.42), lacePaint);
+    canvas.drawLine(Offset(w * 0.45, h * 0.41), Offset(w * 0.51, h * 0.45), lacePaint);
+    canvas.drawLine(Offset(w * 0.41, h * 0.45), Offset(w * 0.47, h * 0.49), lacePaint);
   }
 
   @override

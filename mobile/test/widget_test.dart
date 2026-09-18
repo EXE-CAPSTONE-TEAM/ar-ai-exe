@@ -29,7 +29,7 @@ void main() {
     await tester.pumpWidget(const ShoeScannerApp());
     await tester.pumpAndSettle();
 
-    expect(find.text('Shoe Scanner'), findsOneWidget);
-    expect(find.text('Use seeded admin (local)'), findsOneWidget);
+    expect(find.text('KusShoes'), findsOneWidget);
+    expect(find.text('Đăng nhập tài khoản Test nội bộ (Admin)'), findsOneWidget);
   });
 }

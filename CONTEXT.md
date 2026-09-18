@@ -60,6 +60,9 @@ flowchart TD
 - The editor material baseline is fixed: `baseColor = #ffffff`, `roughness = 1`, `metallic = 0`. Users should not get UI controls to edit base color or roughness in the current MVP.
 - Decal placement is manual. Users position sticker/text layers in the web editor; backend bake/export converts them into preview/export geometry.
 - Existing model textures/materials matter. Imported shoes may rely on texture maps, material slots, and polygon material indices to remain visually correct.
+- Mobile App scope is strictly shoe capture, 3D preview, and handover to Web/Desktop Kus Studio. Mobile does not host complex 3D decal editing and does not take manufacturing/shoe cleaning orders.
+- Mobile App follows a 4-tab architecture aligned with SRS v2.2: Khám phá (SC-27), Quét AI (SC-22, SC-23), Hướng dẫn & Nghệ nhân (SC-24), Cá nhân (SC-26).
+- Guest trial scan allows 1 real backend reconstruction scan on mobile; exporting the raw GLB model or syncing the project to Web Kus Studio requires account registration per BR-41.
 
 ## Critical Invariants
 

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../app/app_theme.dart';
+
 class ScanGuideOverlay extends StatelessWidget {
   const ScanGuideOverlay({
     required this.seconds,
@@ -20,7 +22,7 @@ class ScanGuideOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     return IgnorePointer(
       child: CustomPaint(
-        painter: _GuidePainter(),
+        painter: _GuidePainter(isRecording: isRecording, seconds: seconds),
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
@@ -28,28 +30,52 @@ class ScanGuideOverlay extends StatelessWidget {
             children: [
               DecoratedBox(
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0A0F14).withValues(alpha: 0.72),
-                  borderRadius: BorderRadius.circular(16),
-                  border:
-                      Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                  color: const Color(0xDC0A0A0C),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: AppTheme.darkCardBorderHover),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.orange.withValues(alpha: 0.15),
+                      blurRadius: 18,
+                    ),
+                  ],
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   child: Column(
                     children: [
-                      Text(
-                        passTitle,
-                        style: const TextStyle(
-                          color: Color(0xFFF36A35),
-                          fontWeight: FontWeight.w900,
-                        ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: isRecording ? AppTheme.crimson : AppTheme.statusScanned,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            passTitle.toUpperCase(),
+                            style: AppTheme.headingFont(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              color: AppTheme.orange,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 6),
                       Text(
                         isRecording
-                            ? '$recordingInstruction $seconds s'
-                            : '$idleInstruction Recommended scan: 30-60 s.',
-                        style: const TextStyle(color: Colors.white),
+                            ? '$recordingInstruction ($seconds giây / khuyến nghị 30-60s)'
+                            : '$idleInstruction Khuyến nghị quay: 30-60 giây.',
+                        style: AppTheme.bodyFont(
+                          fontSize: 13,
+                          color: Colors.white,
+                        ),
                         textAlign: TextAlign.center,
                       ),
                     ],
@@ -66,21 +92,59 @@ class ScanGuideOverlay extends StatelessWidget {
 }
 
 class _GuidePainter extends CustomPainter {
+  const _GuidePainter({required this.isRecording, required this.seconds});
+
+  final bool isRecording;
+  final int seconds;
+
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Rect.fromCenter(
-      center: Offset(size.width / 2, size.height / 2),
-      width: size.width * 0.82,
+      center: Offset(size.width / 2, size.height * 0.48),
+      width: size.width * 0.84,
       height: size.height * 0.46,
     );
+
+    // Bounding Oval for shoe
     final paint = Paint()
-      ..color = const Color(0xFFF36A35)
+      ..color = isRecording ? AppTheme.orange : AppTheme.orange.withValues(alpha: 0.6)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
+      ..strokeWidth = isRecording ? 2.5 : 1.8;
+
     canvas.drawRRect(
-        RRect.fromRectAndRadius(rect, const Radius.circular(20)), paint);
+        RRect.fromRectAndRadius(rect, const Radius.circular(24)), paint);
+
+    // Corner targeting HUD brackets
+    final bracketPaint = Paint()
+      ..color = AppTheme.orange
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.5
+      ..strokeCap = StrokeCap.square;
+
+    const bLen = 22.0;
+    // Top-Left
+    canvas.drawLine(Offset(rect.left, rect.top + bLen), Offset(rect.left, rect.top), bracketPaint);
+    canvas.drawLine(Offset(rect.left, rect.top), Offset(rect.left + bLen, rect.top), bracketPaint);
+    // Top-Right
+    canvas.drawLine(Offset(rect.right - bLen, rect.top), Offset(rect.right, rect.top), bracketPaint);
+    canvas.drawLine(Offset(rect.right, rect.top), Offset(rect.right, rect.top + bLen), bracketPaint);
+    // Bottom-Left
+    canvas.drawLine(Offset(rect.left, rect.bottom - bLen), Offset(rect.left, rect.bottom), bracketPaint);
+    canvas.drawLine(Offset(rect.left, rect.bottom), Offset(rect.left + bLen, rect.bottom), bracketPaint);
+    // Bottom-Right
+    canvas.drawLine(Offset(rect.right - bLen, rect.bottom), Offset(rect.right, rect.bottom), bracketPaint);
+    canvas.drawLine(Offset(rect.right, rect.bottom), Offset(rect.right, rect.bottom - bLen), bracketPaint);
+
+    // Center crosshair
+    final chPaint = Paint()
+      ..color = AppTheme.orange.withValues(alpha: 0.5)
+      ..strokeWidth = 1.2;
+    final c = rect.center;
+    canvas.drawLine(Offset(c.dx - 12, c.dy), Offset(c.dx + 12, c.dy), chPaint);
+    canvas.drawLine(Offset(c.dx, c.dy - 12), Offset(c.dx, c.dy + 12), chPaint);
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _GuidePainter oldDelegate) =>
+      oldDelegate.isRecording != isRecording || oldDelegate.seconds != seconds;
 }

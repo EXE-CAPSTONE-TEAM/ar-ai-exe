@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../screens/auth_screen.dart';
 import '../screens/scan_home_screen.dart';
+import '../screens/user_manual_screen.dart';
 import '../services/backend_api.dart';
 import 'app_theme.dart';
 
@@ -9,11 +10,13 @@ class AppShell extends StatefulWidget {
   const AppShell({
     required this.themeMode,
     required this.onThemeModeChanged,
+    this.isGuest = false,
     super.key,
   });
 
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeModeChanged;
+  final bool isGuest;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -26,12 +29,13 @@ class _AppShellState extends State<AppShell> {
   Widget build(BuildContext context) {
     final pages = [
       const _ExploreTab(),
-      const ScanHomeScreen(),
-      const _NotifyTab(),
+      ScanHomeScreen(isGuest: widget.isGuest),
+      const UserManualScreen(),
       _ProfileTab(
         themeMode: widget.themeMode,
         onThemeModeChanged: widget.onThemeModeChanged,
         onLogout: _logout,
+        isGuest: widget.isGuest,
       ),
     ];
 
@@ -130,25 +134,25 @@ class _PillBottomNav extends StatelessWidget {
                 _NavItem(
                   selected: index == 0,
                   icon: Icons.explore_outlined,
-                  label: 'Explore',
+                  label: 'Khám phá',
                   onTap: () => onChanged(0),
                 ),
                 _NavItem(
                   selected: index == 1,
                   icon: Icons.center_focus_strong,
-                  label: 'AI Scan',
+                  label: 'Quét AI',
                   onTap: () => onChanged(1),
                 ),
                 _NavItem(
                   selected: index == 2,
-                  icon: Icons.notifications_none,
-                  label: 'Notify',
+                  icon: Icons.menu_book_outlined,
+                  label: 'Cẩm nang',
                   onTap: () => onChanged(2),
                 ),
                 _NavItem(
                   selected: index == 3,
                   icon: Icons.person_outline,
-                  label: 'Profile',
+                  label: 'Cá nhân',
                   onTap: () => onChanged(3),
                 ),
               ],
@@ -245,60 +249,71 @@ class _ExploreTab extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'Quet ban chan 3D, thiet ke giay ca nhan hoa bang AI va dat san xuat chi trong vai phut.',
-            style: TextStyle(
+            'Quét đôi giày thật bằng camera AI 360°, tùy biến sticker & vẽ tay trên Kus Studio Web và xuất file chuẩn cho nghệ nhân gia công ngoài đời thực.',
+            style: AppTheme.bodyFont(
+              fontSize: 14,
               color: Theme.of(context)
                   .colorScheme
                   .onSurface
-                  .withValues(alpha: 0.7),
-              height: 1.5,
+                  .withValues(alpha: 0.72),
+              height: 1.45,
             ),
           ),
           const SizedBox(height: 22),
           FilledButton.icon(
             onPressed: () {},
-            icon: const Icon(Icons.arrow_forward),
-            label: const Text('Thiet ke ngay tren web'),
+            icon: const Icon(Icons.open_in_browser),
+            label: const Text('MỞ KUS STUDIO TRÊN WEB'),
           ),
           const SizedBox(height: 30),
-          const _SectionLabel('TINH NANG NOI BAT'),
+          const _SectionLabel('TÍNH NĂNG NỔI BẬT'),
           const SizedBox(height: 14),
           const _FeatureGrid(),
           const SizedBox(height: 24),
           const Row(
             children: [
-              Expanded(child: _SectionLabel('SAP RA MAT')),
-              _Tag('Roadmap 2025', filled: false),
+              Expanded(child: _SectionLabel('LỘ TRÌNH PHÁT TRIỂN')),
+              _Tag('Sắp ra mắt', filled: false),
             ],
           ),
           const SizedBox(height: 12),
           const _RoadmapTile(
             icon: Icons.storefront_outlined,
             title: 'KusShoe Store',
-            badge: 'Store',
-            body: 'Mua phu kien giay, day giay custom, de tang chieu cao.',
+            badge: 'Phase 2',
+            body: 'Mua phụ kiện giày, dây giày custom, charm trang trí.',
           ),
           const _RoadmapTile(
             icon: Icons.water_drop_outlined,
-            title: 'Dich vu ve sinh & Spa',
-            badge: 'Service',
+            title: 'Mạng Lưới Sneaker Spa',
+            badge: 'Liên kết',
             body:
-                'Dat lich ve sinh giay chuyen sau, khu mui va repaint tai nha.',
+                'Liên kết đối tác vệ sinh giày chuyên sâu, khử mùi và repaint.',
           ),
           const _RoadmapTile(
             icon: Icons.diamond_outlined,
             title: 'Limited Drops',
-            badge: 'Drop',
+            badge: 'Ý tưởng',
             body:
-                'Cac bo suu tap gioi han do AI va nghe si Viet Nam dong thiet ke.',
+                'Các bộ sưu tập giày số giới hạn do AI và nghệ sĩ hợp tác.',
           ),
-          const _RoadmapTile(
-            icon: Icons.local_shipping_outlined,
-            title: 'Giao hang toan quoc',
-            badge: 'Logistics',
-            body: 'Theo doi don hang va doi tra size de dang qua ung dung.',
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.04),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              'Ghi chú (SC-27): Các tính năng trên thuộc kế hoạch mở rộng tương lai. Trong kỳ EXE201, KusShoes tập trung vào Quét 3D, Thiết kế web và Xuất file.',
+              style: AppTheme.bodyFont(
+                fontSize: 11.5,
+                color: Colors.grey,
+                height: 1.35,
+              ),
+            ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 12),
           const _WebsiteTile(),
         ],
       ),
@@ -313,20 +328,41 @@ class _MiniBrand extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        const CircleAvatar(
-          radius: 18,
-          backgroundColor: AppTheme.orange,
-          child: Text('K',
-              style:
-                  TextStyle(color: Colors.black, fontWeight: FontWeight.w900)),
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [AppTheme.orange, AppTheme.crimson],
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          alignment: Alignment.center,
+          child: const Text(
+            'K',
+            style: TextStyle(
+              color: Colors.black,
+              fontWeight: FontWeight.w900,
+              fontSize: 20,
+            ),
+          ),
         ),
-        const SizedBox(width: 10),
-        Text(
-          'KusShoe',
-          style: Theme.of(context)
-              .textTheme
-              .titleMedium
-              ?.copyWith(fontWeight: FontWeight.w900),
+        const SizedBox(width: 12),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'KusShoes',
+              style: AppTheme.headingFont(
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            Text(
+              'Shape your shoes, show your style',
+              style: AppTheme.bodyFont(fontSize: 11, color: Colors.grey),
+            ),
+          ],
         ),
       ],
     );
@@ -348,20 +384,20 @@ class _FeatureGrid extends StatelessWidget {
       children: const [
         _FeatureCard(
             icon: Icons.center_focus_strong,
-            title: '3D Foot Scan',
-            body: 'Quet chan chinh xac bang camera.'),
-        _FeatureCard(
-            icon: Icons.auto_fix_high,
-            title: 'AI Generator',
-            body: 'Tao mau giay tu mo ta ngon ngu.'),
+            title: 'Quét Giày AI 360°',
+            body: 'Dựng lưới 3D từ video camera thật.'),
         _FeatureCard(
             icon: Icons.layers_outlined,
-            title: 'Material Lab',
-            body: 'Chon da, vai, luoi va mau sac.'),
+            title: 'Thư Viện Phôi Chuẩn',
+            body: 'Phôi sneaker, running, boot sẵn sàng.'),
+        _FeatureCard(
+            icon: Icons.auto_fix_high,
+            title: 'Kus Studio Web',
+            body: 'Dán decal, vẽ tay, ký tên trên web.'),
         _FeatureCard(
             icon: Icons.ios_share,
-            title: 'Export & Share',
-            body: 'Xuat GLB, chia se thiet ke.'),
+            title: 'Xuất File & Nghệ Nhân',
+            body: 'Xuất file GLB & gửi link thợ vẽ.'),
       ],
     );
   }
@@ -455,9 +491,9 @@ class _WebsiteTile extends StatelessWidget {
       color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
       child: ListTile(
         leading: const _IconBubble(icon: Icons.open_in_new),
-        title: const Text('Truy cap KusShoe.vn',
+        title: const Text('Truy cập KusShoes Studio',
             style: TextStyle(fontWeight: FontWeight.w900)),
-        subtitle: const Text('Kham pha gallery, dat hang & ho tro truc tuyen'),
+        subtitle: const Text('Mở 3D Editor trên web, xem thư viện phôi & cộng đồng'),
         trailing: const Icon(Icons.chevron_right),
         onTap: () {},
       ),
@@ -465,157 +501,19 @@ class _WebsiteTile extends StatelessWidget {
   }
 }
 
-class _NotifyTab extends StatelessWidget {
-  const _NotifyTab();
-
-  @override
-  Widget build(BuildContext context) {
-    return _TabScaffold(
-      child: ListView(
-        children: const [
-          Row(
-            children: [
-              Expanded(
-                  child: _KickerTitle(kicker: 'INBOX', title: 'Notifications')),
-              _NewBadge(),
-            ],
-          ),
-          SizedBox(height: 28),
-          _NotificationHero(),
-          SizedBox(height: 18),
-          _NotificationTile(
-            icon: Icons.bolt,
-            title: 'Welcome to KusShoe',
-            body: 'Start your first 3D scan and get 10% off your custom order.',
-            time: '2m ago',
-            unread: true,
-          ),
-          _NotificationTile(
-            icon: Icons.trending_up,
-            title: 'New Drop Alert',
-            body:
-                "The 'Neon Blaze' sole pack just landed. Check it out online.",
-            time: '1h ago',
-            unread: true,
-          ),
-          _NotificationTile(
-            icon: Icons.inventory_2_outlined,
-            title: 'Order Shipped',
-            body:
-                'Your KusShoe Custom Mini #01 is on its way to Ho Chi Minh City.',
-            time: '3h ago',
-          ),
-          _NotificationTile(
-            icon: Icons.workspace_premium_outlined,
-            title: 'Weekly Inspiration',
-            body: "See this week's top community designs on our web gallery.",
-            time: '1d ago',
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _NotificationHero extends StatelessWidget {
-  const _NotificationHero();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Card(
-      child: ListTile(
-        contentPadding: EdgeInsets.symmetric(horizontal: 22, vertical: 22),
-        leading: _IconBubble(icon: Icons.open_in_new, large: true),
-        title: Text('Visit KusShoe Website',
-            style: TextStyle(fontWeight: FontWeight.w900)),
-        subtitle: Text('kushoe.vn - New drops & gallery'),
-        trailing: Icon(Icons.chevron_right),
-      ),
-    );
-  }
-}
-
-class _NotificationTile extends StatelessWidget {
-  const _NotificationTile({
-    required this.icon,
-    required this.title,
-    required this.body,
-    required this.time,
-    this.unread = false,
-  });
-
-  final IconData icon;
-  final String title;
-  final String body;
-  final String time;
-  final bool unread;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      color: unread
-          ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.06)
-          : null,
-      margin: const EdgeInsets.only(bottom: 18),
-      child: Stack(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(22),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _IconBubble(icon: icon, muted: true),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title,
-                          style: const TextStyle(
-                              fontSize: 20, fontWeight: FontWeight.w900)),
-                      const SizedBox(height: 8),
-                      Text(body,
-                          style: TextStyle(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurface
-                                  .withValues(alpha: 0.72),
-                              height: 1.45)),
-                      const SizedBox(height: 14),
-                      Text(time,
-                          style: TextStyle(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurface
-                                  .withValues(alpha: 0.48))),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (unread)
-            const Positioned(
-              top: 20,
-              right: 20,
-              child: CircleAvatar(radius: 6, backgroundColor: AppTheme.orange),
-            ),
-        ],
-      ),
-    );
-  }
-}
 
 class _ProfileTab extends StatelessWidget {
   const _ProfileTab({
     required this.themeMode,
     required this.onThemeModeChanged,
     required this.onLogout,
+    this.isGuest = false,
   });
 
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeModeChanged;
   final Future<void> Function() onLogout;
+  final bool isGuest;
 
   @override
   Widget build(BuildContext context) {
@@ -627,7 +525,7 @@ class _ProfileTab extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  'My Profile',
+                  'Hồ Sơ Cá Nhân',
                   style: Theme.of(context)
                       .textTheme
                       .displaySmall
@@ -636,43 +534,68 @@ class _ProfileTab extends StatelessWidget {
               ),
               IconButton.filledTonal(
                 onPressed: onLogout,
-                icon: const Icon(Icons.settings_outlined),
+                icon: const Icon(Icons.logout),
+                tooltip: 'Đăng xuất',
               ),
             ],
           ),
-          const SizedBox(height: 22),
+          const SizedBox(height: 20),
           Card(
             child: Padding(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(22),
               child: Row(
                 children: [
                   Container(
-                    width: 96,
-                    height: 96,
+                    width: 80,
+                    height: 80,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                          color: AppTheme.orange.withValues(alpha: 0.6),
-                          width: 3),
+                        color: AppTheme.orange.withValues(alpha: 0.8),
+                        width: 2.5,
+                      ),
+                      color: AppTheme.orange.withValues(alpha: 0.1),
                     ),
-                    child: const Icon(Icons.person_outline, size: 48),
+                    child: Icon(
+                      isGuest ? Icons.person_outline : Icons.account_circle,
+                      size: 42,
+                      color: AppTheme.orange,
+                    ),
                   ),
-                  const SizedBox(width: 24),
-                  const Expanded(
+                  const SizedBox(width: 20),
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Nguyen Van A',
-                            style: TextStyle(
-                                fontSize: 24, fontWeight: FontWeight.w900)),
-                        SizedBox(height: 8),
-                        Text('Ho Chi Minh City, VN'),
-                        SizedBox(height: 14),
+                        Text(
+                          isGuest ? 'Khách Trải Nghiệm' : 'Nguyễn Văn A',
+                          style: AppTheme.headingFont(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          isGuest
+                              ? 'Chế độ khách (1 scan thử)'
+                              : 'TP. Hồ Chí Minh, VN',
+                          style: AppTheme.bodyFont(
+                            fontSize: 13,
+                            color: Colors.grey,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
                         Wrap(
                           spacing: 8,
                           children: [
-                            _Tag('Pro Member', filled: true),
-                            _Tag('Since 2024', filled: false),
+                            _Tag(
+                              isGuest ? 'Guest Trial' : 'Gói Basic',
+                              filled: true,
+                            ),
+                            _Tag(
+                              isGuest ? 'Chưa đăng ký' : 'EXE201 Beta',
+                              filled: false,
+                            ),
                           ],
                         ),
                       ],
@@ -682,23 +605,81 @@ class _ProfileTab extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 22),
-          const Row(
+          const SizedBox(height: 20),
+
+          // Guest upsell callout
+          if (isGuest) ...[
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    AppTheme.orange.withValues(alpha: 0.12),
+                    AppTheme.crimson.withValues(alpha: 0.08),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: AppTheme.orange.withValues(alpha: 0.35)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.stars, color: AppTheme.orange, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'NÂNG CẤP LÊN BASIC / PRO',
+                        style: AppTheme.headingFont(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.orange,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Đăng ký tài khoản để lưu giữ mô hình scan vĩnh viễn, mở khóa toàn bộ kho phôi và xuất file GLB cho thợ gia công.',
+                    style: AppTheme.bodyFont(fontSize: 12.5, height: 1.4),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+
+          Row(
             children: [
-              Expanded(child: _StatCard(value: '12', label: 'DESIGNS')),
-              SizedBox(width: 14),
-              Expanded(child: _StatCard(value: '5', label: 'ORDERS')),
-              SizedBox(width: 14),
-              Expanded(child: _StatCard(value: '2.4k', label: 'POINTS')),
+              Expanded(
+                child: _StatCard(
+                  value: isGuest ? '1/1' : '1',
+                  label: isGuest ? 'SCAN THỬ' : 'LƯỢT QUÉT',
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _StatCard(
+                  value: isGuest ? '0' : '12',
+                  label: 'DỰ ÁN',
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _StatCard(
+                  value: isGuest ? '0' : '4',
+                  label: 'FILE XUẤT',
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 28),
-          const _SectionLabel('MENU'),
-          const SizedBox(height: 12),
+          const SizedBox(height: 24),
+          const _SectionLabel('CÀI ĐẶT & QUẢN LÝ'),
+          const SizedBox(height: 10),
           _MenuTile(
             icon: isDark ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
-            title: 'Appearance',
-            subtitle: isDark ? 'Dark mode' : 'Light mode',
+            title: 'Giao diện',
+            subtitle: isDark ? 'Chế độ tối (Dark mode)' : 'Chế độ sáng (Light mode)',
             trailing: Switch(
               value: isDark,
               activeThumbColor: AppTheme.orange,
@@ -707,25 +688,20 @@ class _ProfileTab extends StatelessWidget {
             ),
           ),
           const _MenuTile(
-              icon: Icons.shopping_bag_outlined,
-              title: 'My Designs',
-              subtitle: '12 custom shoes'),
+            icon: Icons.palette_outlined,
+            title: 'Thiết kế của tôi',
+            subtitle: 'Quản lý các bản nháp & file 3D',
+          ),
           const _MenuTile(
-              icon: Icons.inventory_2_outlined,
-              title: 'Orders',
-              subtitle: '3 active, 2 completed'),
+            icon: Icons.card_membership_outlined,
+            title: 'Gói cước & Hạn mức',
+            subtitle: 'Xem gói Basic/Pro và lượt quét còn lại',
+          ),
           const _MenuTile(
-              icon: Icons.favorite_border,
-              title: 'Saved',
-              subtitle: '8 favorite drops'),
-          const _MenuTile(
-              icon: Icons.credit_card,
-              title: 'Payment Methods',
-              subtitle: 'Visa .... 4242'),
-          const _MenuTile(
-              icon: Icons.calendar_month_outlined,
-              title: 'History',
-              subtitle: 'Scan & purchase log'),
+            icon: Icons.history_outlined,
+            title: 'Lịch sử quét 3D',
+            subtitle: 'Xem các phiên scan và file GLB đã xử lý',
+          ),
         ],
       ),
     );
@@ -787,59 +763,6 @@ class _MenuTile extends StatelessWidget {
   }
 }
 
-class _KickerTitle extends StatelessWidget {
-  const _KickerTitle({required this.kicker, required this.title});
-
-  final String kicker;
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          kicker,
-          style: const TextStyle(
-            color: AppTheme.orange,
-            letterSpacing: 6,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          title,
-          style: Theme.of(context)
-              .textTheme
-              .displaySmall
-              ?.copyWith(fontWeight: FontWeight.w900),
-        ),
-      ],
-    );
-  }
-}
-
-class _NewBadge extends StatelessWidget {
-  const _NewBadge();
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: AppTheme.orange.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppTheme.orange.withValues(alpha: 0.4)),
-      ),
-      child: const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Text('2 new',
-            style:
-                TextStyle(color: AppTheme.orange, fontWeight: FontWeight.w900)),
-      ),
-    );
-  }
-}
-
 class _SectionLabel extends StatelessWidget {
   const _SectionLabel(this.text);
 
@@ -886,17 +809,15 @@ class _IconBubble extends StatelessWidget {
   const _IconBubble({
     required this.icon,
     this.muted = false,
-    this.large = false,
   });
 
   final IconData icon;
   final bool muted;
-  final bool large;
 
   @override
   Widget build(BuildContext context) {
     return CircleAvatar(
-      radius: large ? 32 : 22,
+      radius: 22,
       backgroundColor: muted
           ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.04)
           : AppTheme.orange.withValues(alpha: 0.16),

@@ -12,7 +12,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Manager, State, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
 const DEFAULT_BACKEND_PORT: u16 = 8000;
 const DESKTOP_PORT_START: u16 = 8765;
