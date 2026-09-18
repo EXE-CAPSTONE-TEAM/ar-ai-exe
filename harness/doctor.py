@@ -120,6 +120,80 @@ def check_test_assets(repo_root: Path) -> DiagnosticResult:
     )
 
 
+def check_flutter() -> DiagnosticResult:
+    flutter_bin = shutil.which("flutter") or shutil.which("flutter.bat")
+    if not flutter_bin:
+        return DiagnosticResult("Flutter SDK", "WARN", "Flutter executable not found on PATH.")
+    try:
+        proc = subprocess.run([flutter_bin, "--version"], capture_output=True, text=True, timeout=10, check=True)
+        first_line = proc.stdout.splitlines()[0] if proc.stdout else "Flutter (Unknown Version)"
+        return DiagnosticResult("Flutter SDK", "OK", f"{first_line} ({flutter_bin})", flutter_bin)
+    except Exception as exc:
+        return DiagnosticResult("Flutter SDK", "WARN", f"Error checking flutter: {exc}", flutter_bin)
+
+
+def check_mobile_android_toolchain(repo_root: Path) -> DiagnosticResult:
+    import re
+
+    wrapper_props = repo_root / "mobile" / "android" / "gradle" / "wrapper" / "gradle-wrapper.properties"
+    settings_gradle = repo_root / "mobile" / "android" / "settings.gradle.kts"
+    if not settings_gradle.is_file():
+        settings_gradle = repo_root / "mobile" / "android" / "settings.gradle"
+
+    issues: list[str] = []
+    versions: dict[str, str] = {}
+
+    # 1. Gradle version (min 9.1.0)
+    if wrapper_props.is_file():
+        content = wrapper_props.read_text(encoding="utf-8")
+        match = re.search(r"gradle-([0-9]+(?:\.[0-9]+)*)-", content)
+        if match:
+            v_str = match.group(1)
+            v_tuple = tuple(int(x) for x in re.findall(r"\d+", v_str))
+            versions["Gradle"] = v_str
+            if v_tuple < (9, 1, 0):
+                issues.append(f"Gradle {v_str} < 9.1.0 (upgrade in gradle-wrapper.properties)")
+        else:
+            issues.append("Could not parse Gradle version in gradle-wrapper.properties")
+    else:
+        issues.append("gradle-wrapper.properties not found")
+
+    # 2. AGP and Kotlin versions (min AGP 9.0.1, min Kotlin 2.3.20)
+    if settings_gradle.is_file():
+        content = settings_gradle.read_text(encoding="utf-8")
+        agp_match = re.search(r'com\.android\.application["\']\)?\s*version\s*["\']([0-9]+(?:\.[0-9]+)*)["\']', content)
+        if agp_match:
+            v_str = agp_match.group(1)
+            v_tuple = tuple(int(x) for x in re.findall(r"\d+", v_str))
+            versions["AGP"] = v_str
+            if v_tuple < (9, 0, 1):
+                issues.append(f"AGP {v_str} < 9.0.1 (upgrade in settings.gradle.kts)")
+        else:
+            issues.append("Could not parse com.android.application version in settings.gradle.kts")
+
+        kgp_match = re.search(r'org\.jetbrains\.kotlin\.android["\']\)?\s*version\s*["\']([0-9]+(?:\.[0-9]+)*)["\']', content)
+        if kgp_match:
+            v_str = kgp_match.group(1)
+            v_tuple = tuple(int(x) for x in re.findall(r"\d+", v_str))
+            versions["Kotlin"] = v_str
+            if v_tuple < (2, 3, 20):
+                issues.append(f"Kotlin {v_str} < 2.3.20 (upgrade in settings.gradle.kts)")
+        else:
+            issues.append("Could not parse org.jetbrains.kotlin.android version in settings.gradle.kts")
+    else:
+        issues.append("settings.gradle.kts not found")
+
+    if issues:
+        return DiagnosticResult(
+            "Android Toolchain",
+            "WARN",
+            "Deprecations detected: " + "; ".join(issues),
+        )
+
+    summary = f"Gradle {versions.get('Gradle', '?')}, AGP {versions.get('AGP', '?')}, Kotlin {versions.get('Kotlin', '?')}"
+    return DiagnosticResult("Android Toolchain", "OK", f"Compatible with Flutter 3.47+ ({summary})")
+
+
 def run_diagnostics(repo_root: Optional[Path] = None) -> list[DiagnosticResult]:
     if repo_root is None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -129,6 +203,8 @@ def run_diagnostics(repo_root: Optional[Path] = None) -> list[DiagnosticResult]:
         check_blender(),
         check_node(),
         check_npm(),
+        check_flutter(),
+        check_mobile_android_toolchain(repo_root),
         check_test_assets(repo_root),
     ]
     return results

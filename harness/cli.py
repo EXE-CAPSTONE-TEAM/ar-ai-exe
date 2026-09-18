@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 import time
@@ -17,9 +18,11 @@ from harness.tia import TestImpactAnalyzer
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DIR = REPO_ROOT / "backend"
+MOBILE_DIR = REPO_ROOT / "mobile"
 PYTHON_BIN = BACKEND_DIR / ".venv" / "Scripts" / "python.exe"
 if not PYTHON_BIN.is_file():
     PYTHON_BIN = Path(sys.executable)
+FLUTTER_BIN = shutil.which("flutter") or shutil.which("flutter.bat")
 
 
 def run_command_with_telemetry(cmd: list[str], cwd: Path, name: str, telemetry: TelemetryEngine) -> bool:
@@ -61,7 +64,7 @@ def main() -> None:
     run_parser = subparsers.add_parser("run", help="Execute harness test suites.")
     run_parser.add_argument(
         "--suite",
-        choices=["all", "lint", "blender", "control-plane", "backend", "fast"],
+        choices=["all", "lint", "blender", "control-plane", "backend", "mobile", "fast"],
         default="all",
         help="Target suite to execute.",
     )
@@ -97,11 +100,13 @@ def main() -> None:
                 suites_to_run.append("control-plane")
             if impact.run_blender_3d:
                 suites_to_run.append("blender")
+            if impact.run_mobile:
+                suites_to_run.append("mobile")
         else:
             if args.suite == "fast":
                 suites_to_run = ["lint", "backend", "control-plane"]
             elif args.suite == "all":
-                suites_to_run = ["lint", "control-plane", "blender", "backend"]
+                suites_to_run = ["lint", "control-plane", "blender", "backend", "mobile"]
             else:
                 suites_to_run = [args.suite]
 
@@ -132,6 +137,21 @@ def main() -> None:
                         [str(PYTHON_BIN), "-m", "pytest", "tests/test_architectural_linter.py", "tests/test_telemetry_context.py", "-v"],
                         cwd=BACKEND_DIR,
                         name="Backend_Harness_Meta_Suite",
+                        telemetry=telemetry,
+                    )
+                elif suite == "mobile":
+                    if not FLUTTER_BIN:
+                        raise RuntimeError("Flutter binary not found on PATH.")
+                    run_command_with_telemetry(
+                        [str(FLUTTER_BIN), "analyze"],
+                        cwd=MOBILE_DIR,
+                        name="Mobile_Flutter_Analyze_Suite",
+                        telemetry=telemetry,
+                    )
+                    run_command_with_telemetry(
+                        [str(FLUTTER_BIN), "test"],
+                        cwd=MOBILE_DIR,
+                        name="Mobile_Flutter_Test_Suite",
                         telemetry=telemetry,
                     )
             except Exception as exc:

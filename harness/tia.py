@@ -20,6 +20,7 @@ class ImpactAnalysisResult:
     run_blender_3d: bool
     run_control_plane: bool
     run_frontend: bool
+    run_mobile: bool = False
 
     def summary(self) -> str:
         suites = []
@@ -33,6 +34,8 @@ class ImpactAnalysisResult:
             suites.append("blender_3d (heavy)")
         if self.run_frontend:
             suites.append("frontend")
+        if self.run_mobile:
+            suites.append("mobile")
         return ", ".join(suites) if suites else "none (no impacted code detected)"
 
 
@@ -86,6 +89,7 @@ class TestImpactAnalyzer:
         run_blender_3d = False
         run_control_plane = False
         run_frontend = False
+        run_mobile = False
 
         for f in changed_files:
             # Python backend files
@@ -122,6 +126,11 @@ class TestImpactAnalyzer:
             if f.startswith("frontend/"):
                 run_frontend = True
 
+            # Mobile files
+            if f.startswith("mobile/"):
+                run_lint = True
+                run_mobile = True
+
             # Harness core files
             if f.startswith("harness/"):
                 run_lint = True
@@ -139,4 +148,5 @@ class TestImpactAnalyzer:
             run_blender_3d=run_blender_3d,
             run_control_plane=run_control_plane,
             run_frontend=run_frontend,
+            run_mobile=run_mobile,
         )

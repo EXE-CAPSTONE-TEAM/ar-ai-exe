@@ -40,6 +40,7 @@ class ArchitecturalRulesScanner:
         violations.extend(self.check_decal_hit_ratio_guard())
         violations.extend(self.check_payload_limits_defined())
         violations.extend(self.check_hardcoded_secrets_and_ips())
+        violations.extend(self.check_mobile_toolchain_versions())
         return violations
 
     def check_material_slot_preservation(self) -> Iterator[InvariantViolation]:
@@ -151,6 +152,59 @@ class ArchitecturalRulesScanner:
                         rule_id="RULE-005",
                         message=f"Detected hardcoded private IP address in {py_file.name}:{line_idx}",
                         remediation="Use environment variables or capability URLs instead of hardcoded IPs.",
+                    )
+
+    def check_mobile_toolchain_versions(self) -> Iterator[InvariantViolation]:
+        """RULE-006: Enforce modern Android toolchain versions to prevent Flutter deprecation warnings.
+
+        Minimum versions: Gradle >= 9.1.0, AGP >= 9.0.1, Kotlin >= 2.3.20.
+        """
+        wrapper_props = self.repo_root / "mobile" / "android" / "gradle" / "wrapper" / "gradle-wrapper.properties"
+        if wrapper_props.is_file():
+            content = wrapper_props.read_text(encoding="utf-8")
+            match = re.search(r"gradle-([0-9]+(?:\.[0-9]+)*)-", content)
+            if match:
+                v_str = match.group(1)
+                v_tuple = tuple(int(x) for x in re.findall(r"\d+", v_str))
+                if v_tuple < (9, 1, 0):
+                    yield InvariantViolation(
+                        file_path=wrapper_props,
+                        line_number=1,
+                        rule_id="RULE-006",
+                        message=f"Gradle version ({v_str}) is below minimum required (9.1.0) by Flutter 3.47+.",
+                        remediation="Upgrade distributionUrl in gradle-wrapper.properties to gradle-9.1.0-all.zip.",
+                    )
+
+        settings_gradle = self.repo_root / "mobile" / "android" / "settings.gradle.kts"
+        if not settings_gradle.is_file():
+            settings_gradle = self.repo_root / "mobile" / "android" / "settings.gradle"
+
+        if settings_gradle.is_file():
+            content = settings_gradle.read_text(encoding="utf-8")
+            agp_match = re.search(r'com\.android\.application["\']\)?\s*version\s*["\']([0-9]+(?:\.[0-9]+)*)["\']', content)
+            if agp_match:
+                v_str = agp_match.group(1)
+                v_tuple = tuple(int(x) for x in re.findall(r"\d+", v_str))
+                if v_tuple < (9, 0, 1):
+                    yield InvariantViolation(
+                        file_path=settings_gradle,
+                        line_number=1,
+                        rule_id="RULE-006",
+                        message=f"Android Gradle Plugin version ({v_str}) is below minimum required (9.0.1) by Flutter 3.47+.",
+                        remediation="Upgrade com.android.application version to at least '9.0.1' in settings.gradle.kts.",
+                    )
+
+            kgp_match = re.search(r'org\.jetbrains\.kotlin\.android["\']\)?\s*version\s*["\']([0-9]+(?:\.[0-9]+)*)["\']', content)
+            if kgp_match:
+                v_str = kgp_match.group(1)
+                v_tuple = tuple(int(x) for x in re.findall(r"\d+", v_str))
+                if v_tuple < (2, 3, 20):
+                    yield InvariantViolation(
+                        file_path=settings_gradle,
+                        line_number=1,
+                        rule_id="RULE-006",
+                        message=f"Kotlin Gradle Plugin version ({v_str}) is below minimum required (2.3.20) by Flutter 3.47+.",
+                        remediation="Upgrade org.jetbrains.kotlin.android version to at least '2.3.20' in settings.gradle.kts.",
                     )
 
     def _iter_python_files(self, base_dir: Path) -> Iterator[Path]:

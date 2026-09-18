@@ -57,6 +57,33 @@ def run_dynamic(user_input):
     assert "eval" in violations[0].message
 
 
+def test_linter_detects_outdated_mobile_toolchain(tmp_path: Path) -> None:
+    """Linter must detect outdated Gradle, AGP, or Kotlin versions."""
+    gradle_dir = tmp_path / "mobile" / "android" / "gradle" / "wrapper"
+    gradle_dir.mkdir(parents=True)
+    (gradle_dir / "gradle-wrapper.properties").write_text(
+        "distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14-all.zip\n",
+        encoding="utf-8",
+    )
+
+    settings_file = tmp_path / "mobile" / "android" / "settings.gradle.kts"
+    settings_file.write_text(
+        'plugins {\n    id("com.android.application") version "8.11.1" apply false\n    id("org.jetbrains.kotlin.android") version "2.2.20" apply false\n}\n',
+        encoding="utf-8",
+    )
+
+    scanner = ArchitecturalRulesScanner(tmp_path)
+    violations = list(scanner.check_mobile_toolchain_versions())
+
+    assert len(violations) == 3
+    rule_ids = {v.rule_id for v in violations}
+    assert rule_ids == {"RULE-006"}
+    messages = " ".join(v.message for v in violations)
+    assert "Gradle version (8.14)" in messages
+    assert "Android Gradle Plugin version (8.11.1)" in messages
+    assert "Kotlin Gradle Plugin version (2.2.20)" in messages
+
+
 def test_current_repo_passes_all_architectural_rules() -> None:
     """The production repository must have 0 architectural rule violations."""
     scanner = ArchitecturalRulesScanner(REPO_ROOT)
