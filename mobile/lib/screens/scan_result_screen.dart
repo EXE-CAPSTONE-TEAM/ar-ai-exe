@@ -60,14 +60,14 @@ class ScanResultScreen extends StatelessWidget {
                         children: [
                           Row(
                             children: [
-                              Text(
-                                'CHECKLIST TIẾN TRÌNH AI (SC-23)',
-                                style: AppTheme.monoFont(
-                                  fontSize: 11,
-                                  color: AppTheme.orange,
-                                  letterSpacing: 1.2,
+                                Text(
+                                  'TIẾN TRÌNH DỰNG 3D AI',
+                                  style: AppTheme.monoFont(
+                                    fontSize: 11,
+                                    color: AppTheme.orange,
+                                    letterSpacing: 1.2,
+                                  ),
                                 ),
-                              ),
                               const Spacer(),
                               _StatusBadge(status: status, isProcessing: processingStarted),
                             ],
@@ -215,7 +215,7 @@ class ScanResultScreen extends StatelessWidget {
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                'Bạn đang ở Chế độ Khách. Đăng ký tài khoản để lưu mô hình này vĩnh viễn vào dự án của bạn (BR-41).',
+                                'Bạn đang ở Chế độ Khách. Đăng ký tài khoản để lưu mô hình này vĩnh viễn vào bộ sưu tập của bạn.',
                                 style: AppTheme.bodyFont(fontSize: 12.5),
                               ),
                             ),
@@ -235,7 +235,7 @@ class ScanResultScreen extends StatelessWidget {
                     OutlinedButton.icon(
                       onPressed: () => _showExportSheet(context),
                       icon: const Icon(Icons.download_for_offline_outlined),
-                      label: const Text('XUẤT FILE SCAN GỐC (GLB - BR-42)'),
+                      label: const Text('XUẤT FILE SCAN GỐC (GLB)'),
                     ),
                     const SizedBox(height: 8),
                     Center(
@@ -300,7 +300,7 @@ class ScanResultScreen extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              'Theo BR-42 (SRS v2.2), gói Basic trở lên được quyền xuất trực tiếp file scan gốc GLB sạch (đã qua MeshCleanupService) để lưu trữ hoặc nạp vào phần mềm 3D khác.',
+              'Gói Basic trở lên được quyền xuất trực tiếp file scan gốc GLB sạch (đã qua chuẩn hóa lưới 3D) để lưu trữ hoặc nạp vào phần mềm chuyên dụng khác.',
               style: AppTheme.bodyFont(fontSize: 13, color: Colors.white70, height: 1.4),
             ),
             const SizedBox(height: 20),

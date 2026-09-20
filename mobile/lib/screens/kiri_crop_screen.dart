@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 
 import '../models/kiri_status.dart';
+import '../services/api_exception.dart';
 import '../services/backend_api.dart';
 
 class KiriCropScreen extends StatefulWidget {
@@ -25,7 +26,7 @@ class KiriCropScreen extends StatefulWidget {
 
 class _KiriCropScreenState extends State<KiriCropScreen> {
   BackendApi get _api => widget.api;
-  final _projectNameController = TextEditingController(text: 'My shoe scan');
+  final _projectNameController = TextEditingController(text: 'Đôi giày của tôi');
   Timer? _pollTimer;
   late KiriStatus _status;
   CropBox _cropBox = const CropBox();
@@ -109,11 +110,11 @@ class _KiriCropScreenState extends State<KiriCropScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Prepare 3D model'),
+        title: const Text('Chuẩn bị mô hình 3D'),
         actions: [
           if (_status.canCrop)
             IconButton(
-              tooltip: 'Reset crop box',
+              tooltip: 'Đặt lại khung cắt',
               onPressed: () => setState(() => _cropBox = const CropBox()),
               icon: const Icon(Icons.restart_alt),
             ),
@@ -145,7 +146,7 @@ class _KiriCropScreenState extends State<KiriCropScreen> {
                         if (_status.previewUrl case final previewUrl?)
                           ModelViewer(
                             src: previewUrl,
-                            alt: 'Scanned shoe model',
+                            alt: 'Mô hình giày đã quét',
                             ar: false,
                             autoRotate: false,
                             cameraControls: true,
@@ -162,7 +163,7 @@ class _KiriCropScreenState extends State<KiriCropScreen> {
                 ),
               ),
               const SizedBox(height: 20),
-              Text('Position', style: Theme.of(context).textTheme.titleMedium),
+              Text('Vị trí', style: Theme.of(context).textTheme.titleMedium),
               _AxisSliders(
                 value: _cropBox.center,
                 minimum: -0.5,
@@ -170,7 +171,7 @@ class _KiriCropScreenState extends State<KiriCropScreen> {
                 onChanged: (value) => setState(() => _cropBox = _cropBox.copyWith(center: value)),
               ),
               const Divider(height: 32),
-              Text('Crop size', style: Theme.of(context).textTheme.titleMedium),
+              Text('Kích thước khung cắt', style: Theme.of(context).textTheme.titleMedium),
               _AxisSliders(
                 value: _cropBox.size,
                 minimum: 0.05,
@@ -178,7 +179,7 @@ class _KiriCropScreenState extends State<KiriCropScreen> {
                 onChanged: (value) => setState(() => _cropBox = _cropBox.copyWith(size: value)),
               ),
               const Divider(height: 32),
-              Text('Alignment', style: Theme.of(context).textTheme.titleMedium),
+              Text('Độ nghiêng', style: Theme.of(context).textTheme.titleMedium),
               _AxisSliders(
                 value: _cropBox.rotation,
                 minimum: -180,
@@ -192,7 +193,7 @@ class _KiriCropScreenState extends State<KiriCropScreen> {
                 controller: _projectNameController,
                 maxLength: 160,
                 decoration: const InputDecoration(
-                  labelText: 'Project name',
+                  labelText: 'Tên dự án',
                   prefixIcon: Icon(Icons.folder_outlined),
                 ),
               ),
@@ -219,7 +220,7 @@ class _KiriCropScreenState extends State<KiriCropScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.cloud_upload_outlined),
-              label: Text(_saving ? 'Saving project' : 'Save project'),
+              label: Text(_saving ? 'Đang lưu dự án' : 'Lưu dự án'),
             ),
           ),
         ),
@@ -227,7 +228,7 @@ class _KiriCropScreenState extends State<KiriCropScreen> {
     );
   }
 
-  String _message(Object error) => error.toString().replaceFirst('Exception: ', '');
+  String _message(Object error) => ApiException.from(error).message;
 }
 
 class _AxisSliders extends StatelessWidget {
@@ -303,13 +304,13 @@ class _ProcessingView extends StatelessWidget {
             if (!status.isFailed) ...[
               CircularProgressIndicator(value: status.progress == 0 ? null : status.progress / 100),
               const SizedBox(height: 20),
-              Text('Creating your 3D model', style: Theme.of(context).textTheme.titleLarge),
+              Text('Đang dựng mô hình 3D của bạn', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
-              Text('${status.progress}% complete'),
+              Text('Hoàn thành ${status.progress}%'),
             ] else ...[
               Icon(Icons.error_outline, size: 44, color: Theme.of(context).colorScheme.error),
               const SizedBox(height: 12),
-              Text('Model processing stopped', style: Theme.of(context).textTheme.titleLarge),
+              Text('Quá trình dựng mô hình đã dừng', style: Theme.of(context).textTheme.titleLarge),
             ],
             if (message != null) ...[
               const SizedBox(height: 12),
@@ -320,7 +321,7 @@ class _ProcessingView extends StatelessWidget {
               OutlinedButton.icon(
                 onPressed: onRetry,
                 icon: const Icon(Icons.refresh),
-                label: const Text('Check again'),
+                label: const Text('Kiểm tra lại'),
               ),
             ],
           ],
@@ -345,17 +346,17 @@ class _ReadyView extends StatelessWidget {
           children: [
             Icon(Icons.cloud_done_outlined, size: 52, color: Theme.of(context).colorScheme.primary),
             const SizedBox(height: 16),
-            Text('Project saved', style: Theme.of(context).textTheme.headlineSmall),
+            Text('Đã lưu dự án', style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 8),
             const Text(
-              'Your 3D model is ready in the desktop app.',
+              'Mô hình 3D đã sẵn sàng. Mở Kus Studio trên Web hoặc Desktop để tiếp tục thiết kế.',
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
             FilledButton.icon(
               onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
               icon: const Icon(Icons.add_a_photo_outlined),
-              label: const Text('Scan another product'),
+              label: const Text('Quét đôi giày khác'),
             ),
           ],
         ),

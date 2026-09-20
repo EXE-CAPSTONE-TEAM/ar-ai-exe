@@ -9,93 +9,116 @@ class ScanHeroCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return AspectRatio(
-      aspectRatio: 0.76,
-      child: DecoratedBox(
+      aspectRatio: 0.84,
+      child: Container(
+        padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
-          color: isDark ? AppTheme.darkCard : const Color(0xFFFFF4ED),
-          borderRadius: BorderRadius.circular(26),
+          color: isDark ? const Color(0x15FFFFFF) : const Color(0x12FF5A36),
+          borderRadius: BorderRadius.circular(30),
           border: Border.all(
-            color: isDark ? AppTheme.darkCardBorder : const Color(0xFFFFC5AC),
-            width: 1.4,
+            color: isDark ? const Color(0x22FFFFFF) : const Color(0x28FF5A36),
+            width: 1.0,
           ),
         ),
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: CustomPaint(painter: _ScanFramePainter(isDark: isDark)),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(26),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: isDark ? AppTheme.darkCard : const Color(0xFFFFF6F0),
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(
+                color: isDark ? AppTheme.darkCardBorder : const Color(0xFFFFD0BC),
+                width: 1.2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: isDark
+                      ? Colors.black.withValues(alpha: 0.5)
+                      : AppTheme.orange.withValues(alpha: 0.08),
+                  blurRadius: 24,
+                  offset: const Offset(0, 10),
+                ),
+              ],
             ),
-            Align(
-              alignment: const Alignment(0, -0.82),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xEE0A0A0C) : Colors.white,
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(
-                    color: isDark
-                        ? const Color(0x40FF5A36)
-                        : const Color(0xFFFFC5AC),
-                    width: 1.4,
-                  ),
-                  boxShadow: [
-                    if (isDark)
-                      BoxShadow(
-                        color: AppTheme.orange.withValues(alpha: 0.12),
-                        blurRadius: 16,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: CustomPaint(painter: _ScanFramePainter(isDark: isDark)),
+                ),
+                Align(
+                  alignment: const Alignment(0, -0.80),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xEE0A0A0C) : Colors.white,
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: isDark
+                            ? const Color(0x44FF5A36)
+                            : const Color(0xFFFFC5AC),
+                        width: 1.2,
                       ),
-                  ],
-                ),
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  child: Text(
-                    'ĐẶT ĐÔI GIÀY VÀO KHUNG VÀ XOAY 360°',
-                    textAlign: TextAlign.center,
-                    style: AppTheme.headingFont(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.8,
-                      color: isDark ? Colors.white : Colors.black,
+                      boxShadow: [
+                        if (isDark)
+                          BoxShadow(
+                            color: AppTheme.orange.withValues(alpha: 0.12),
+                            blurRadius: 16,
+                          ),
+                      ],
+                    ),
+                    child: Padding(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Text(
+                        'HƯỚNG CAMERA VÀO GIÀY · 360°',
+                        textAlign: TextAlign.center,
+                        style: AppTheme.headingFont(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.1,
+                          color: isDark ? Colors.white : Colors.black,
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ),
-            Positioned(
-              left: 18,
-              right: 18,
-              bottom: 18,
-              child: Row(
-                children: [
-                  const CircleAvatar(
-                      radius: 5, backgroundColor: AppTheme.statusScanned),
-                  const SizedBox(width: 8),
-                  Text(
-                    'RADAR 360° · AI SENSING',
-                    style: AppTheme.monoFont(
-                      fontSize: 10.5,
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onSurface
-                          .withValues(alpha: 0.7),
-                      letterSpacing: 1.4,
-                    ),
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  bottom: 14,
+                  child: Row(
+                    children: [
+                      const CircleAvatar(
+                          radius: 4, backgroundColor: AppTheme.statusScanned),
+                      const SizedBox(width: 7),
+                      Text(
+                        'RADAR 360° · AI SENSING',
+                        style: AppTheme.monoFont(
+                          fontSize: 10,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.65),
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        '720P / 1080P',
+                        style: AppTheme.monoFont(
+                          fontSize: 10,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.65),
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                    ],
                   ),
-                  const Spacer(),
-                  Text(
-                    '720P / 1080P',
-                    style: AppTheme.monoFont(
-                      fontSize: 10.5,
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onSurface
-                          .withValues(alpha: 0.7),
-                      letterSpacing: 1.4,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

@@ -2,15 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../app/app_shell.dart';
 import '../app/app_theme.dart';
+import '../services/api_exception.dart';
 import '../services/backend_api.dart';
 import 'otp_verify_screen.dart';
 
-const _seededAdminEmail = 'admin@kusshoes.vn';
-const _seededAdminPassword = 'Admin@12345';
-
 class AuthScreen extends StatefulWidget {
   const AuthScreen({
-    this.themeMode = ThemeMode.dark,
+    this.themeMode = ThemeMode.light,
     this.onThemeModeChanged,
     super.key,
   });
@@ -23,7 +21,7 @@ class AuthScreen extends StatefulWidget {
 }
 
 class _AuthScreenState extends State<AuthScreen> {
-  final _api = BackendApi();
+  BackendApi get _api => BackendApi.shared;
   final _nameController = TextEditingController();
   final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
@@ -57,15 +55,11 @@ class _AuthScreenState extends State<AuthScreen> {
                   // Brand Logo & Header
                   Center(
                     child: Container(
-                      width: 64,
-                      height: 64,
+                      width: 80,
+                      height: 80,
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [AppTheme.orange, AppTheme.crimson],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(20),
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(22),
                         boxShadow: [
                           BoxShadow(
                             color: AppTheme.orange.withValues(alpha: 0.35),
@@ -74,13 +68,13 @@ class _AuthScreenState extends State<AuthScreen> {
                           ),
                         ],
                       ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        'K',
-                        style: AppTheme.headingFont(
-                          fontSize: 32,
-                          fontWeight: FontWeight.w900,
-                          color: Colors.black,
+                      padding: const EdgeInsets.all(10),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.asset(
+                          'assets/images/logo.png',
+                          fit: BoxFit.contain,
+                          alignment: Alignment.center,
                         ),
                       ),
                     ),
@@ -180,7 +174,14 @@ class _AuthScreenState extends State<AuthScreen> {
 
                   Row(
                     children: [
-                      const Expanded(child: Divider(color: Colors.white12)),
+                      Expanded(
+                        child: Divider(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.12),
+                        ),
+                      ),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         child: Text(
@@ -192,7 +193,14 @@ class _AuthScreenState extends State<AuthScreen> {
                           ),
                         ),
                       ),
-                      const Expanded(child: Divider(color: Colors.white12)),
+                      Expanded(
+                        child: Divider(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.12),
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 20),
@@ -262,18 +270,6 @@ class _AuthScreenState extends State<AuthScreen> {
                     icon: const Icon(Icons.g_mobiledata, size: 28, color: AppTheme.orange),
                     label: const Text('Tiếp tục với Google / Gmail'),
                   ),
-                  const SizedBox(height: 10),
-
-                  // Seeded Admin for Dev Testing
-                  TextButton.icon(
-                    onPressed: _isBusy ? null : _seededAdminLogin,
-                    icon: const Icon(Icons.science_outlined, size: 16),
-                    label: const Text('Đăng nhập tài khoản Test nội bộ (Admin)'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: Colors.grey,
-                      textStyle: AppTheme.monoFont(fontSize: 11),
-                    ),
-                  ),
                   if (_error != null) ...[
                     const SizedBox(height: 14),
                     Text(
@@ -310,34 +306,24 @@ class _AuthScreenState extends State<AuthScreen> {
         );
         _openOtpVerify(pending.userId, pending.email);
       } else {
-        await _api.login(
+        final outcome = await _api.login(
           email: _emailController.text.trim(),
           password: _passwordController.text,
         );
+        if (outcome.mfaRequired) {
+          // No 2FA screen on mobile yet; say so instead of failing on a null
+          // access token (BR-12 makes 2FA mandatory for Admin accounts).
+          setState(() => _error =
+              'Tài khoản này bật xác thực 2 bước. Hãy đăng nhập trên web '
+              'KusShoes để hoàn tất bước xác minh.');
+          return;
+        }
         _openScanner(isGuest: false);
       }
+    } on ApiException catch (error) {
+      setState(() => _error = error.message);
     } catch (error) {
       setState(() => _error = 'Xác thực thất bại: $error');
-    } finally {
-      if (mounted) {
-        setState(() => _isBusy = false);
-      }
-    }
-  }
-
-  Future<void> _seededAdminLogin() async {
-    setState(() {
-      _isBusy = true;
-      _error = null;
-    });
-    try {
-      await _api.login(
-        email: _seededAdminEmail,
-        password: _seededAdminPassword,
-      );
-      _openScanner(isGuest: false);
-    } catch (error) {
-      setState(() => _error = 'Đăng nhập admin thất bại: $error');
     } finally {
       if (mounted) {
         setState(() => _isBusy = false);

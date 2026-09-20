@@ -1,6 +1,6 @@
 {
-    "name": "shoe_visual_customizer_mobile",
-    "short_name": "shoe_visual_customizer_mobile",
+    "name": "KusShoes",
+    "short_name": "KusShoes",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

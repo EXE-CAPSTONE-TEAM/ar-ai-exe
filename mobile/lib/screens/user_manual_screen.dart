@@ -7,34 +7,36 @@ class UserManualScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).padding.bottom;
     return SafeArea(
       bottom: false,
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 440),
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(18, 20, 18, 120),
+            padding: EdgeInsets.fromLTRB(18, 16, 18, 108 + bottomInset),
             children: [
               Row(
                 children: [
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: AppTheme.orange.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppTheme.orange.withValues(alpha: 0.3)),
+                      color: AppTheme.orange.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: AppTheme.orange.withValues(alpha: 0.35)),
                     ),
                     child: Text(
-                      'SC-24 · CẨM NANG',
+                      'CẨM NANG SỬ DỤNG',
                       style: AppTheme.monoFont(
-                        fontSize: 11,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
                         color: AppTheme.orange,
-                        letterSpacing: 1.0,
+                        letterSpacing: 1.2,
                       ),
                     ),
                   ),
                   const Spacer(),
-                  const Icon(Icons.menu_book_outlined, color: AppTheme.orange),
+                  const Icon(Icons.menu_book_outlined, color: AppTheme.orange, size: 20),
                 ],
               ),
               const SizedBox(height: 14),
@@ -105,7 +107,7 @@ class _WorkflowGuideSection extends StatelessWidget {
           step: '03',
           title: 'Xuất File & Giao Nghệ Nhân',
           description:
-              'Tải file GLB/OBJ kèm Gói tham khảo màu sắc hoặc tạo Link Nghệ nhân (SC-34) để thợ gia công vẽ tay ngoài thực tế.',
+              'Tải file GLB/OBJ kèm Gói tham khảo màu sắc hoặc tạo Link Nghệ nhân 3D để thợ gia công vẽ tay ngoài thực tế.',
           icon: Icons.brush_outlined,
         ),
       ],
@@ -226,7 +228,7 @@ class _PostExportFaqSection extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           _bulletPoint('1. Mở tính năng "Tạo Link Nghệ Nhân" trong dự án đã hoàn tất.'),
-          _bulletPoint('2. Gửi đường link độc lập (SC-34) cho xưởng hoặc nghệ nhân vẽ giày.'),
+          _bulletPoint('2. Gửi đường link 3D độc lập cho xưởng hoặc nghệ nhân vẽ giày.'),
           _bulletPoint('3. Nghệ nhân mở link trên trình duyệt xoay 360°, xem chuẩn mã màu Pantone/Hex và tỷ lệ decal để vẽ tay chính xác 100%.'),
         ],
       ),
@@ -261,7 +263,7 @@ class _ArtisanDirectorySection extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                'DANH BẠ NGHỆ NHÂN THAM KHẢO (BR-102)',
+                'DANH BẠ NGHỆ NHÂN LIÊN KẾT',
                 style: AppTheme.monoFont(
                   fontSize: 12,
                   letterSpacing: 1.2,
@@ -318,7 +320,7 @@ class _ArtisanDirectorySection extends StatelessWidget {
             border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
           ),
           child: Text(
-            '⚠️ Tuyên bố miễn trừ (BR-101): KusShoes cung cấp danh bạ tham khảo độc lập nhằm hỗ trợ kết nối khách hàng và nghệ nhân tự do. KusShoes không thu phí hoa hồng và không chịu trách nhiệm chất lượng gia công vật lý bên ngoài.',
+            'Lưu ý & Miễn trừ trách nhiệm: KusShoes cung cấp danh bạ tham khảo độc lập nhằm hỗ trợ kết nối khách hàng và nghệ nhân tự do. KusShoes không thu phí hoa hồng và không chịu trách nhiệm chất lượng gia công vật lý bên ngoài.',
             style: AppTheme.bodyFont(
               fontSize: 11.5,
               color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),

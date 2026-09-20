@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/api_exception.dart';
 import '../services/backend_api.dart';
 import '../app/app_shell.dart';
 
@@ -8,7 +9,7 @@ class OtpVerifyScreen extends StatefulWidget {
     required this.api,
     required this.userId,
     required this.email,
-    this.themeMode = ThemeMode.dark,
+    this.themeMode = ThemeMode.light,
     this.onThemeModeChanged,
     super.key,
   });
@@ -105,8 +106,10 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
           ),
         ),
       );
+    } on ApiException catch (error) {
+      setState(() => _error = error.message);
     } catch (error) {
-      setState(() => _error = 'Verification failed: $error');
+      setState(() => _error = 'Xác minh không thành công. $error');
     } finally {
       if (mounted) setState(() => _isBusy = false);
     }
@@ -121,8 +124,10 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
     try {
       await widget.api.resendOtp(userId: widget.userId);
       setState(() => _info = 'A new code was sent.');
+    } on ApiException catch (error) {
+      setState(() => _error = error.message);
     } catch (error) {
-      setState(() => _error = 'Resend failed: $error');
+      setState(() => _error = 'Không gửi lại được mã. $error');
     } finally {
       if (mounted) setState(() => _isBusy = false);
     }

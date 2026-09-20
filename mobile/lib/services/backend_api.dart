@@ -1,13 +1,20 @@
 import 'dart:math';
 
+import 'package:cookie_jar/cookie_jar.dart';
 import 'package:cross_file/cross_file.dart';
 import 'package:dio/dio.dart';
+import 'package:dio_cookie_manager/dio_cookie_manager.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:path_provider/path_provider.dart';
 
+import '../config/app_config.dart';
+import '../models/account.dart';
 import '../models/reconstruction_readiness.dart';
 import '../models/kiri_status.dart';
 import '../models/scan_metadata.dart';
 import '../models/scan_upload_result.dart';
+import 'api_exception.dart';
 import 'token_storage.dart';
 
 /// Result of a claimed compute grant: a project-scoped scan token is now
@@ -32,6 +39,22 @@ class PendingRegistration {
   final String email;
 }
 
+/// `POST /auth/login` can answer with tokens or with a 2FA challenge
+/// (mandatory for Admin under BR-12), so the caller must branch.
+class LoginOutcome {
+  const LoginOutcome({
+    required this.signedIn,
+    this.mfaRequired = false,
+    this.challengeToken,
+    this.method,
+  });
+
+  final bool signedIn;
+  final bool mfaRequired;
+  final String? challengeToken;
+  final String? method;
+}
+
 class BackendApi {
   BackendApi({
     Dio? dio,
@@ -39,42 +62,62 @@ class BackendApi {
     TokenStorage? tokenStorage,
     String? kusshoesBaseUrl,
     String? computeBaseUrl,
-  })  : _kusshoesBaseUrl = kusshoesBaseUrl ??
-            const String.fromEnvironment(
-              'KUSSHOES_BASE_URL',
-              defaultValue: 'http://172.16.1.232:8000',
-            ),
-        _computeBaseUrl = computeBaseUrl ??
-            const String.fromEnvironment(
-              'COMPUTE_BASE_URL',
-              defaultValue: 'http://172.16.1.232:8010',
-            ),
+    CookieJar? cookieJar,
+  })  : _kusshoesBaseUrl = kusshoesBaseUrl ?? AppConfig.kusshoesBaseUrl,
+        _computeBaseUrl = computeBaseUrl ?? AppConfig.computeBaseUrl,
         _tokenStorage = tokenStorage ?? TokenStorage(secureStorage),
-        _dio = dio ?? Dio();
+        _injectedCookieJar = cookieJar,
+        _dio = dio ?? Dio() {
+    _dio.options.connectTimeout ??= const Duration(seconds: 20);
+    _dio.options.receiveTimeout ??= const Duration(seconds: 60);
+    _dio.interceptors.add(InterceptorsWrapper(onError: _onError));
+  }
+
+  /// The app shares one client so the in-memory access token, the rotated
+  /// refresh cookie and the scan token stay consistent across screens.
+  static BackendApi? _shared;
+
+  static BackendApi get shared => _shared ??= BackendApi();
+
+  @visibleForTesting
+  static set shared(BackendApi api) => _shared = api;
 
   static const _accessTokenKey = 'kusshoes_access_token';
-  static const _refreshTokenKey = 'kusshoes_refresh_token';
+
+  /// Written by an earlier build that expected a refresh token in the response
+  /// body. The backend only ever sets it as an httpOnly cookie, so the stored
+  /// value was always null - purged on sign-out so nothing stale lingers.
+  static const _legacyRefreshTokenKey = 'kusshoes_refresh_token';
 
   final Dio _dio;
   final TokenStorage _tokenStorage;
   final String _kusshoesBaseUrl;
+  final CookieJar? _injectedCookieJar;
 
   /// Origin for scan-session/kiri calls. Starts at the compile-time default
   /// and is replaced by the real compute service URL after [beginScan].
   String _computeBaseUrl;
 
   String? _accessToken;
-  String? _refreshToken;
 
   /// Short-lived, project-scoped token minted by the compute service via
   /// `/api/control-plane/scan/exchange`. Kept in memory only — a fresh scan
   /// always re-bootstraps.
   String? _scanAccessToken;
 
+  bool _cookiesReady = false;
+  Future<bool>? _pendingRefresh;
+
+  /// Flips to true once the session cannot be recovered (refresh rejected or
+  /// the account was suspended), so the shell can return to sign-in.
+  final ValueNotifier<bool> sessionExpired = ValueNotifier(false);
+
   Future<bool> hasStoredToken() async {
     _accessToken ??= await _tokenStorage.read(_accessTokenKey);
     return _accessToken != null;
   }
+
+  // --- Auth -----------------------------------------------------------------
 
   Future<PendingRegistration> register({
     required String name,
@@ -82,9 +125,9 @@ class BackendApi {
     required String email,
     required String password,
   }) async {
-    final response = await _dio.post<Map<String, dynamic>>(
+    final data = await _post(
       '$_kusshoesBaseUrl/api/v1/auth/register',
-      data: {
+      body: {
         'email': email,
         'username': username,
         'password': password,
@@ -92,7 +135,6 @@ class BackendApi {
         'full_name': name,
       },
     );
-    final data = response.data!;
     return PendingRegistration(
       userId: data['user_id'] as String,
       email: data['email'] as String,
@@ -103,94 +145,166 @@ class BackendApi {
     required String userId,
     required String otpCode,
   }) async {
-    final response = await _dio.post<Map<String, dynamic>>(
+    final data = await _post(
       '$_kusshoesBaseUrl/api/v1/auth/verify-otp',
-      data: {'user_id': userId, 'otp_code': otpCode},
+      body: {'user_id': userId, 'otp_code': otpCode},
     );
-    await _storeKusshoesTokens(response.data);
+    await _storeAccessToken(data);
   }
 
   Future<void> resendOtp({required String userId}) async {
-    await _dio.post<void>(
+    await _post(
       '$_kusshoesBaseUrl/api/v1/auth/resend-otp',
-      data: {'user_id': userId},
+      body: {'user_id': userId},
     );
   }
 
-  Future<void> login({required String email, required String password}) async {
-    final response = await _dio.post<Map<String, dynamic>>(
+  Future<LoginOutcome> login({
+    required String email,
+    required String password,
+  }) async {
+    final data = await _post(
       '$_kusshoesBaseUrl/api/v1/auth/login',
-      data: {'email': email, 'password': password},
+      body: {'email': email, 'password': password},
     );
-    await _storeKusshoesTokens(response.data);
+    if (data['mfa_required'] == true) {
+      return LoginOutcome(
+        signedIn: false,
+        mfaRequired: true,
+        challengeToken: data['challenge_token'] as String?,
+        method: data['method'] as String?,
+      );
+    }
+    await _storeAccessToken(data);
+    return const LoginOutcome(signedIn: true);
+  }
+
+  /// Completes a 2FA challenge returned by [login].
+  Future<void> verifyTwoFactor({
+    required String challengeToken,
+    required String code,
+  }) async {
+    final data = await _post(
+      '$_kusshoesBaseUrl/api/v1/auth/2fa/verify',
+      body: {'challenge_token': challengeToken, 'code': code},
+    );
+    await _storeAccessToken(data);
   }
 
   Future<void> logout() async {
-    final refreshToken = _refreshToken;
-    if (_accessToken != null && refreshToken != null) {
+    if (_accessToken != null) {
       try {
-        await _dio.post<void>(
+        // The refresh token lives in the httpOnly cookie the jar replays, so
+        // no body is needed for the server-side revoke.
+        await _post(
           '$_kusshoesBaseUrl/api/v1/auth/logout',
-          data: {'refresh_token': refreshToken},
-          options: _kusshoesAuthOptions(),
+          body: const <String, dynamic>{},
+          authenticated: true,
         );
       } catch (_) {
-        // Best-effort server-side revoke; local state is cleared below either way.
+        // Best-effort revoke; local state is cleared below either way.
       }
     }
-    _accessToken = null;
-    _refreshToken = null;
-    _scanAccessToken = null;
-    await _tokenStorage.delete(_accessTokenKey);
-    await _tokenStorage.delete(_refreshTokenKey);
+    await _clearSession();
   }
 
-  /// Bootstraps a KusShoes project for a new scan, then exchanges the
-  /// returned compute grant for a project-scoped scan token. Must run
-  /// before [createScanSession] / upload / kiri calls.
-  Future<ScanGrant> beginScan({required String projectName}) async {
-    await _ensureKusshoesToken();
-    final bootstrap = await _dio.post<Map<String, dynamic>>(
+  // --- Account ---------------------------------------------------------------
+
+  /// `GET /api/v1/users/me`
+  Future<UserProfile> getProfile() async {
+    await _ensureAccessToken();
+    return UserProfile.fromJson(
+      await _get('$_kusshoesBaseUrl/api/v1/users/me', authenticated: true),
+    );
+  }
+
+  /// `GET /api/v1/users/me/usage` — plan tier and per-cycle quota counters.
+  Future<AccountUsage> getUsage() async {
+    await _ensureAccessToken();
+    return AccountUsage.fromJson(
+      await _get('$_kusshoesBaseUrl/api/v1/users/me/usage', authenticated: true),
+    );
+  }
+
+  /// `GET /api/v1/subscription`
+  Future<SubscriptionInfo> getSubscription() async {
+    await _ensureAccessToken();
+    return SubscriptionInfo.fromJson(
+      await _get('$_kusshoesBaseUrl/api/v1/subscription', authenticated: true),
+    );
+  }
+
+  /// `GET /api/v1/projects` — one cursor page of the signed-in user's designs.
+  Future<ProjectPage> listProjects({String? cursor, int limit = 20}) async {
+    await _ensureAccessToken();
+    final query = <String, String>{
+      'limit': '$limit',
+      if (cursor != null) 'cursor': cursor,
+    };
+    final suffix = query.entries
+        .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+        .join('&');
+    return ProjectPage.fromJson(
+      await _get(
+        '$_kusshoesBaseUrl/api/v1/projects?$suffix',
+        authenticated: true,
+      ),
+    );
+  }
+
+  // --- Scan flow ------------------------------------------------------------
+
+  /// Bootstraps a KusShoes project for a new scan, then exchanges the returned
+  /// compute grant for a project-scoped scan token. Must run before
+  /// [createScanSession] / upload / kiri calls.
+  ///
+  /// [clientRequestId] keys the server's idempotency record, so a retry of a
+  /// failed scan attempt MUST reuse the same value — a fresh id creates a
+  /// second empty project (see [newScanRequestId]).
+  Future<ScanGrant> beginScan({
+    required String projectName,
+    required String clientRequestId,
+  }) async {
+    await _ensureAccessToken();
+    final bootstrap = await _post(
       '$_kusshoesBaseUrl/api/v1/mobile/scans/bootstrap',
-      data: {
-        'client_request_id': _uuidV4(),
+      body: {
+        'client_request_id': clientRequestId,
         'project_name': projectName,
       },
-      options: _kusshoesAuthOptions(),
+      authenticated: true,
     );
-    final bootstrapData = bootstrap.data!;
-    _computeBaseUrl = bootstrapData['compute_api_url'] as String;
-    final computeGrant = bootstrapData['compute_grant'] as String;
+    _computeBaseUrl = bootstrap['compute_api_url'] as String;
+    final computeGrant = bootstrap['compute_grant'] as String;
 
-    final exchange = await _dio.post<Map<String, dynamic>>(
+    final exchange = await _post(
       '$_computeBaseUrl/api/control-plane/scan/exchange',
-      data: {'computeGrant': computeGrant},
+      body: {'computeGrant': computeGrant},
     );
-    final exchangeData = exchange.data!;
-    _scanAccessToken = exchangeData['accessToken'] as String;
+    _scanAccessToken = exchange['accessToken'] as String;
     return ScanGrant(
-      projectId: exchangeData['projectId'] as String,
-      projectName: exchangeData['projectName'] as String,
-      webProjectUrl: exchangeData['webProjectUrl'] as String,
+      projectId: exchange['projectId'] as String,
+      projectName: exchange['projectName'] as String,
+      webProjectUrl: exchange['webProjectUrl'] as String,
     );
   }
+
+  /// A stable id for one scan attempt, including all of its retries.
+  static String newScanRequestId() => _uuidV4();
 
   Future<String> createScanSession({required ScanMetadata metadata}) async {
     _ensureScanToken();
-    final response = await _dio.post<Map<String, dynamic>>(
+    final data = await _post(
       '$_computeBaseUrl/api/scan-sessions',
-      data: {'metadata': metadata.toJson()},
-      options: _scanAuthOptions(),
+      body: {'metadata': metadata.toJson()},
+      scanScoped: true,
     );
-    return response.data?['id'] as String;
+    return data['id'] as String;
   }
 
   Future<ReconstructionReadiness> getReconstructionReadiness() async {
-    final response = await _dio.get<Map<String, dynamic>>(
-      '$_computeBaseUrl/api/system/reconstruction-readiness',
-    );
     return ReconstructionReadiness.fromJson(
-      response.data ?? const <String, dynamic>{},
+      await _get('$_computeBaseUrl/api/system/reconstruction-readiness'),
     );
   }
 
@@ -201,51 +315,59 @@ class BackendApi {
     required void Function(int sent, int total) onProgress,
   }) async {
     _ensureScanToken();
-
-    final formData = FormData.fromMap({
-      'video': MultipartFile.fromBytes(
-        await videoFile.readAsBytes(),
-        filename: '$passType.mp4',
-      ),
-    });
-
-    final response = await _dio.post<Map<String, dynamic>>(
-      '$_computeBaseUrl/api/scan-sessions/$scanSessionId/videos/$passType',
-      data: formData,
-      options: _scanAuthOptions(contentType: 'multipart/form-data'),
-      onSendProgress: onProgress,
-    );
-
-    return ScanUploadResult.fromJson(response.data!);
+    await _ensureCookieJar();
+    try {
+      // Streamed from disk rather than read into memory: a 60s 1080p pass can
+      // run to tens of MB and BR-34 allows up to 200MB per job.
+      final formData = FormData.fromMap({
+        'video': await MultipartFile.fromFile(
+          videoFile.path,
+          filename: '$passType.mp4',
+        ),
+      });
+      final response = await _dio.post<Map<String, dynamic>>(
+        '$_computeBaseUrl/api/scan-sessions/$scanSessionId/videos/$passType',
+        data: formData,
+        options: _scanAuthOptions(contentType: 'multipart/form-data'),
+        onSendProgress: onProgress,
+      );
+      return ScanUploadResult.fromJson(response.data!);
+    } catch (error) {
+      throw ApiException.from(error);
+    }
   }
 
   Future<String> startProcessing({required String scanSessionId}) async {
     _ensureScanToken();
-    final response = await _dio.post<Map<String, dynamic>>(
+    final data = await _post(
       '$_computeBaseUrl/api/scan-sessions/$scanSessionId/process',
-      data: <String, dynamic>{},
-      options: _scanAuthOptions(),
+      body: const <String, dynamic>{},
+      scanScoped: true,
     );
-    return response.data?['status'] as String? ?? 'uploaded';
+    return data['status'] as String? ?? 'uploaded';
   }
 
-  Future<KiriStatus> startKiriProcessing({required String scanSessionId}) async {
+  Future<KiriStatus> startKiriProcessing({
+    required String scanSessionId,
+  }) async {
     _ensureScanToken();
-    final response = await _dio.post<Map<String, dynamic>>(
-      '$_computeBaseUrl/api/scan-sessions/$scanSessionId/kiri/process',
-      data: const <String, dynamic>{},
-      options: _scanAuthOptions(),
+    return _kiriStatus(
+      await _post(
+        '$_computeBaseUrl/api/scan-sessions/$scanSessionId/kiri/process',
+        body: const <String, dynamic>{},
+        scanScoped: true,
+      ),
     );
-    return _kiriStatus(response.data);
   }
 
   Future<KiriStatus> getKiriStatus({required String scanSessionId}) async {
     _ensureScanToken();
-    final response = await _dio.get<Map<String, dynamic>>(
-      '$_computeBaseUrl/api/scan-sessions/$scanSessionId/kiri/status',
-      options: _scanAuthOptions(),
+    return _kiriStatus(
+      await _get(
+        '$_computeBaseUrl/api/scan-sessions/$scanSessionId/kiri/status',
+        scanScoped: true,
+      ),
     );
-    return _kiriStatus(response.data);
   }
 
   Future<KiriStatus> configureCrop({
@@ -253,12 +375,13 @@ class BackendApi {
     required CropBox cropBox,
   }) async {
     _ensureScanToken();
-    final response = await _dio.post<Map<String, dynamic>>(
-      '$_computeBaseUrl/api/scan-sessions/$scanSessionId/crop',
-      data: cropBox.toJson(),
-      options: _scanAuthOptions(),
+    return _kiriStatus(
+      await _post(
+        '$_computeBaseUrl/api/scan-sessions/$scanSessionId/crop',
+        body: cropBox.toJson(),
+        scanScoped: true,
+      ),
     );
-    return _kiriStatus(response.data);
   }
 
   Future<KiriStatus> saveKiriProject({
@@ -267,20 +390,20 @@ class BackendApi {
     required CropBox cropBox,
   }) async {
     _ensureScanToken();
-    final response = await _dio.post<Map<String, dynamic>>(
-      '$_computeBaseUrl/api/scan-sessions/$scanSessionId/save-project',
-      data: {
-        'projectName': projectName,
-        'cropBox': cropBox.toJson(),
-      },
-      options: _scanAuthOptions(),
+    return _kiriStatus(
+      await _post(
+        '$_computeBaseUrl/api/scan-sessions/$scanSessionId/save-project',
+        body: {'projectName': projectName, 'cropBox': cropBox.toJson()},
+        scanScoped: true,
+      ),
     );
-    return _kiriStatus(response.data);
   }
 
-  KiriStatus _kiriStatus(Map<String, dynamic>? payload) {
-    if (payload == null) {
-      throw Exception('Backend did not return Kiri status.');
+  KiriStatus _kiriStatus(Map<String, dynamic> payload) {
+    if (payload.isEmpty) {
+      throw const ApiException(
+        message: 'Máy chủ không trả về trạng thái dựng 3D. Vui lòng thử lại.',
+      );
     }
     final status = KiriStatus.fromJson(payload);
     final previewUrl = status.previewUrl;
@@ -300,30 +423,186 @@ class BackendApi {
     );
   }
 
-  Future<void> _storeKusshoesTokens(Map<String, dynamic>? payload) async {
-    final accessToken = payload?['access_token'] as String?;
-    final refreshToken = payload?['refresh_token'] as String?;
-    if (accessToken == null) {
-      throw Exception('Backend did not return an access token.');
-    }
-    _accessToken = accessToken;
-    _refreshToken = refreshToken;
-    await _tokenStorage.write(_accessTokenKey, accessToken);
-    if (refreshToken != null) {
-      await _tokenStorage.write(_refreshTokenKey, refreshToken);
+  // --- Transport ------------------------------------------------------------
+
+  Future<Map<String, dynamic>> _post(
+    String url, {
+    required Object body,
+    bool authenticated = false,
+    bool scanScoped = false,
+  }) async {
+    await _ensureCookieJar();
+    try {
+      final response = await _dio.post<Map<String, dynamic>>(
+        url,
+        data: body,
+        options: _optionsFor(
+          authenticated: authenticated,
+          scanScoped: scanScoped,
+        ),
+      );
+      return response.data ?? const <String, dynamic>{};
+    } catch (error) {
+      throw ApiException.from(error);
     }
   }
 
-  Future<void> _ensureKusshoesToken() async {
+  Future<Map<String, dynamic>> _get(
+    String url, {
+    bool authenticated = false,
+    bool scanScoped = false,
+  }) async {
+    await _ensureCookieJar();
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        url,
+        options: _optionsFor(
+          authenticated: authenticated,
+          scanScoped: scanScoped,
+        ),
+      );
+      return response.data ?? const <String, dynamic>{};
+    } catch (error) {
+      throw ApiException.from(error);
+    }
+  }
+
+  Options? _optionsFor({
+    required bool authenticated,
+    required bool scanScoped,
+  }) {
+    if (scanScoped) {
+      return _scanAuthOptions();
+    }
+    return authenticated ? _kusshoesAuthOptions() : null;
+  }
+
+  /// Attaches the cookie manager on first use. `PersistCookieJar` keeps the
+  /// rotated `kusshoes_refresh_token` cookie across app restarts — the backend
+  /// only ever returns the refresh token in that httpOnly cookie, never in a
+  /// response body, and each one is single-use.
+  Future<void> _ensureCookieJar() async {
+    if (_cookiesReady) {
+      return;
+    }
+    _cookiesReady = true;
+    if (_injectedCookieJar != null) {
+      _dio.interceptors.add(CookieManager(_injectedCookieJar));
+      return;
+    }
+    if (kIsWeb) {
+      // The browser manages cookies itself.
+      return;
+    }
+    try {
+      final dir = await getApplicationSupportDirectory();
+      _dio.interceptors.add(
+        CookieManager(
+          PersistCookieJar(
+            storage: FileStorage('${dir.path}/.kusshoes-cookies'),
+          ),
+        ),
+      );
+    } catch (_) {
+      // Fall back to an in-memory jar: refresh still works for this run.
+      _dio.interceptors.add(CookieManager(CookieJar()));
+    }
+  }
+
+  Future<void> _onError(
+    DioException error,
+    ErrorInterceptorHandler handler,
+  ) async {
+    final request = error.requestOptions;
+    final isKusshoesCall = request.uri.toString().startsWith(_kusshoesBaseUrl);
+    final isRefreshCall = request.path.endsWith('/auth/refresh');
+    final alreadyRetried = request.extra['kusshoes_retried'] == true;
+
+    if (error.response?.statusCode != 401 ||
+        !isKusshoesCall ||
+        isRefreshCall ||
+        alreadyRetried ||
+        _accessToken == null) {
+      return handler.next(error);
+    }
+
+    final refreshed = await _refreshAccessToken();
+    if (!refreshed) {
+      await _clearSession();
+      sessionExpired.value = true;
+      return handler.next(error);
+    }
+
+    try {
+      request
+        ..headers['Authorization'] = 'Bearer $_accessToken'
+        ..extra['kusshoes_retried'] = true;
+      return handler.resolve(await _dio.fetch<dynamic>(request));
+    } on DioException catch (retryError) {
+      return handler.next(retryError);
+    }
+  }
+
+  /// Single-flight: concurrent 401s share one refresh round-trip so the
+  /// single-use refresh cookie is not spent twice.
+  Future<bool> _refreshAccessToken() {
+    return _pendingRefresh ??= _performRefresh().whenComplete(() {
+      _pendingRefresh = null;
+    });
+  }
+
+  Future<bool> _performRefresh() async {
+    try {
+      final response = await _dio.post<Map<String, dynamic>>(
+        '$_kusshoesBaseUrl/api/v1/auth/refresh',
+        data: const <String, dynamic>{},
+      );
+      final accessToken = response.data?['access_token'] as String?;
+      if (accessToken == null) {
+        return false;
+      }
+      _accessToken = accessToken;
+      await _tokenStorage.write(_accessTokenKey, accessToken);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _storeAccessToken(Map<String, dynamic>? payload) async {
+    final accessToken = payload?['access_token'] as String?;
+    if (accessToken == null) {
+      throw const ApiException(
+        message: 'Máy chủ không trả về token đăng nhập. Vui lòng thử lại.',
+      );
+    }
+    _accessToken = accessToken;
+    sessionExpired.value = false;
+    await _tokenStorage.write(_accessTokenKey, accessToken);
+  }
+
+  Future<void> _clearSession() async {
+    _accessToken = null;
+    _scanAccessToken = null;
+    await _tokenStorage.delete(_accessTokenKey);
+    await _tokenStorage.delete(_legacyRefreshTokenKey);
+  }
+
+  Future<void> _ensureAccessToken() async {
     _accessToken ??= await _tokenStorage.read(_accessTokenKey);
     if (_accessToken == null) {
-      throw Exception('Sign in before starting a scan.');
+      throw const ApiException(
+        message: 'Bạn cần đăng nhập trước khi quét giày.',
+        isAuthExpired: true,
+      );
     }
   }
 
   void _ensureScanToken() {
     if (_scanAccessToken == null) {
-      throw Exception('Scan session expired. Start a new scan.');
+      throw const ApiException(
+        message: 'Phiên quét đã hết hạn. Hãy bắt đầu một lượt quét mới.',
+      );
     }
   }
 

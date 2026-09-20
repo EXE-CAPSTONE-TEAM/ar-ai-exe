@@ -1,8 +1,16 @@
-import 'package:flutter/material.dart';
+import 'dart:ui';
 
+import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../config/app_config.dart';
+import '../models/account.dart';
 import '../screens/auth_screen.dart';
+import '../screens/my_designs_screen.dart';
+import '../screens/plan_usage_screen.dart';
 import '../screens/scan_home_screen.dart';
 import '../screens/user_manual_screen.dart';
+import '../services/api_exception.dart';
 import '../services/backend_api.dart';
 import 'app_theme.dart';
 
@@ -26,7 +34,31 @@ class _AppShellState extends State<AppShell> {
   int _index = 1;
 
   @override
+  void initState() {
+    super.initState();
+    BackendApi.shared.sessionExpired.addListener(_onSessionExpired);
+  }
+
+  @override
+  void dispose() {
+    BackendApi.shared.sessionExpired.removeListener(_onSessionExpired);
+    super.dispose();
+  }
+
+  /// Access tokens live 15 minutes (NFR-SEC-11) and the client refreshes them
+  /// transparently; this only fires when the refresh itself was rejected.
+  void _onSessionExpired() {
+    if (!mounted || !BackendApi.shared.sessionExpired.value) {
+      return;
+    }
+    _returnToSignIn(
+      message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.',
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).padding.bottom;
     final pages = [
       const _ExploreTab(),
       ScanHomeScreen(isGuest: widget.isGuest),
@@ -44,9 +76,9 @@ class _AppShellState extends State<AppShell> {
         children: [
           Positioned.fill(child: pages[_index]),
           Positioned(
-            left: 12,
-            right: 12,
-            bottom: 16,
+            left: 14,
+            right: 14,
+            bottom: bottomInset > 0 ? bottomInset + 8 : 16,
             child: _PillBottomNav(
               index: _index,
               onChanged: (value) => setState(() => _index = value),
@@ -58,9 +90,18 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _logout() async {
-    await BackendApi().logout();
+    await BackendApi.shared.logout();
     if (!mounted) {
       return;
+    }
+    _returnToSignIn();
+  }
+
+  void _returnToSignIn({String? message}) {
+    if (message != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
     }
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(
@@ -81,13 +122,14 @@ class _TabScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).padding.bottom;
     return SafeArea(
       bottom: false,
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 430),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 18, 18, 132),
+            padding: EdgeInsets.fromLTRB(18, 16, 18, 108 + bottomInset),
             child: child,
           ),
         ),
@@ -110,52 +152,66 @@ class _PillBottomNav extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 410),
-        child: DecoratedBox(
+        constraints: const BoxConstraints(maxWidth: 400),
+        child: Container(
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xF2151515) : Colors.white,
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(
-              color: isDark ? const Color(0xFF2C2C2C) : const Color(0xFFFFD0BC),
-            ),
+            borderRadius: BorderRadius.circular(32),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.5 : 0.12),
-                blurRadius: 28,
-                offset: const Offset(0, 18),
+                color: Colors.black.withValues(alpha: isDark ? 0.6 : 0.14),
+                blurRadius: 32,
+                offset: const Offset(0, 16),
               ),
             ],
           ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 10, 10, 9),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _NavItem(
-                  selected: index == 0,
-                  icon: Icons.explore_outlined,
-                  label: 'Khám phá',
-                  onTap: () => onChanged(0),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(32),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xD8141417)
+                      : const Color(0xF2FFFFFF),
+                  borderRadius: BorderRadius.circular(32),
+                  border: Border.all(
+                    color: isDark
+                        ? const Color(0x33FF5A36)
+                        : const Color(0xFFFFD5C4),
+                    width: 1.2,
+                  ),
                 ),
-                _NavItem(
-                  selected: index == 1,
-                  icon: Icons.center_focus_strong,
-                  label: 'Quét AI',
-                  onTap: () => onChanged(1),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _NavItem(
+                      selected: index == 0,
+                      icon: Icons.explore_outlined,
+                      label: 'Khám phá',
+                      onTap: () => onChanged(0),
+                    ),
+                    _NavItem(
+                      selected: index == 1,
+                      icon: Icons.center_focus_strong,
+                      label: 'Quét AI',
+                      onTap: () => onChanged(1),
+                    ),
+                    _NavItem(
+                      selected: index == 2,
+                      icon: Icons.menu_book_outlined,
+                      label: 'Cẩm nang',
+                      onTap: () => onChanged(2),
+                    ),
+                    _NavItem(
+                      selected: index == 3,
+                      icon: Icons.person_outline,
+                      label: 'Cá nhân',
+                      onTap: () => onChanged(3),
+                    ),
+                  ],
                 ),
-                _NavItem(
-                  selected: index == 2,
-                  icon: Icons.menu_book_outlined,
-                  label: 'Cẩm nang',
-                  onTap: () => onChanged(2),
-                ),
-                _NavItem(
-                  selected: index == 3,
-                  icon: Icons.person_outline,
-                  label: 'Cá nhân',
-                  onTap: () => onChanged(3),
-                ),
-              ],
+              ),
             ),
           ),
         ),
@@ -179,43 +235,66 @@ class _NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? AppTheme.orange : const Color(0xFF9D9D9D);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final color = selected
+        ? AppTheme.orange
+        : (isDark ? const Color(0xFF8E8E93) : const Color(0xFF757575));
     return InkWell(
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: BorderRadius.circular(20),
       onTap: onTap,
-      child: SizedBox(
-        width: 82,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              width: selected ? 52 : 42,
-              height: selected ? 52 : 42,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              width: selected ? 46 : 38,
+              height: selected ? 34 : 30,
               decoration: BoxDecoration(
-                color: selected ? AppTheme.orange : Colors.transparent,
-                shape: BoxShape.circle,
+                color: selected
+                    ? AppTheme.orange.withValues(alpha: 0.18)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(17),
               ),
               child: Icon(
                 icon,
-                color: selected ? Colors.black : color,
-                size: selected ? 27 : 25,
+                color: selected ? AppTheme.orange : color,
+                size: selected ? 22 : 20,
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 3),
             Text(
               label,
               maxLines: 1,
               style: TextStyle(
-                color:
-                    selected ? Theme.of(context).colorScheme.onSurface : color,
-                fontWeight: FontWeight.w800,
-                fontSize: 12,
+                color: selected
+                    ? Theme.of(context).colorScheme.onSurface
+                    : color,
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                fontSize: 11,
+                letterSpacing: selected ? 0.2 : 0,
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Opens the KusShoes web app in the device browser.
+///
+/// Only the site root is linked for now - the deployment has no SPA rewrite,
+/// so sub-paths answer 404 (see [AppConfig.webAppUrl]).
+Future<void> _openWebApp(BuildContext context, {String path = ''}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final uri = Uri.parse(AppConfig.webUrl(path));
+  final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!opened) {
+    messenger.showSnackBar(
+      SnackBar(content: Text('Không mở được trình duyệt. Truy cập $uri')),
     );
   }
 }
@@ -261,7 +340,7 @@ class _ExploreTab extends StatelessWidget {
           ),
           const SizedBox(height: 22),
           FilledButton.icon(
-            onPressed: () {},
+            onPressed: () => _openWebApp(context),
             icon: const Icon(Icons.open_in_browser),
             label: const Text('MỞ KUS STUDIO TRÊN WEB'),
           ),
@@ -299,17 +378,27 @@ class _ExploreTab extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.04),
-              borderRadius: BorderRadius.circular(12),
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.white.withValues(alpha: 0.03)
+                  : AppTheme.orange.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : AppTheme.orange.withValues(alpha: 0.15),
+              ),
             ),
             child: Text(
-              'Ghi chú (SC-27): Các tính năng trên thuộc kế hoạch mở rộng tương lai. Trong kỳ EXE201, KusShoes tập trung vào Quét 3D, Thiết kế web và Xuất file.',
+              'KusShoes tập trung tối đa vào trải nghiệm Quét 3D, Studio tùy biến Web và Xuất file GLB chuẩn cho nghệ nhân gia công.',
               style: AppTheme.bodyFont(
-                fontSize: 11.5,
-                color: Colors.grey,
-                height: 1.35,
+                fontSize: 12,
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withValues(alpha: 0.6),
+                height: 1.4,
               ),
             ),
           ),
@@ -332,18 +421,21 @@ class _MiniBrand extends StatelessWidget {
           width: 38,
           height: 38,
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [AppTheme.orange, AppTheme.crimson],
-            ),
+            color: Colors.white,
             borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.orange.withValues(alpha: 0.2),
+                blurRadius: 8,
+              ),
+            ],
           ),
-          alignment: Alignment.center,
-          child: const Text(
-            'K',
-            style: TextStyle(
-              color: Colors.black,
-              fontWeight: FontWeight.w900,
-              fontSize: 20,
+          padding: const EdgeInsets.all(4),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.asset(
+              'assets/images/logo.png',
+              fit: BoxFit.contain,
             ),
           ),
         ),
@@ -494,15 +586,15 @@ class _WebsiteTile extends StatelessWidget {
         title: const Text('Truy cập KusShoes Studio',
             style: TextStyle(fontWeight: FontWeight.w900)),
         subtitle: const Text('Mở 3D Editor trên web, xem thư viện phôi & cộng đồng'),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () {},
+        trailing: const Icon(Icons.open_in_new, size: 18),
+        onTap: () => _openWebApp(context),
       ),
     );
   }
 }
 
 
-class _ProfileTab extends StatelessWidget {
+class _ProfileTab extends StatefulWidget {
   const _ProfileTab({
     required this.themeMode,
     required this.onThemeModeChanged,
@@ -516,193 +608,315 @@ class _ProfileTab extends StatelessWidget {
   final bool isGuest;
 
   @override
-  Widget build(BuildContext context) {
-    final isDark = themeMode == ThemeMode.dark;
-    return _TabScaffold(
-      child: ListView(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Hồ Sơ Cá Nhân',
-                  style: Theme.of(context)
-                      .textTheme
-                      .displaySmall
-                      ?.copyWith(fontWeight: FontWeight.w900),
-                ),
-              ),
-              IconButton.filledTonal(
-                onPressed: onLogout,
-                icon: const Icon(Icons.logout),
-                tooltip: 'Đăng xuất',
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(22),
-              child: Row(
-                children: [
-                  Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: AppTheme.orange.withValues(alpha: 0.8),
-                        width: 2.5,
-                      ),
-                      color: AppTheme.orange.withValues(alpha: 0.1),
-                    ),
-                    child: Icon(
-                      isGuest ? Icons.person_outline : Icons.account_circle,
-                      size: 42,
-                      color: AppTheme.orange,
-                    ),
-                  ),
-                  const SizedBox(width: 20),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          isGuest ? 'Khách Trải Nghiệm' : 'Nguyễn Văn A',
-                          style: AppTheme.headingFont(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          isGuest
-                              ? 'Chế độ khách (1 scan thử)'
-                              : 'TP. Hồ Chí Minh, VN',
-                          style: AppTheme.bodyFont(
-                            fontSize: 13,
-                            color: Colors.grey,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 8,
-                          children: [
-                            _Tag(
-                              isGuest ? 'Guest Trial' : 'Gói Basic',
-                              filled: true,
-                            ),
-                            _Tag(
-                              isGuest ? 'Chưa đăng ký' : 'EXE201 Beta',
-                              filled: false,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
+  State<_ProfileTab> createState() => _ProfileTabState();
+}
 
-          // Guest upsell callout
-          if (isGuest) ...[
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    AppTheme.orange.withValues(alpha: 0.12),
-                    AppTheme.crimson.withValues(alpha: 0.08),
+class _ProfileTabState extends State<_ProfileTab> {
+  BackendApi get _api => BackendApi.shared;
+
+  UserProfile? _profile;
+  AccountUsage? _usage;
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!widget.isGuest) {
+      _load();
+    }
+  }
+
+  /// SC-26: everything on this tab comes from the account endpoints. A guest
+  /// session has no account to read, so it keeps the local-only view.
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final profile = await _api.getProfile();
+      final usage = await _api.getUsage();
+      if (!mounted) return;
+      setState(() {
+        _profile = profile;
+        _usage = usage;
+        _loading = false;
+      });
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.message;
+        _loading = false;
+      });
+    }
+  }
+
+  void _openMyDesigns() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => MyDesignsScreen(api: _api)),
+    );
+  }
+
+  void _openPlanUsage() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => PlanUsageScreen(api: _api)),
+    );
+  }
+
+  void _requireAccount() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Đăng ký tài khoản để dùng mục này.'),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = widget.themeMode == ThemeMode.dark;
+    final profile = _profile;
+    final usage = _usage;
+
+    return _TabScaffold(
+      child: RefreshIndicator(
+        onRefresh: widget.isGuest ? () async {} : _load,
+        child: ListView(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Hồ Sơ Cá Nhân',
+                    style: Theme.of(context)
+                        .textTheme
+                        .displaySmall
+                        ?.copyWith(fontWeight: FontWeight.w900),
+                  ),
+                ),
+                IconButton.filledTonal(
+                  onPressed: widget.onLogout,
+                  icon: const Icon(Icons.logout),
+                  tooltip: 'Đăng xuất',
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(22),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: AppTheme.orange.withValues(alpha: 0.8),
+                          width: 2.5,
+                        ),
+                        color: AppTheme.orange.withValues(alpha: 0.1),
+                      ),
+                      child: Icon(
+                        widget.isGuest
+                            ? Icons.person_outline
+                            : Icons.account_circle,
+                        size: 42,
+                        color: AppTheme.orange,
+                      ),
+                    ),
+                    const SizedBox(width: 20),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.isGuest
+                                ? 'Khách Trải Nghiệm'
+                                : (profile?.displayName ??
+                                    (_loading ? 'Đang tải…' : 'Tài khoản')),
+                            style: AppTheme.headingFont(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            widget.isGuest
+                                ? 'Chế độ khách (chưa có lượt quét)'
+                                : (profile?.email ?? ''),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTheme.bodyFont(
+                              fontSize: 13,
+                              color: Colors.grey,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              _Tag(
+                                widget.isGuest
+                                    ? 'Guest Trial'
+                                    : 'Gói ${usage?.tierLabel ?? '—'}',
+                                filled: true,
+                              ),
+                              if (!widget.isGuest &&
+                                  profile?.accountCode.isNotEmpty == true)
+                                _Tag(profile!.accountCode, filled: false),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: AppTheme.orange.withValues(alpha: 0.35)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.stars, color: AppTheme.orange, size: 20),
-                      const SizedBox(width: 8),
-                      Text(
-                        'NÂNG CẤP LÊN BASIC / PRO',
-                        style: AppTheme.headingFont(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w800,
-                          color: AppTheme.orange,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Đăng ký tài khoản để lưu giữ mô hình scan vĩnh viễn, mở khóa toàn bộ kho phôi và xuất file GLB cho thợ gia công.',
-                    style: AppTheme.bodyFont(fontSize: 12.5, height: 1.4),
-                  ),
-                ],
               ),
             ),
             const SizedBox(height: 20),
-          ],
 
-          Row(
-            children: [
-              Expanded(
-                child: _StatCard(
-                  value: isGuest ? '1/1' : '1',
-                  label: isGuest ? 'SCAN THỬ' : 'LƯỢT QUÉT',
+            if (_error != null) ...[
+              Card(
+                color: Theme.of(context).colorScheme.errorContainer,
+                child: ListTile(
+                  leading: const Icon(Icons.cloud_off_outlined),
+                  title: Text(
+                    _error!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onErrorContainer,
+                      fontSize: 13,
+                    ),
+                  ),
+                  trailing: TextButton(
+                    onPressed: _load,
+                    child: const Text('Thử lại'),
+                  ),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _StatCard(
-                  value: isGuest ? '0' : '12',
-                  label: 'DỰ ÁN',
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _StatCard(
-                  value: isGuest ? '0' : '4',
-                  label: 'FILE XUẤT',
-                ),
-              ),
+              const SizedBox(height: 20),
             ],
-          ),
-          const SizedBox(height: 24),
-          const _SectionLabel('CÀI ĐẶT & QUẢN LÝ'),
-          const SizedBox(height: 10),
-          _MenuTile(
-            icon: isDark ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
-            title: 'Giao diện',
-            subtitle: isDark ? 'Chế độ tối (Dark mode)' : 'Chế độ sáng (Light mode)',
-            trailing: Switch(
-              value: isDark,
-              activeThumbColor: AppTheme.orange,
-              onChanged: (value) =>
-                  onThemeModeChanged(value ? ThemeMode.dark : ThemeMode.light),
+
+            // Guest upsell callout
+            if (widget.isGuest) ...[
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.orange.withValues(alpha: 0.12),
+                      AppTheme.crimson.withValues(alpha: 0.08),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(18),
+                  border:
+                      Border.all(color: AppTheme.orange.withValues(alpha: 0.35)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.stars, color: AppTheme.orange, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          'NÂNG CẤP LÊN BASIC / PRO',
+                          style: AppTheme.headingFont(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.orange,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Đăng ký tài khoản để lưu giữ mô hình scan vĩnh viễn, mở khóa toàn bộ kho phôi và xuất file GLB cho thợ gia công.',
+                      style: AppTheme.bodyFont(fontSize: 12.5, height: 1.4),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+
+            // Live counters from GET /users/me/usage — a null limit on the
+            // plan means unlimited, rendered as the bare count.
+            Row(
+              children: [
+                Expanded(
+                  child: _StatCard(
+                    value: widget.isGuest
+                        ? '0'
+                        : AccountUsage.ratio(
+                            usage?.projectsCount ?? 0,
+                            usage?.maxProjects,
+                          ),
+                    label: 'DỰ ÁN',
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _StatCard(
+                    value: widget.isGuest
+                        ? '0'
+                        : AccountUsage.ratio(
+                            usage?.exportsCount ?? 0,
+                            usage?.maxExportsPerMonth,
+                          ),
+                    label: 'FILE XUẤT',
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _StatCard(
+                    value: widget.isGuest
+                        ? '0'
+                        : AccountUsage.ratio(
+                            usage?.aiCreditsUsed ?? 0,
+                            usage?.aiCreditsLimit,
+                          ),
+                    label: 'AI CREDIT',
+                  ),
+                ),
+              ],
             ),
-          ),
-          const _MenuTile(
-            icon: Icons.palette_outlined,
-            title: 'Thiết kế của tôi',
-            subtitle: 'Quản lý các bản nháp & file 3D',
-          ),
-          const _MenuTile(
-            icon: Icons.card_membership_outlined,
-            title: 'Gói cước & Hạn mức',
-            subtitle: 'Xem gói Basic/Pro và lượt quét còn lại',
-          ),
-          const _MenuTile(
-            icon: Icons.history_outlined,
-            title: 'Lịch sử quét 3D',
-            subtitle: 'Xem các phiên scan và file GLB đã xử lý',
-          ),
-        ],
+            const SizedBox(height: 24),
+            const _SectionLabel('CÀI ĐẶT & QUẢN LÝ'),
+            const SizedBox(height: 10),
+            _MenuTile(
+              icon:
+                  isDark ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
+              title: 'Giao diện',
+              subtitle: isDark
+                  ? 'Chế độ tối (Dark mode)'
+                  : 'Chế độ sáng (Light mode)',
+              trailing: Switch(
+                value: isDark,
+                activeThumbColor: AppTheme.orange,
+                onChanged: (value) => widget
+                    .onThemeModeChanged(value ? ThemeMode.dark : ThemeMode.light),
+              ),
+            ),
+            _MenuTile(
+              icon: Icons.palette_outlined,
+              title: 'Thiết kế của tôi',
+              subtitle: widget.isGuest
+                  ? 'Cần tài khoản để xem dự án'
+                  : 'Danh sách dự án & mở trên Kus Studio Web',
+              onTap: widget.isGuest ? _requireAccount : _openMyDesigns,
+            ),
+            _MenuTile(
+              icon: Icons.card_membership_outlined,
+              title: 'Gói cước & Hạn mức',
+              subtitle: widget.isGuest
+                  ? 'Cần tài khoản để xem hạn mức'
+                  : 'Gói hiện tại, hạn mức dự án / xuất file / AI credit',
+              onTap: widget.isGuest ? _requireAccount : _openPlanUsage,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -739,12 +953,14 @@ class _MenuTile extends StatelessWidget {
     required this.title,
     required this.subtitle,
     this.trailing,
+    this.onTap,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
   final Widget? trailing;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -758,6 +974,7 @@ class _MenuTile extends StatelessWidget {
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
         subtitle: Text(subtitle),
         trailing: trailing ?? const Icon(Icons.chevron_right),
+        onTap: onTap,
       ),
     );
   }
