@@ -61,7 +61,12 @@ flowchart TD
 - Decal placement is manual. Users position sticker/text layers in the web editor; backend bake/export converts them into preview/export geometry.
 - Existing model textures/materials matter. Imported shoes may rely on texture maps, material slots, and polygon material indices to remain visually correct.
 - Mobile App scope is strictly shoe capture, 3D preview, and handover to Web/Desktop Kus Studio. Mobile does not host complex 3D decal editing and does not take manufacturing/shoe cleaning orders.
-- Mobile App follows a 4-tab architecture aligned with SRS v2.2: Khám phá (SC-27), Quét AI (SC-22, SC-23), Hướng dẫn & Nghệ nhân (SC-24), Cá nhân (SC-26).
+- Mobile App follows a 4-tab architecture aligned with SRS v2.2: Khám phá (SC-27), Quét AI (SC-22, SC-23), Cẩm nang hướng dẫn quét 3D (SC-24, tính năng Kết nối nghệ nhân ngoài đời đã loại bỏ khỏi phạm vi dự án), Cá nhân (SC-26).
+- Mobile feature delivery follows a tracer-bullet vertical slice strategy: prioritize store compliance (account deletion), project lifecycle, billing checkout, and exploration templates before secondary utilities.
+- Mobile Project Management supports full lifecycle in `MyDesignsScreen`: inline renaming (`PATCH /projects/{id}`), soft-delete (`DELETE /projects/{id}`), and a dedicated Trash view (`GET /projects/trash`) with restore (`POST /restore`) and permanent purge (`DELETE /permanent`).
+- Mobile Subscription Checkout opens `checkout_url` via `LaunchMode.externalApplication` to preserve banking/VietQR/MoMo app deeplinks, accompanied by an in-app confirmation modal that triggers subscription and quota revalidation upon user return.
+- Mobile Explore Tab displays real templates via `GET /templates`; selecting a template allows users to bootstrap a project (`POST /projects`), apply the template (`POST /apply-template`), and immediately hand off to Kus Studio Web via `editor_url`.
+- Mobile Profile Tab supports full user self-service: profile editing (`PATCH /users/me`), presigned S3 avatar upload (`POST/DELETE /users/me/avatar` with `image_picker`), password change (`PUT /users/me/password`), app feedback rating (`POST /feedback`), and store-mandated account deletion (`DELETE /users/me`).
 - Guest trial scan allows 1 real backend reconstruction scan on mobile; exporting the raw GLB model or syncing the project to Web Kus Studio requires account registration per BR-41.
 
 ## Critical Invariants

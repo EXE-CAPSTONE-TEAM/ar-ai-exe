@@ -87,6 +87,9 @@ class MeshCleanupService:
         self.runner = runner or CommandRunner()
         self.options = options or MeshCleanupOptions.from_settings()
 
+    def is_available(self) -> bool:
+        return self.blender.is_available()
+
     def cleanup(
         self,
         source_model: Path,

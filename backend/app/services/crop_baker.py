@@ -19,6 +19,9 @@ class CropBakeService:
         self.blender = blender or BlenderService()
         self.runner = runner or CommandRunner()
 
+    def is_available(self) -> bool:
+        return self.blender.is_available()
+
     def bake(self, source_glb: Path, output_glb: Path, crop_box: CropBox) -> None:
         work_dir = output_glb.parent / "_crop_bake"
         work_dir.mkdir(parents=True, exist_ok=True)

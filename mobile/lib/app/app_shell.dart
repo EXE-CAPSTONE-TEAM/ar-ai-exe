@@ -1,10 +1,12 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../config/app_config.dart';
 import '../models/account.dart';
+import '../models/template_models.dart';
 import '../screens/auth_screen.dart';
 import '../screens/my_designs_screen.dart';
 import '../screens/plan_usage_screen.dart';
@@ -13,6 +15,14 @@ import '../screens/user_manual_screen.dart';
 import '../services/api_exception.dart';
 import '../services/backend_api.dart';
 import 'app_theme.dart';
+
+/// Bottom-nav tabs, in display order.
+///
+/// The app opens on [scan]: capturing a shoe is what the mobile app is for
+/// (BR-42 keeps editing on Web/Desktop), so scanning is the landing tab rather
+/// than Explore. Reordering this enum reorders the bar and keeps the default
+/// pointing at the same tab.
+enum HomeTab { explore, scan, manual, profile }
 
 class AppShell extends StatefulWidget {
   const AppShell({
@@ -31,7 +41,9 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
-  int _index = 1;
+  static const _initialTab = HomeTab.scan;
+
+  HomeTab _tab = _initialTab;
 
   @override
   void initState() {
@@ -56,32 +68,55 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
+  void _openAuth({bool register = true}) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AuthScreen(
+          themeMode: widget.themeMode,
+          onThemeModeChanged: widget.onThemeModeChanged,
+          initialRegister: register,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).padding.bottom;
     final pages = [
-      const _ExploreTab(),
-      ScanHomeScreen(isGuest: widget.isGuest),
+      _ExploreTab(
+        isGuest: widget.isGuest,
+        onRequireAuth: () => _openAuth(register: true),
+      ),
+      ScanHomeScreen(
+        isGuest: widget.isGuest,
+        onRequireAuth: () => _openAuth(register: true),
+        onOpenPlans: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => PlanUsageScreen(api: BackendApi.shared)),
+        ),
+      ),
       const UserManualScreen(),
       _ProfileTab(
         themeMode: widget.themeMode,
         onThemeModeChanged: widget.onThemeModeChanged,
         onLogout: _logout,
         isGuest: widget.isGuest,
+        onRequireAuth: () => _openAuth(register: true),
       ),
     ];
 
     return Scaffold(
       body: Stack(
         children: [
-          Positioned.fill(child: pages[_index]),
+          Positioned.fill(child: pages[_tab.index]),
           Positioned(
             left: 14,
             right: 14,
             bottom: bottomInset > 0 ? bottomInset + 8 : 16,
             child: _PillBottomNav(
-              index: _index,
-              onChanged: (value) => setState(() => _index = value),
+              index: _tab.index,
+              onChanged: (value) =>
+                  setState(() => _tab = HomeTab.values[value]),
             ),
           ),
         ],
@@ -185,29 +220,37 @@ class _PillBottomNav extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _NavItem(
-                      selected: index == 0,
-                      icon: Icons.explore_outlined,
-                      label: 'Khám phá',
-                      onTap: () => onChanged(0),
+                    Expanded(
+                      child: _NavItem(
+                        selected: index == 0,
+                        icon: Icons.explore_outlined,
+                        label: 'Khám phá',
+                        onTap: () => onChanged(0),
+                      ),
                     ),
-                    _NavItem(
-                      selected: index == 1,
-                      icon: Icons.center_focus_strong,
-                      label: 'Quét AI',
-                      onTap: () => onChanged(1),
+                    Expanded(
+                      child: _NavItem(
+                        selected: index == 1,
+                        icon: Icons.center_focus_strong,
+                        label: 'Quét AI',
+                        onTap: () => onChanged(1),
+                      ),
                     ),
-                    _NavItem(
-                      selected: index == 2,
-                      icon: Icons.menu_book_outlined,
-                      label: 'Cẩm nang',
-                      onTap: () => onChanged(2),
+                    Expanded(
+                      child: _NavItem(
+                        selected: index == 2,
+                        icon: Icons.menu_book_outlined,
+                        label: 'Cẩm nang',
+                        onTap: () => onChanged(2),
+                      ),
                     ),
-                    _NavItem(
-                      selected: index == 3,
-                      icon: Icons.person_outline,
-                      label: 'Cá nhân',
-                      onTap: () => onChanged(3),
+                    Expanded(
+                      child: _NavItem(
+                        selected: index == 3,
+                        icon: Icons.person_outline,
+                        label: 'Cá nhân',
+                        onTap: () => onChanged(3),
+                      ),
                     ),
                   ],
                 ),
@@ -268,6 +311,8 @@ class _NavItem extends StatelessWidget {
             Text(
               label,
               maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
               style: TextStyle(
                 color: selected
                     ? Theme.of(context).colorScheme.onSurface
@@ -299,8 +344,178 @@ Future<void> _openWebApp(BuildContext context, {String path = ''}) async {
   }
 }
 
-class _ExploreTab extends StatelessWidget {
-  const _ExploreTab();
+class _ExploreTab extends StatefulWidget {
+  const _ExploreTab({
+    required this.isGuest,
+    this.onRequireAuth,
+  });
+
+  final bool isGuest;
+  final VoidCallback? onRequireAuth;
+
+  @override
+  State<_ExploreTab> createState() => _ExploreTabState();
+}
+
+class _ExploreTabState extends State<_ExploreTab> {
+  final BackendApi _api = BackendApi.shared;
+  List<ShoeTemplate> _templates = [];
+  bool _loading = true;
+  String? _selectedCategory;
+
+  static const _categories = [
+    {'key': null, 'label': 'Tất cả'},
+    {'key': 'sneaker', 'label': 'Sneaker'},
+    {'key': 'running', 'label': 'Giày chạy'},
+    {'key': 'boot', 'label': 'Boot'},
+    {'key': 'loafer', 'label': 'Loafer'},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTemplates();
+  }
+
+  Future<void> _loadTemplates() async {
+    setState(() => _loading = true);
+    try {
+      final list = await _api.listTemplates(category: _selectedCategory);
+      if (!mounted) return;
+      setState(() {
+        _templates = list;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _onSelectTemplate(ShoeTemplate template) async {
+    if (widget.isGuest) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Vui lòng đăng ký tài khoản để áp dụng phôi mẫu.'),
+          action: SnackBarAction(
+            label: 'ĐĂNG KÝ',
+            textColor: AppTheme.orange,
+            onPressed: () => widget.onRequireAuth?.call(),
+          ),
+        ),
+      );
+      return;
+    }
+
+    bool creating = false;
+    await showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: AppTheme.orange.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(Icons.view_in_ar_outlined, color: AppTheme.orange, size: 28),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          template.name,
+                          style: AppTheme.headingFont(fontSize: 18, fontWeight: FontWeight.w900),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          template.categoryLabel,
+                          style: const TextStyle(color: AppTheme.orange, fontSize: 13, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              if (template.description != null && template.description!.isNotEmpty)
+                Text(
+                  template.description!,
+                  style: AppTheme.bodyFont(fontSize: 13.5, height: 1.4),
+                )
+              else
+                const Text(
+                  'Phôi giày mẫu 3D chuẩn tỉ lệ thực tế, sẵn sàng tùy biến màu sắc và tem decal trên Kus Studio Web.',
+                  style: TextStyle(fontSize: 13, color: Colors.grey, height: 1.4),
+                ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  _Tag('${template.layerCount} họa tiết', filled: true),
+                  const SizedBox(width: 8),
+                  _Tag('${template.useCount} lượt dùng', filled: false),
+                ],
+              ),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                icon: const Icon(Icons.palette_outlined),
+                label: creating
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('DÙNG MẪU NÀY THIẾT KẾ TRÊN WEB'),
+                onPressed: creating
+                    ? null
+                    : () async {
+                        setSheetState(() => creating = true);
+                        try {
+                          final project = await _api.createProject(name: '${template.name} Custom');
+                          await _api.applyTemplate(projectId: project.id, templateId: template.id);
+                          if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+
+                          await launchUrl(
+                            Uri.parse(project.editorUrl),
+                            mode: LaunchMode.externalApplication,
+                          );
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Đã tạo dự án và mở Kus Studio Web!'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          setSheetState(() => creating = false);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Lỗi áp dụng mẫu: $e'), backgroundColor: Colors.red),
+                            );
+                          }
+                        }
+                      },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -328,7 +543,7 @@ class _ExploreTab extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'Quét đôi giày thật bằng camera AI 360°, tùy biến sticker & vẽ tay trên Kus Studio Web và xuất file chuẩn cho nghệ nhân gia công ngoài đời thực.',
+            'Quét đôi giày thật bằng camera AI 360°, tùy biến sticker & vẽ tay trên Kus Studio Web và xuất file 3D GLB/OBJ chuẩn.',
             style: AppTheme.bodyFont(
               fontSize: 14,
               color: Theme.of(context)
@@ -344,6 +559,109 @@ class _ExploreTab extends StatelessWidget {
             icon: const Icon(Icons.open_in_browser),
             label: const Text('MỞ KUS STUDIO TRÊN WEB'),
           ),
+          const SizedBox(height: 28),
+
+          // Template Catalog Section
+          Row(
+            children: [
+              const Expanded(child: _SectionLabel('PHÔI GIÀY MẪU CÓ SẴN')),
+              if (_loading)
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _categories.map((cat) {
+                final selected = _selectedCategory == cat['key'];
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text(cat['label']!),
+                    selected: selected,
+                    onSelected: (val) {
+                      setState(() => _selectedCategory = val ? cat['key'] : null);
+                      _loadTemplates();
+                    },
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          if (!_loading && _templates.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Center(
+                child: Text(
+                  'Đang cập nhật thêm các mẫu giày 3D mới.',
+                  style: TextStyle(color: Colors.grey, fontSize: 13),
+                ),
+              ),
+            )
+          else if (_templates.isNotEmpty)
+            SizedBox(
+              height: 170,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: _templates.length,
+                itemBuilder: (context, idx) {
+                  final t = _templates[idx];
+                  return Container(
+                    width: 200,
+                    margin: const EdgeInsets.only(right: 14),
+                    child: Card(
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: () => _onSelectTemplate(t),
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 18,
+                                    backgroundColor: AppTheme.orange.withValues(alpha: 0.15),
+                                    child: const Icon(Icons.view_in_ar, size: 20, color: AppTheme.orange),
+                                  ),
+                                  const Spacer(),
+                                  _Tag(t.categoryLabel, filled: false),
+                                ],
+                              ),
+                              const Spacer(),
+                              Text(
+                                t.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${t.layerCount} họa tiết · ${t.useCount} lượt dùng',
+                                style: const TextStyle(fontSize: 11, color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+
           const SizedBox(height: 30),
           const _SectionLabel('TÍNH NĂNG NỔI BẬT'),
           const SizedBox(height: 14),
@@ -391,7 +709,7 @@ class _ExploreTab extends StatelessWidget {
               ),
             ),
             child: Text(
-              'KusShoes tập trung tối đa vào trải nghiệm Quét 3D, Studio tùy biến Web và Xuất file GLB chuẩn cho nghệ nhân gia công.',
+              'KusShoes tập trung tối đa vào trải nghiệm Quét 3D, Studio tùy biến Web và Xuất file GLB chuẩn cho xưởng gia công.',
               style: AppTheme.bodyFont(
                 fontSize: 12,
                 color: Theme.of(context)
@@ -600,12 +918,14 @@ class _ProfileTab extends StatefulWidget {
     required this.onThemeModeChanged,
     required this.onLogout,
     this.isGuest = false,
+    this.onRequireAuth,
   });
 
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeModeChanged;
   final Future<void> Function() onLogout;
   final bool isGuest;
+  final VoidCallback? onRequireAuth;
 
   @override
   State<_ProfileTab> createState() => _ProfileTabState();
@@ -666,8 +986,484 @@ class _ProfileTabState extends State<_ProfileTab> {
 
   void _requireAccount() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Đăng ký tài khoản để dùng mục này.'),
+      SnackBar(
+        content: const Text('Đăng ký tài khoản để dùng mục này.'),
+        action: SnackBarAction(
+          label: 'ĐĂNG KÝ',
+          textColor: AppTheme.orange,
+          onPressed: () => widget.onRequireAuth?.call(),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickAndUploadAvatar() async {
+    try {
+      final picker = ImagePicker();
+      final photo = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 85,
+      );
+      if (photo == null || !mounted) return;
+
+      final bytes = await photo.readAsBytes();
+      final ext = photo.name.split('.').last.toLowerCase();
+      final contentType = ext == 'png' ? 'image/png' : 'image/jpeg';
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Đang tải ảnh đại diện lên...')),
+      );
+
+      final uploadInfo = await _api.requestAvatarUpload(
+        contentType: contentType,
+        fileSize: bytes.length,
+      );
+      final uploadUrl = uploadInfo['upload_url'];
+      if (uploadUrl != null && uploadUrl.isNotEmpty) {
+        await _api.uploadAvatarBytes(
+          uploadUrl: uploadUrl,
+          bytes: bytes,
+          contentType: contentType,
+        );
+        await _load();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cập nhật ảnh đại diện thành công!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Lỗi tải ảnh: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  Future<void> _editProfile() async {
+    final profile = _profile;
+    final firstNameController =
+        TextEditingController(text: profile?.firstName ?? '');
+    final lastNameController =
+        TextEditingController(text: profile?.lastName ?? '');
+    final phoneController =
+        TextEditingController(text: profile?.phoneNumber ?? '');
+
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Chỉnh sửa thông tin cá nhân'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: lastNameController,
+                decoration: const InputDecoration(labelText: 'Họ và tên đệm'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: firstNameController,
+                decoration: const InputDecoration(labelText: 'Tên'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: phoneController,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Số điện thoại'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Hủy'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Lưu'),
+          ),
+        ],
+      ),
+    );
+
+    if (updated != true || !mounted) return;
+
+    try {
+      await _api.updateProfile(
+        firstName: firstNameController.text.trim(),
+        lastName: lastNameController.text.trim(),
+        phoneNumber: phoneController.text.trim(),
+      );
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cập nhật thông tin thành công!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Lỗi: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  Future<void> _changePassword() async {
+    final currentPassController = TextEditingController();
+    final newPassController = TextEditingController();
+    final confirmPassController = TextEditingController();
+    String? dialogError;
+    bool isChanging = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Đổi mật khẩu'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: currentPassController,
+                  obscureText: true,
+                  decoration:
+                      const InputDecoration(labelText: 'Mật khẩu hiện tại'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: newPassController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Mật khẩu mới (tối thiểu 6 ký tự)',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: confirmPassController,
+                  obscureText: true,
+                  decoration:
+                      const InputDecoration(labelText: 'Xác nhận mật khẩu mới'),
+                ),
+                if (dialogError != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    dialogError!,
+                    style: const TextStyle(color: Colors.red, fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed:
+                  isChanging ? null : () => Navigator.of(dialogCtx).pop(),
+              child: const Text('Hủy'),
+            ),
+            FilledButton(
+              onPressed: isChanging
+                  ? null
+                  : () async {
+                      final curr = currentPassController.text;
+                      final next = newPassController.text;
+                      final confirm = confirmPassController.text;
+                      if (curr.isEmpty || next.isEmpty) {
+                        setDialogState(
+                          () => dialogError = 'Vui lòng nhập đầy đủ thông tin',
+                        );
+                        return;
+                      }
+                      if (next.length < 6) {
+                        setDialogState(
+                          () => dialogError = 'Mật khẩu mới phải từ 6 ký tự',
+                        );
+                        return;
+                      }
+                      if (next != confirm) {
+                        setDialogState(
+                          () => dialogError = 'Xác nhận mật khẩu không khớp',
+                        );
+                        return;
+                      }
+
+                      setDialogState(() {
+                        isChanging = true;
+                        dialogError = null;
+                      });
+
+                      try {
+                        await _api.changePassword(
+                          currentPassword: curr,
+                          newPassword: next,
+                        );
+                        if (dialogCtx.mounted) {
+                          Navigator.of(dialogCtx).pop();
+                        }
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Đổi mật khẩu thành công!'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        }
+                      } on ApiException catch (e) {
+                        setDialogState(() {
+                          isChanging = false;
+                          dialogError = e.message;
+                        });
+                      } catch (e) {
+                        setDialogState(() {
+                          isChanging = false;
+                          dialogError = 'Lỗi đổi mật khẩu: $e';
+                        });
+                      }
+                    },
+              child: isChanging
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text('Đổi mật khẩu'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _submitFeedback() async {
+    int rating = 5;
+    final commentController = TextEditingController();
+    bool isSending = false;
+    String? error;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Đánh giá & Góp ý ứng dụng'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Ý kiến của bạn giúp chúng tôi nâng cấp chất lượng tái tạo 3D đôi giày ngày một tốt hơn.',
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(5, (index) {
+                    final star = index + 1;
+                    return IconButton(
+                      icon: Icon(
+                        star <= rating ? Icons.star : Icons.star_border,
+                        color: Colors.amber,
+                        size: 32,
+                      ),
+                      onPressed: () => setDialogState(() => rating = star),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: commentController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Nội dung góp ý (tùy chọn)',
+                    hintText: 'Chia sẻ cảm nhận hoặc báo lỗi...',
+                  ),
+                ),
+                if (error != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    error!,
+                    style: const TextStyle(color: Colors.red, fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed:
+                  isSending ? null : () => Navigator.of(dialogCtx).pop(),
+              child: const Text('Đóng'),
+            ),
+            FilledButton(
+              onPressed: isSending
+                  ? null
+                  : () async {
+                      setDialogState(() {
+                        isSending = true;
+                        error = null;
+                      });
+                      try {
+                        await _api.submitFeedback(
+                          rating: rating,
+                          comment: commentController.text.trim(),
+                        );
+                        if (dialogCtx.mounted) {
+                          Navigator.of(dialogCtx).pop();
+                        }
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Cảm ơn bạn đã gửi đánh giá!'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        }
+                      } on ApiException catch (e) {
+                        setDialogState(() {
+                          isSending = false;
+                          error = e.message;
+                        });
+                      } catch (e) {
+                        setDialogState(() {
+                          isSending = false;
+                          error = 'Lỗi gửi đánh giá: $e';
+                        });
+                      }
+                    },
+              child: isSending
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text('Gửi đánh giá'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deleteAccount() async {
+    final passwordController = TextEditingController();
+    String? error;
+    bool isDeleting = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Xác nhận xóa tài khoản?'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'CẢNH BÁO: Toàn bộ thông tin cá nhân, các mẫu giày đã quét và các thiết kế của bạn sẽ bị xóa vĩnh viễn khỏi hệ thống KusShoes. Hành động này không thể hoàn tác.',
+                  style: TextStyle(color: Colors.red, fontSize: 13, height: 1.4),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Vui lòng nhập mật khẩu đăng nhập để xác nhận xóa:',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: passwordController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Mật khẩu của bạn',
+                    prefixIcon: Icon(Icons.lock_outline),
+                  ),
+                ),
+                if (error != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    error!,
+                    style: const TextStyle(color: Colors.red, fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed:
+                  isDeleting ? null : () => Navigator.of(dialogCtx).pop(),
+              child: const Text('Hủy'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: isDeleting
+                  ? null
+                  : () async {
+                      final pass = passwordController.text;
+                      if (pass.isEmpty) {
+                        setDialogState(
+                          () => error = 'Vui lòng nhập mật khẩu xác nhận',
+                        );
+                        return;
+                      }
+                      setDialogState(() {
+                        isDeleting = true;
+                        error = null;
+                      });
+                      try {
+                        await _api.deleteAccount(password: pass);
+                        if (dialogCtx.mounted) {
+                          Navigator.of(dialogCtx).pop();
+                        }
+                        await widget.onLogout();
+                      } on ApiException catch (e) {
+                        setDialogState(() {
+                          isDeleting = false;
+                          error = e.message;
+                        });
+                      } catch (e) {
+                        setDialogState(() {
+                          isDeleting = false;
+                          error = 'Lỗi xóa tài khoản: $e';
+                        });
+                      }
+                    },
+              child: isDeleting
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text('Xóa tài khoản vĩnh viễn'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -690,43 +1486,79 @@ class _ProfileTabState extends State<_ProfileTab> {
                     'Hồ Sơ Cá Nhân',
                     style: Theme.of(context)
                         .textTheme
-                        .displaySmall
+                        .titleLarge
                         ?.copyWith(fontWeight: FontWeight.w900),
                   ),
                 ),
                 IconButton.filledTonal(
                   onPressed: widget.onLogout,
+                  iconSize: 18,
+                  visualDensity: VisualDensity.compact,
                   icon: const Icon(Icons.logout),
                   tooltip: 'Đăng xuất',
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
             Card(
               child: Padding(
-                padding: const EdgeInsets.all(22),
+                padding: const EdgeInsets.all(14),
                 child: Row(
                   children: [
-                    Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: AppTheme.orange.withValues(alpha: 0.8),
-                          width: 2.5,
-                        ),
-                        color: AppTheme.orange.withValues(alpha: 0.1),
-                      ),
-                      child: Icon(
-                        widget.isGuest
-                            ? Icons.person_outline
-                            : Icons.account_circle,
-                        size: 42,
-                        color: AppTheme.orange,
+                    GestureDetector(
+                      onTap: widget.isGuest ? null : _pickAndUploadAvatar,
+                      child: Stack(
+                        children: [
+                          Container(
+                            width: 58,
+                            height: 58,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: AppTheme.orange.withValues(alpha: 0.8),
+                                width: 2.5,
+                              ),
+                              color: AppTheme.orange.withValues(alpha: 0.1),
+                              image: (profile?.avatarPath != null &&
+                                      profile!.avatarPath!.isNotEmpty)
+                                  ? DecorationImage(
+                                      image: NetworkImage(profile.avatarPath!),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : null,
+                            ),
+                            child: (profile?.avatarPath == null ||
+                                    profile!.avatarPath!.isEmpty)
+                                ? Icon(
+                                    widget.isGuest
+                                        ? Icons.person_outline
+                                        : Icons.account_circle,
+                                    size: 30,
+                                    color: AppTheme.orange,
+                                  )
+                                : null,
+                          ),
+                          if (!widget.isGuest)
+                            Positioned(
+                              bottom: 0,
+                              right: 0,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: const BoxDecoration(
+                                  color: AppTheme.orange,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.camera_alt,
+                                  size: 12,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 20),
+                    const SizedBox(width: 14),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -736,12 +1568,14 @@ class _ProfileTabState extends State<_ProfileTab> {
                                 ? 'Khách Trải Nghiệm'
                                 : (profile?.displayName ??
                                     (_loading ? 'Đang tải…' : 'Tài khoản')),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: AppTheme.headingFont(
-                              fontSize: 20,
+                              fontSize: 16,
                               fontWeight: FontWeight.w900,
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 2),
                           Text(
                             widget.isGuest
                                 ? 'Chế độ khách (chưa có lượt quét)'
@@ -749,11 +1583,11 @@ class _ProfileTabState extends State<_ProfileTab> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: AppTheme.bodyFont(
-                              fontSize: 13,
+                              fontSize: 12,
                               color: Colors.grey,
                             ),
                           ),
-                          const SizedBox(height: 10),
+                          const SizedBox(height: 8),
                           Wrap(
                             spacing: 8,
                             children: [
@@ -775,7 +1609,7 @@ class _ProfileTabState extends State<_ProfileTab> {
                 ),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
 
             if (_error != null) ...[
               Card(
@@ -795,50 +1629,61 @@ class _ProfileTabState extends State<_ProfileTab> {
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 14),
             ],
 
             // Guest upsell callout
             if (widget.isGuest) ...[
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      AppTheme.orange.withValues(alpha: 0.12),
-                      AppTheme.crimson.withValues(alpha: 0.08),
-                    ],
-                  ),
-                  borderRadius: BorderRadius.circular(18),
-                  border:
-                      Border.all(color: AppTheme.orange.withValues(alpha: 0.35)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.stars, color: AppTheme.orange, size: 20),
-                        const SizedBox(width: 8),
-                        Text(
-                          'NÂNG CẤP LÊN BASIC / PRO',
-                          style: AppTheme.headingFont(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.orange,
-                          ),
-                        ),
+              InkWell(
+                onTap: widget.onRequireAuth,
+                borderRadius: BorderRadius.circular(18),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        AppTheme.orange.withValues(alpha: 0.12),
+                        AppTheme.crimson.withValues(alpha: 0.08),
                       ],
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Đăng ký tài khoản để lưu giữ mô hình scan vĩnh viễn, mở khóa toàn bộ kho phôi và xuất file GLB cho thợ gia công.',
-                      style: AppTheme.bodyFont(fontSize: 12.5, height: 1.4),
-                    ),
-                  ],
+                    borderRadius: BorderRadius.circular(18),
+                    border:
+                        Border.all(color: AppTheme.orange.withValues(alpha: 0.35)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.stars, color: AppTheme.orange, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'NÂNG CẤP LÊN BASIC / PRO',
+                              style: AppTheme.headingFont(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.orange,
+                              ),
+                            ),
+                          ),
+                          const Icon(
+                            Icons.arrow_forward_ios,
+                            size: 13,
+                            color: AppTheme.orange,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Đăng ký tài khoản để lưu giữ mô hình scan vĩnh viễn, mở khóa toàn bộ kho phôi và xuất file GLB cho thợ gia công.',
+                        style: AppTheme.bodyFont(fontSize: 12.5, height: 1.4),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 14),
             ],
 
             // Live counters from GET /users/me/usage — a null limit on the
@@ -882,9 +1727,9 @@ class _ProfileTabState extends State<_ProfileTab> {
                 ),
               ],
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 18),
             const _SectionLabel('CÀI ĐẶT & QUẢN LÝ'),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             _MenuTile(
               icon:
                   isDark ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
@@ -915,6 +1760,36 @@ class _ProfileTabState extends State<_ProfileTab> {
                   : 'Gói hiện tại, hạn mức dự án / xuất file / AI credit',
               onTap: widget.isGuest ? _requireAccount : _openPlanUsage,
             ),
+            _MenuTile(
+              icon: Icons.person_outline,
+              title: 'Thông tin cá nhân',
+              subtitle: widget.isGuest
+                  ? 'Cần tài khoản để chỉnh sửa hồ sơ'
+                  : 'Đổi họ tên, số điện thoại liên lạc',
+              onTap: widget.isGuest ? _requireAccount : _editProfile,
+            ),
+            _MenuTile(
+              icon: Icons.lock_outline,
+              title: 'Đổi mật khẩu',
+              subtitle: widget.isGuest
+                  ? 'Cần tài khoản để đổi mật khẩu'
+                  : 'Cập nhật mật khẩu bảo mật tài khoản',
+              onTap: widget.isGuest ? _requireAccount : _changePassword,
+            ),
+            _MenuTile(
+              icon: Icons.feedback_outlined,
+              title: 'Đánh giá & Góp ý',
+              subtitle: 'Gửi ý kiến đóng góp nâng cấp KusShoes',
+              onTap: widget.isGuest ? _requireAccount : _submitFeedback,
+            ),
+            if (!widget.isGuest)
+              _MenuTile(
+                icon: Icons.delete_forever_outlined,
+                title: 'Xóa tài khoản',
+                subtitle: 'Xóa vĩnh viễn dữ liệu tài khoản và các mẫu scan',
+                isDestructive: true,
+                onTap: _deleteAccount,
+              ),
           ],
         ),
       ),
@@ -932,14 +1807,27 @@ class _StatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 24),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
         child: Column(
           children: [
-            Text(value,
-                style:
-                    const TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
-            const SizedBox(height: 10),
-            Text(label, style: const TextStyle(letterSpacing: 2, fontSize: 12)),
+            FittedBox(
+              child: Text(
+                value,
+                maxLines: 1,
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(letterSpacing: 1.1, fontSize: 10),
+            ),
           ],
         ),
       ),
@@ -954,6 +1842,7 @@ class _MenuTile extends StatelessWidget {
     required this.subtitle,
     this.trailing,
     this.onTap,
+    this.isDestructive = false,
   });
 
   final IconData icon;
@@ -961,19 +1850,44 @@ class _MenuTile extends StatelessWidget {
   final String subtitle;
   final Widget? trailing;
   final VoidCallback? onTap;
+  final bool isDestructive;
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
+        dense: true,
+        visualDensity: VisualDensity.compact,
         contentPadding:
-            const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        leading: _IconBubble(icon: icon, muted: true),
-        title: Text(title,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
-        subtitle: Text(subtitle),
-        trailing: trailing ?? const Icon(Icons.chevron_right),
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        leading: _IconBubble(
+          icon: icon,
+          muted: !isDestructive,
+          radius: 17,
+          colorOverride: isDestructive ? Colors.redAccent : null,
+        ),
+        title: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+            color: isDestructive ? Colors.redAccent : null,
+          ),
+        ),
+        subtitle: Text(
+          subtitle,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 12),
+        ),
+        trailing: trailing ??
+            Icon(
+              Icons.chevron_right,
+              color: isDestructive ? Colors.redAccent : null,
+            ),
         onTap: onTap,
       ),
     );
@@ -1026,23 +1940,33 @@ class _IconBubble extends StatelessWidget {
   const _IconBubble({
     required this.icon,
     this.muted = false,
+    this.radius = 22,
+    this.colorOverride,
   });
 
   final IconData icon;
   final bool muted;
+  final double radius;
+  final Color? colorOverride;
 
   @override
   Widget build(BuildContext context) {
+    final effectiveColor = colorOverride ??
+        (muted
+            ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.65)
+            : AppTheme.orange);
+
     return CircleAvatar(
-      radius: 22,
-      backgroundColor: muted
-          ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.04)
-          : AppTheme.orange.withValues(alpha: 0.16),
+      radius: radius,
+      backgroundColor: colorOverride != null
+          ? colorOverride!.withValues(alpha: 0.12)
+          : (muted
+              ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.04)
+              : AppTheme.orange.withValues(alpha: 0.16)),
       child: Icon(
         icon,
-        color: muted
-            ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.65)
-            : AppTheme.orange,
+        size: radius * 0.95,
+        color: effectiveColor,
       ),
     );
   }

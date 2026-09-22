@@ -10,6 +10,8 @@ import 'package:path_provider/path_provider.dart';
 
 import '../config/app_config.dart';
 import '../models/account.dart';
+import '../models/project_models.dart';
+import '../models/template_models.dart';
 import '../models/reconstruction_readiness.dart';
 import '../models/kiri_status.dart';
 import '../models/scan_metadata.dart';
@@ -208,7 +210,30 @@ class BackendApi {
     await _clearSession();
   }
 
-  // --- Account ---------------------------------------------------------------
+  Future<void> forgotPassword({required String email}) async {
+    await _post(
+      '$_kusshoesBaseUrl/api/v1/auth/forgot-password',
+      body: {'email': email},
+    );
+  }
+
+  Future<void> resetPassword({
+    required String email,
+    required String otpCode,
+    required String newPassword,
+  }) async {
+    await _post(
+      '$_kusshoesBaseUrl/api/v1/auth/reset-password',
+      body: {
+        'email': email,
+        'otp_code': otpCode,
+        'new_password': newPassword,
+        'confirm_password': newPassword,
+      },
+    );
+  }
+
+  // --- Account & User Management ---------------------------------------------
 
   /// `GET /api/v1/users/me`
   Future<UserProfile> getProfile() async {
@@ -216,6 +241,99 @@ class BackendApi {
     return UserProfile.fromJson(
       await _get('$_kusshoesBaseUrl/api/v1/users/me', authenticated: true),
     );
+  }
+
+  /// `PATCH /api/v1/users/me` — updates name and phone number.
+  Future<UserProfile> updateProfile({
+    String? firstName,
+    String? lastName,
+    String? phoneNumber,
+  }) async {
+    await _ensureAccessToken();
+    final body = <String, dynamic>{
+      if (firstName != null) 'first_name': firstName,
+      if (lastName != null) 'last_name': lastName,
+      if (phoneNumber != null) 'phone_number': phoneNumber,
+    };
+    final data = await _patch(
+      '$_kusshoesBaseUrl/api/v1/users/me',
+      body: body,
+      authenticated: true,
+    );
+    return UserProfile.fromJson(data);
+  }
+
+  /// `PUT /api/v1/users/me/password` — changes current login password.
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    await _ensureAccessToken();
+    await _put(
+      '$_kusshoesBaseUrl/api/v1/users/me/password',
+      body: {
+        'current_password': currentPassword,
+        'new_password': newPassword,
+        'confirm_password': newPassword,
+      },
+      authenticated: true,
+    );
+  }
+
+  /// `DELETE /api/v1/users/me` — permanent account deletion (App Store Guideline 5.1.1(v)).
+  Future<void> deleteAccount({required String password}) async {
+    await _ensureAccessToken();
+    await _delete(
+      '$_kusshoesBaseUrl/api/v1/users/me',
+      body: {'password': password},
+      authenticated: true,
+    );
+    await _clearSession();
+  }
+
+  /// `POST /api/v1/users/me/avatar` — requests presigned S3 PUT URL.
+  Future<Map<String, String>> requestAvatarUpload({
+    required String contentType,
+    required int fileSize,
+  }) async {
+    await _ensureAccessToken();
+    final data = await _post(
+      '$_kusshoesBaseUrl/api/v1/users/me/avatar',
+      body: {'content_type': contentType, 'file_size': fileSize},
+      authenticated: true,
+    );
+    return {
+      'upload_url': data['upload_url'] as String? ?? '',
+      'avatar_path': data['avatar_path'] as String? ?? '',
+    };
+  }
+
+  /// Uploads raw avatar bytes directly to MinIO/S3 presigned URL.
+  Future<void> uploadAvatarBytes({
+    required String uploadUrl,
+    required List<int> bytes,
+    required String contentType,
+  }) async {
+    try {
+      await _dio.put<dynamic>(
+        uploadUrl,
+        data: Stream.fromIterable([bytes]),
+        options: Options(
+          headers: {
+            'Content-Type': contentType,
+            'Content-Length': bytes.length.toString(),
+          },
+        ),
+      );
+    } catch (error) {
+      throw ApiException.from(error);
+    }
+  }
+
+  /// `DELETE /api/v1/users/me/avatar` — removes custom avatar.
+  Future<void> deleteAvatar() async {
+    await _ensureAccessToken();
+    await _delete('$_kusshoesBaseUrl/api/v1/users/me/avatar', authenticated: true);
   }
 
   /// `GET /api/v1/users/me/usage` — plan tier and per-cycle quota counters.
@@ -226,6 +344,8 @@ class BackendApi {
     );
   }
 
+  // --- Billing & Subscriptions ----------------------------------------------
+
   /// `GET /api/v1/subscription`
   Future<SubscriptionInfo> getSubscription() async {
     await _ensureAccessToken();
@@ -233,6 +353,62 @@ class BackendApi {
       await _get('$_kusshoesBaseUrl/api/v1/subscription', authenticated: true),
     );
   }
+
+  /// `GET /api/v1/plans` — dynamic plans and limits.
+  Future<List<BillingPlan>> listPlans() async {
+    final list = await _getList('$_kusshoesBaseUrl/api/v1/plans');
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(BillingPlan.fromJson)
+        .toList(growable: false);
+  }
+
+  /// `POST /api/v1/subscription/checkout` — creates gateway checkout link.
+  Future<String> createCheckoutSession({
+    required String tier,
+    required String billingCycle,
+    required String gateway,
+    String? couponCode,
+  }) async {
+    await _ensureAccessToken();
+    final data = await _post(
+      '$_kusshoesBaseUrl/api/v1/subscription/checkout',
+      body: {
+        'tier': tier.toLowerCase(),
+        'billing_cycle': billingCycle.toLowerCase(),
+        'gateway': gateway.toLowerCase(),
+        if (couponCode != null && couponCode.isNotEmpty)
+          'coupon_code': couponCode,
+      },
+      authenticated: true,
+    );
+    return data['checkout_url'] as String? ?? '';
+  }
+
+  /// `GET /api/v1/subscription/invoices` — billing history.
+  Future<List<InvoiceItem>> listInvoices({int limit = 20}) async {
+    await _ensureAccessToken();
+    final list = await _getList(
+      '$_kusshoesBaseUrl/api/v1/subscription/invoices?limit=$limit',
+      authenticated: true,
+    );
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(InvoiceItem.fromJson)
+        .toList(growable: false);
+  }
+
+  /// `POST /api/v1/subscription/cancel`
+  Future<void> cancelSubscription({bool immediate = false}) async {
+    await _ensureAccessToken();
+    await _post(
+      '$_kusshoesBaseUrl/api/v1/subscription/cancel',
+      body: {'immediate': immediate},
+      authenticated: true,
+    );
+  }
+
+  // --- Project Lifecycle & Full Trash ---------------------------------------
 
   /// `GET /api/v1/projects` — one cursor page of the signed-in user's designs.
   Future<ProjectPage> listProjects({String? cursor, int limit = 20}) async {
@@ -250,6 +426,170 @@ class BackendApi {
         authenticated: true,
       ),
     );
+  }
+
+  /// `GET /api/v1/projects/{project_id}`
+  Future<ProjectDetail> getProject(String projectId) async {
+    await _ensureAccessToken();
+    final data = await _get(
+      '$_kusshoesBaseUrl/api/v1/projects/$projectId',
+      authenticated: true,
+    );
+    return ProjectDetail.fromJson(data);
+  }
+
+  /// `POST /api/v1/projects` — creates a new standalone project.
+  Future<ProjectSummary> createProject({
+    required String name,
+    String? description,
+  }) async {
+    await _ensureAccessToken();
+    final data = await _post(
+      '$_kusshoesBaseUrl/api/v1/projects',
+      body: {
+        'name': name,
+        if (description != null) 'description': description,
+      },
+      authenticated: true,
+    );
+    return ProjectSummary.fromJson(data);
+  }
+
+  /// `PATCH /api/v1/projects/{project_id}` — renames project.
+  Future<ProjectSummary> updateProject(
+    String projectId, {
+    String? name,
+    String? description,
+  }) async {
+    await _ensureAccessToken();
+    final data = await _patch(
+      '$_kusshoesBaseUrl/api/v1/projects/$projectId',
+      body: {
+        if (name != null) 'name': name,
+        if (description != null) 'description': description,
+      },
+      authenticated: true,
+    );
+    return ProjectSummary.fromJson(data);
+  }
+
+  /// `DELETE /api/v1/projects/{project_id}` — soft delete into trash.
+  Future<void> deleteProject(String projectId) async {
+    await _ensureAccessToken();
+    await _delete(
+      '$_kusshoesBaseUrl/api/v1/projects/$projectId',
+      authenticated: true,
+    );
+  }
+
+  /// `GET /api/v1/projects/trash` — lists soft-deleted projects.
+  Future<ProjectTrashPage> listTrashProjects({
+    String? cursor,
+    int limit = 20,
+  }) async {
+    await _ensureAccessToken();
+    final query = <String, String>{
+      'limit': '$limit',
+      if (cursor != null) 'cursor': cursor,
+    };
+    final suffix = query.entries
+        .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+        .join('&');
+    final data = await _get(
+      '$_kusshoesBaseUrl/api/v1/projects/trash?$suffix',
+      authenticated: true,
+    );
+    return ProjectTrashPage.fromJson(data);
+  }
+
+  /// `POST /api/v1/projects/{project_id}/restore` — restores from trash.
+  Future<void> restoreProject(String projectId) async {
+    await _ensureAccessToken();
+    await _post(
+      '$_kusshoesBaseUrl/api/v1/projects/$projectId/restore',
+      body: const <String, dynamic>{},
+      authenticated: true,
+    );
+  }
+
+  /// `DELETE /api/v1/projects/{project_id}/permanent` — purges permanently.
+  Future<void> permanentlyDeleteProject(String projectId) async {
+    await _ensureAccessToken();
+    await _delete(
+      '$_kusshoesBaseUrl/api/v1/projects/$projectId/permanent',
+      authenticated: true,
+    );
+  }
+
+  // --- Templates ------------------------------------------------------------
+
+  /// `GET /api/v1/templates` — public templates catalog.
+  Future<List<ShoeTemplate>> listTemplates({String? category}) async {
+    final query = category != null && category.isNotEmpty
+        ? '?category=${Uri.encodeQueryComponent(category)}'
+        : '';
+    final list = await _getList('$_kusshoesBaseUrl/api/v1/templates$query');
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(ShoeTemplate.fromJson)
+        .toList(growable: false);
+  }
+
+  /// `POST /api/v1/projects/{project_id}/apply-template/{template_id}`
+  Future<void> applyTemplate({
+    required String projectId,
+    required String templateId,
+  }) async {
+    await _ensureAccessToken();
+    await _post(
+      '$_kusshoesBaseUrl/api/v1/projects/$projectId/apply-template/$templateId',
+      body: const <String, dynamic>{},
+      authenticated: true,
+    );
+  }
+
+  // --- Feedback & Exports ---------------------------------------------------
+
+  /// `POST /api/v1/feedback` (SF-12)
+  Future<void> submitFeedback({
+    required int rating,
+    String? comment,
+    String? scanSessionId,
+  }) async {
+    await _ensureAccessToken();
+    await _post(
+      '$_kusshoesBaseUrl/api/v1/feedback',
+      body: {
+        'rating': rating,
+        if (comment != null && comment.isNotEmpty) 'comment': comment,
+        if (scanSessionId != null) 'scan_session_id': scanSessionId,
+      },
+      authenticated: true,
+    );
+  }
+
+  /// `GET /api/v1/exports`
+  Future<List<ExportItem>> listExports() async {
+    await _ensureAccessToken();
+    final list = await _getList(
+      '$_kusshoesBaseUrl/api/v1/exports',
+      authenticated: true,
+    );
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(ExportItem.fromJson)
+        .toList(growable: false);
+  }
+
+  /// `POST /api/v1/exports/{export_id}/download-url`
+  Future<String> getExportDownloadUrl(String exportId) async {
+    await _ensureAccessToken();
+    final data = await _post(
+      '$_kusshoesBaseUrl/api/v1/exports/$exportId/download-url',
+      body: const <String, dynamic>{},
+      authenticated: true,
+    );
+    return data['download_url'] as String? ?? '';
   }
 
   // --- Scan flow ------------------------------------------------------------
@@ -425,26 +765,45 @@ class BackendApi {
 
   // --- Transport ------------------------------------------------------------
 
+  Future<dynamic> _fetch(
+    String url, {
+    required String method,
+    Object? body,
+    bool authenticated = false,
+    bool scanScoped = false,
+  }) async {
+    await _ensureCookieJar();
+    try {
+      final baseOptions = _optionsFor(
+        authenticated: authenticated,
+        scanScoped: scanScoped,
+      );
+      final options = (baseOptions ?? Options()).copyWith(method: method);
+      final response = await _dio.request<dynamic>(
+        url,
+        data: body,
+        options: options,
+      );
+      return response.data;
+    } catch (error) {
+      throw ApiException.from(error);
+    }
+  }
+
   Future<Map<String, dynamic>> _post(
     String url, {
     required Object body,
     bool authenticated = false,
     bool scanScoped = false,
   }) async {
-    await _ensureCookieJar();
-    try {
-      final response = await _dio.post<Map<String, dynamic>>(
-        url,
-        data: body,
-        options: _optionsFor(
-          authenticated: authenticated,
-          scanScoped: scanScoped,
-        ),
-      );
-      return response.data ?? const <String, dynamic>{};
-    } catch (error) {
-      throw ApiException.from(error);
-    }
+    final data = await _fetch(
+      url,
+      method: 'POST',
+      body: body,
+      authenticated: authenticated,
+      scanScoped: scanScoped,
+    );
+    return data is Map<String, dynamic> ? data : const <String, dynamic>{};
   }
 
   Future<Map<String, dynamic>> _get(
@@ -452,19 +811,69 @@ class BackendApi {
     bool authenticated = false,
     bool scanScoped = false,
   }) async {
-    await _ensureCookieJar();
-    try {
-      final response = await _dio.get<Map<String, dynamic>>(
-        url,
-        options: _optionsFor(
-          authenticated: authenticated,
-          scanScoped: scanScoped,
-        ),
-      );
-      return response.data ?? const <String, dynamic>{};
-    } catch (error) {
-      throw ApiException.from(error);
-    }
+    final data = await _fetch(
+      url,
+      method: 'GET',
+      authenticated: authenticated,
+      scanScoped: scanScoped,
+    );
+    return data is Map<String, dynamic> ? data : const <String, dynamic>{};
+  }
+
+  Future<List<dynamic>> _getList(
+    String url, {
+    bool authenticated = false,
+    bool scanScoped = false,
+  }) async {
+    final data = await _fetch(
+      url,
+      method: 'GET',
+      authenticated: authenticated,
+      scanScoped: scanScoped,
+    );
+    return data is List ? data : const <dynamic>[];
+  }
+
+  Future<Map<String, dynamic>> _patch(
+    String url, {
+    required Object body,
+    bool authenticated = false,
+  }) async {
+    final data = await _fetch(
+      url,
+      method: 'PATCH',
+      body: body,
+      authenticated: authenticated,
+    );
+    return data is Map<String, dynamic> ? data : const <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> _put(
+    String url, {
+    required Object body,
+    bool authenticated = false,
+  }) async {
+    final data = await _fetch(
+      url,
+      method: 'PUT',
+      body: body,
+      authenticated: authenticated,
+    );
+    return data is Map<String, dynamic> ? data : const <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> _delete(
+    String url, {
+    Object? body,
+    bool authenticated = false,
+  }) async {
+    final data = await _fetch(
+      url,
+      method: 'DELETE',
+      body: body,
+      authenticated: authenticated,
+    );
+    return data is Map<String, dynamic> ? data : const <String, dynamic>{};
   }
 
   Options? _optionsFor({

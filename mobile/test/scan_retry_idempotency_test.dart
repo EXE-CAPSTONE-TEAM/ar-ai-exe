@@ -63,8 +63,7 @@ void main() {
         home: UploadProgressScreen(
           api: api,
           metadata: _metadata(),
-          sideVideoFile: XFile('side.mp4'),
-          topVideoFile: XFile('top.mp4'),
+          videoFile: XFile('scan.mp4'),
         ),
       ),
     );
@@ -97,8 +96,7 @@ void main() {
         home: UploadProgressScreen(
           api: api,
           metadata: _metadata(),
-          sideVideoFile: XFile('side.mp4'),
-          topVideoFile: XFile('top.mp4'),
+          videoFile: XFile('scan.mp4'),
         ),
       ),
     );

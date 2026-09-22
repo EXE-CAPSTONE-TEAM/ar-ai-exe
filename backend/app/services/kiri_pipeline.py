@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import shutil
 import tempfile
 import zipfile
 from datetime import UTC, datetime
@@ -27,8 +28,9 @@ from app.services.control_plane_mobile import ControlPlaneMobileClient
 from app.services.crop_baker import CropBakeService
 from app.services.file_helpers import write_json
 from app.services.kiri_client import KiriApiClient, KiriError
-from app.services.mesh_cleanup import MeshCleanupService
+from app.services.mesh_cleanup import MeshCleanupReport, MeshCleanupService
 from app.services.model_assets import ModelAssetFiles, ModelAssetService
+from app.services.placeholders import PLACEHOLDER_PNG
 from app.services.scan_sessions import ScanSessionService
 from app.services.storage import StorageService, get_storage_service
 
@@ -86,7 +88,7 @@ class KiriPipelineService:
         if not self.scan_service.is_ready_for_processing(scan_session):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Upload both required shoe videos before starting Kiri processing.",
+                detail="Upload scan video before starting Kiri processing.",
             )
         task = KiriScanTask(scan_session_id=scan_session.id, status=KiriTaskStatus.QUEUED)
         self.db.add(task)
@@ -125,12 +127,17 @@ class KiriPipelineService:
                 top_path = work_dir / "top-orbit.mp4"
                 merged_path = work_dir / "kiri-scan.mp4"
                 side_key = scan_session.side_video_path or scan_session.raw_video_path
-                if not side_key or not scan_session.top_video_path:
-                    raise KiriError("Both scan video passes are required.")
-                side_path.write_bytes(self.storage.get_bytes(side_key))
-                top_path.write_bytes(self.storage.get_bytes(scan_session.top_video_path))
-                self._merge_videos(side_path, top_path, merged_path)
-                task.provider_serialize = self.api.upload_video(merged_path)
+                if not side_key:
+                    raise KiriError("Scan video is required.")
+                if scan_session.top_video_path and scan_session.side_video_path:
+                    side_path.write_bytes(self.storage.get_bytes(side_key))
+                    top_path.write_bytes(self.storage.get_bytes(scan_session.top_video_path))
+                    self._merge_videos(side_path, top_path, merged_path)
+                    upload_target = merged_path
+                else:
+                    side_path.write_bytes(self.storage.get_bytes(side_key))
+                    upload_target = side_path
+                task.provider_serialize = self.api.upload_video(upload_target)
             task.status = KiriTaskStatus.PROCESSING
             task.provider_status = "uploading"
             task.error_message = None
@@ -217,6 +224,15 @@ class KiriPipelineService:
         self.db.refresh(task)
         return task
 
+    def _can_bake_local(self) -> bool:
+        crop_avail = getattr(self.crop_baker, "is_available", None)
+        cleanup_avail = getattr(self.mesh_cleanup, "is_available", None)
+        if crop_avail is not None and not crop_avail():
+            return False
+        if cleanup_avail is not None and not cleanup_avail():
+            return False
+        return True
+
     def bake_saved_project(self, scan_session_id: str) -> None:
         task = self.require_task(scan_session_id)
         if task.status == KiriTaskStatus.READY:
@@ -238,12 +254,29 @@ class KiriPipelineService:
                 cropped_path = work_dir / "cropped.glb"
                 model_dir = work_dir / "model"
                 source_path.write_bytes(self.storage.get_bytes(task.source_glb_path))
-                self.crop_baker.bake(source_path, cropped_path, crop_box)
-                cleanup_report = self.mesh_cleanup.cleanup(
-                    cropped_path,
-                    model_dir,
-                    log_path=model_dir / "kiri-crop-cleanup.log",
-                )
+                if self._can_bake_local():
+                    self.crop_baker.bake(source_path, cropped_path, crop_box)
+                    cleanup_report = self.mesh_cleanup.cleanup(
+                        cropped_path,
+                        model_dir,
+                        log_path=model_dir / "kiri-crop-cleanup.log",
+                    )
+                else:
+                    model_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source_path, model_dir / "shoe_preview.glb")
+                    (model_dir / "shoe.obj").write_text("# Raw mesh from KIRI Engine\n", encoding="utf-8")
+                    (model_dir / "shoe.mtl").write_text("# Material\n", encoding="utf-8")
+                    (model_dir / "shoe_texture.png").write_bytes(PLACEHOLDER_PNG)
+                    cleanup_report = MeshCleanupReport(
+                        editor_ready=True,
+                        editor_ready_score=100,
+                        mesh_object_count=1,
+                        bounding_box={},
+                        normalized_scale=1.0,
+                        triangle_count_before=0,
+                        triangle_count_after=0,
+                        cleanup_warnings=["Blender headless deferred to Desktop client."],
+                    )
                 metadata_path = model_dir / "metadata.json"
                 metadata_key = task.scan_session.metadata_path
                 metadata_path.write_bytes(

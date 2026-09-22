@@ -90,17 +90,22 @@ class ScanHeroCard extends StatelessWidget {
                       const CircleAvatar(
                           radius: 4, backgroundColor: AppTheme.statusScanned),
                       const SizedBox(width: 7),
-                      Text(
-                        'RADAR 360° · AI SENSING',
-                        style: AppTheme.monoFont(
-                          fontSize: 10,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withValues(alpha: 0.65),
-                          letterSpacing: 1.2,
+                      Flexible(
+                        child: Text(
+                          'RADAR 360° · AI SENSING',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTheme.monoFont(
+                            fontSize: 10,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withValues(alpha: 0.65),
+                            letterSpacing: 1.2,
+                          ),
                         ),
                       ),
+                      const SizedBox(width: 8),
                       const Spacer(),
                       Text(
                         '720P / 1080P',

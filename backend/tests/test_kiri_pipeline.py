@@ -203,6 +203,45 @@ def test_scan_session_ownership_is_required_for_kiri_routes() -> None:
         assert exc.value.status_code == status.HTTP_404_NOT_FOUND
 
 
+def test_start_processing_with_single_video_uploads_directly() -> None:
+    with database_session() as db:
+        user = User(name="Owner", email="owner@example.com")
+        project = Project(user=user, name="Single scan")
+        scan = ScanSession(
+            user=user,
+            project=project,
+            status=ScanStatus.QUEUED,
+            raw_video_path="videos/single.mp4",
+        )
+        db.add(scan)
+        db.commit()
+        db.refresh(scan)
+
+        task = KiriScanTask(scan_session=scan, status=KiriTaskStatus.QUEUED)
+        db.add(task)
+        db.commit()
+
+        storage = MemoryStorage()
+        storage.put_bytes("videos/single.mp4", b"fake_mp4_video", "video/mp4")
+
+        class RecordingKiriApi:
+            def __init__(self) -> None:
+                self.uploaded_bytes: bytes | None = None
+
+            def upload_video(self, path: Path) -> str:
+                self.uploaded_bytes = path.read_bytes()
+                return "serialize-single"
+
+        api = RecordingKiriApi()
+        service = KiriPipelineService(db, api=api, storage=storage)
+        service.start_processing(scan.id)
+
+        db.refresh(task)
+        assert task.status == KiriTaskStatus.PROCESSING
+        assert task.provider_serialize == "serialize-single"
+        assert api.uploaded_bytes == b"fake_mp4_video"
+
+
 class database_session:
     def __enter__(self) -> Session:
         self.engine = create_engine("sqlite:///:memory:")
@@ -262,11 +301,57 @@ class FakeCropBaker:
     def __init__(self) -> None:
         self.calls = 0
 
+    def is_available(self) -> bool:
+        return True
+
     def bake(self, source_glb, output_glb, crop_box) -> None:
         self.calls += 1
         assert source_glb.read_bytes().startswith(b"glTF")
         assert crop_box.coordinate_space == "normalized"
         output_glb.write_bytes(source_glb.read_bytes())
+
+
+class UnavailableCropBaker:
+    def is_available(self) -> bool:
+        return False
+
+    def bake(self, source_glb, output_glb, crop_box) -> None:
+        raise RuntimeError("Blender binary not found.")
+
+
+def test_save_project_falls_back_when_blender_unavailable_on_server() -> None:
+    with database_session() as db:
+        task = create_task(db)
+        storage = MemoryStorage()
+        source_key = f"kiri/{task.scan_session_id}/source.glb"
+        raw_glb = b"glTF" + b"\x00" * 32
+        storage.put_bytes(source_key, raw_glb, "model/gltf-binary")
+        task.source_glb_path = source_key
+        task.crop_box_json = CropBox().model_dump_json(by_alias=True)
+        task.status = KiriTaskStatus.CROP_BAKING
+        task.scan_session.status = ScanStatus.CROP_BAKING
+        db.commit()
+
+        service = KiriPipelineService(
+            db,
+            api=FakeKiriApi("successful", model_zip()),
+            storage=storage,
+            crop_baker=UnavailableCropBaker(),
+            mesh_cleanup=FakeMeshCleanup(),
+        )
+
+        service.bake_saved_project(task.scan_session_id)
+
+        db.refresh(task)
+        assert task.status == KiriTaskStatus.READY
+        assert task.scan_session.status == ScanStatus.CROP_READY
+        assert task.scan_session.model_asset is not None
+        version = AssetVersionService(db).latest_published(
+            task.scan_session.project_id,
+            AssetVersionType.MODEL,
+        )
+        assert version is not None
+
 
 
 class FakeBlender:

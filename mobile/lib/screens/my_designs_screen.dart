@@ -5,6 +5,7 @@ import '../app/app_theme.dart';
 import '../models/account.dart';
 import '../services/api_exception.dart';
 import '../services/backend_api.dart';
+import 'project_trash_screen.dart';
 
 /// SC-26 "Thiết kế của tôi" — the signed-in user's projects from
 /// `GET /api/v1/projects`.
@@ -118,12 +119,143 @@ class _MyDesignsScreenState extends State<MyDesignsScreen> {
     }
   }
 
+  Future<void> _renameProject(ProjectSummary project) async {
+    final controller = TextEditingController(text: project.name);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Đổi tên dự án'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Tên mẫu giày',
+            hintText: 'Nhập tên mới...',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Hủy'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final text = controller.text.trim();
+              if (text.isNotEmpty) Navigator.of(ctx).pop(text);
+            },
+            child: const Text('Lưu'),
+          ),
+        ],
+      ),
+    );
+
+    if (newName == null || newName == project.name || !mounted) return;
+
+    try {
+      final updated = await widget.api.updateProject(project.id, name: newName);
+      if (!mounted) return;
+      setState(() {
+        final index = _projects.indexWhere((p) => p.id == project.id);
+        if (index != -1) {
+          _projects[index] = updated;
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Đã cập nhật tên dự án.')),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Lỗi: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  Future<void> _deleteProject(ProjectSummary project) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Xóa dự án?'),
+        content: Text(
+          'Dự án "${project.name}" sẽ được chuyển vào thùng rác. Bạn có thể khôi phục sau này.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Hủy'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Xóa vào thùng rác'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await widget.api.deleteProject(project.id);
+      if (!mounted) return;
+      setState(() {
+        _projects.removeWhere((p) => p.id == project.id);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Đã chuyển "${project.name}" vào thùng rác.'),
+          action: SnackBarAction(
+            label: 'Thùng rác',
+            onPressed: () {
+              Navigator.of(context)
+                  .push(
+                MaterialPageRoute(
+                  builder: (_) => ProjectTrashScreen(api: widget.api),
+                ),
+              )
+                  .then((_) {
+                if (mounted) _load();
+              });
+            },
+          ),
+        ),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Lỗi: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Thiết kế của tôi'),
         actions: [
+          IconButton(
+            tooltip: 'Thùng rác',
+            icon: const Icon(Icons.delete_outline),
+            onPressed: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => ProjectTrashScreen(api: widget.api),
+                ),
+              );
+              if (mounted) _load();
+            },
+          ),
           IconButton(
             tooltip: 'Tải lại',
             onPressed: _loading ? null : _load,
@@ -176,6 +308,8 @@ class _MyDesignsScreenState extends State<MyDesignsScreen> {
           return _ProjectTile(
             project: _projects[index],
             onOpen: () => _openInEditor(_projects[index]),
+            onRename: () => _renameProject(_projects[index]),
+            onDelete: () => _deleteProject(_projects[index]),
           );
         },
       ),
@@ -184,17 +318,24 @@ class _MyDesignsScreenState extends State<MyDesignsScreen> {
 }
 
 class _ProjectTile extends StatelessWidget {
-  const _ProjectTile({required this.project, required this.onOpen});
+  const _ProjectTile({
+    required this.project,
+    required this.onOpen,
+    required this.onRename,
+    required this.onDelete,
+  });
 
   final ProjectSummary project;
   final VoidCallback onOpen;
+  final VoidCallback onRename;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: CircleAvatar(
           backgroundColor: AppTheme.orange.withValues(alpha: 0.14),
           child: Icon(
@@ -218,7 +359,48 @@ class _ProjectTile extends StatelessWidget {
             style: AppTheme.monoFont(fontSize: 11, color: Colors.grey),
           ),
         ),
-        trailing: const Icon(Icons.open_in_new, size: 18),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.open_in_new, size: 20),
+              tooltip: 'Mở Kus Studio Web',
+              onPressed: onOpen,
+            ),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, size: 20),
+              onSelected: (value) {
+                if (value == 'rename') {
+                  onRename();
+                } else if (value == 'delete') {
+                  onDelete();
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'rename',
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit_outlined, size: 18),
+                      SizedBox(width: 8),
+                      Text('Đổi tên'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                      SizedBox(width: 8),
+                      Text('Xóa vào thùng rác', style: TextStyle(color: Colors.red)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
         onTap: onOpen,
       ),
     );

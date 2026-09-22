@@ -5,12 +5,21 @@ import '../models/account.dart';
 import '../services/api_exception.dart';
 import '../services/backend_api.dart';
 import '../widgets/scan_hero_card.dart';
+import 'auth_screen.dart';
+import 'plan_usage_screen.dart';
 import 'scan_setup_screen.dart';
 
 class ScanHomeScreen extends StatefulWidget {
-  const ScanHomeScreen({this.isGuest = false, super.key});
+  const ScanHomeScreen({
+    this.isGuest = false,
+    this.onRequireAuth,
+    this.onOpenPlans,
+    super.key,
+  });
 
   final bool isGuest;
+  final VoidCallback? onRequireAuth;
+  final VoidCallback? onOpenPlans;
 
   @override
   State<ScanHomeScreen> createState() => _ScanHomeScreenState();
@@ -56,7 +65,7 @@ class _ScanHomeScreenState extends State<ScanHomeScreen> {
       return 'KHÁCH: 0 LƯỢT QUÉT';
     }
     if (_loadingUsage) {
-      return 'ĐANG TẢI HẠN MỨC...';
+      return 'ĐANG TẢI…';
     }
     final usage = _usage;
     if (usage == null) {
@@ -64,9 +73,9 @@ class _ScanHomeScreenState extends State<ScanHomeScreen> {
     }
     final scans = usage.maxScansPerCycle;
     if (scans == null) {
-      return '${usage.tierLabel}: QUÉT KHÔNG GIỚI HẠN';
+      return '${usage.tierLabel}: KHÔNG GIỚI HẠN';
     }
-    return '${usage.tierLabel}: $scans LƯỢT QUÉT/CHU KỲ';
+    return '${usage.tierLabel}: $scans LƯỢT QUÉT';
   }
 
   /// BR-99: Free has no scan allowance, so the CTA sells the upgrade instead
@@ -132,9 +141,12 @@ class _ScanHomeScreenState extends State<ScanHomeScreen> {
                                   ),
                                 ),
                               ),
-                              const Spacer(),
-                              // Quota Badge
-                              Container(
+                              const SizedBox(width: 8),
+                              // Quota Badge — Flexible so a longer tier or
+                              // locale ellipsizes instead of overflowing.
+                              Flexible(
+                                fit: FlexFit.loose,
+                                child: Container(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 10,
                                   vertical: 4,
@@ -161,18 +173,23 @@ class _ScanHomeScreenState extends State<ScanHomeScreen> {
                                           : AppTheme.orange,
                                     ),
                                     const SizedBox(width: 6),
-                                    Text(
-                                      _quotaLabel,
-                                      style: AppTheme.monoFont(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w700,
-                                        letterSpacing: 0.5,
-                                        color: widget.isGuest
-                                            ? AppTheme.statusScanned
-                                            : AppTheme.orange,
+                                      Flexible(
+                                        child: Text(
+                                          _quotaLabel,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: AppTheme.monoFont(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w700,
+                                            letterSpacing: 0.5,
+                                            color: widget.isGuest
+                                                ? AppTheme.statusScanned
+                                                : AppTheme.orange,
+                                          ),
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
                               ),
                             ],
@@ -239,15 +256,20 @@ class _ScanHomeScreenState extends State<ScanHomeScreen> {
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Text(
-                                        _canScan
-                                            ? 'BẮT ĐẦU QUÉT 360°'
-                                            : 'NÂNG CẤP ĐỂ QUÉT 360°',
-                                        style: AppTheme.headingFont(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w900,
-                                          letterSpacing: 1.2,
-                                          color: Colors.black,
+                                      Flexible(
+                                        child: Text(
+                                          _canScan
+                                              ? 'BẮT ĐẦU QUÉT 360°'
+                                              : 'NÂNG CẤP ĐỂ QUÉT 360°',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                          style: AppTheme.headingFont(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: 1.2,
+                                            color: Colors.black,
+                                          ),
                                         ),
                                       ),
                                       const SizedBox(width: 12),
@@ -350,7 +372,30 @@ class _ScanHomeScreenState extends State<ScanHomeScreen> {
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                onPressed: () => Navigator.of(sheetContext).pop(),
+                onPressed: () {
+                  Navigator.of(sheetContext).pop();
+                  if (widget.isGuest) {
+                    if (widget.onRequireAuth != null) {
+                      widget.onRequireAuth!();
+                    } else {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const AuthScreen(initialRegister: true),
+                        ),
+                      );
+                    }
+                  } else {
+                    if (widget.onOpenPlans != null) {
+                      widget.onOpenPlans!();
+                    } else {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => PlanUsageScreen(api: _api),
+                        ),
+                      );
+                    }
+                  }
+                },
                 icon: Icon(
                   widget.isGuest ? Icons.person_add_alt : Icons.upgrade,
                 ),

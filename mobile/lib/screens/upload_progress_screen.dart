@@ -1,24 +1,27 @@
 import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 
+import '../config/app_config.dart';
 import '../models/scan_metadata.dart';
 import '../services/api_exception.dart';
 import '../services/backend_api.dart';
-import 'kiri_crop_screen.dart';
+import 'scan_result_screen.dart';
 
 class UploadProgressScreen extends StatefulWidget {
   const UploadProgressScreen({
     required this.api,
     required this.metadata,
-    required this.sideVideoFile,
-    required this.topVideoFile,
+    required this.videoFile,
+    this.sideVideoFile,
+    this.topVideoFile,
     super.key,
   });
 
   final BackendApi api;
   final ScanMetadata metadata;
-  final XFile sideVideoFile;
-  final XFile topVideoFile;
+  final XFile videoFile;
+  final XFile? sideVideoFile;
+  final XFile? topVideoFile;
 
   @override
   State<UploadProgressScreen> createState() => _UploadProgressScreenState();
@@ -79,8 +82,8 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
       });
       await _api.uploadScanPass(
         scanSessionId: scanSessionId,
-        passType: 'side-orbit',
-        videoFile: widget.sideVideoFile,
+        passType: 'single-video',
+        videoFile: widget.videoFile,
         onProgress: _updateProgress,
       );
 
@@ -89,18 +92,6 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
         _progress = 0;
         _message = _stepLabel(2);
       });
-      await _api.uploadScanPass(
-        scanSessionId: scanSessionId,
-        passType: 'top-orbit',
-        videoFile: widget.topVideoFile,
-        onProgress: _updateProgress,
-      );
-
-      _safeSetState(() {
-        _step = 3;
-        _progress = 0;
-        _message = _stepLabel(3);
-      });
       final kiriStatus =
           await _api.startKiriProcessing(scanSessionId: scanSessionId);
       if (!mounted) {
@@ -108,10 +99,11 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
       }
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => KiriCropScreen(
-            api: widget.api,
+          builder: (_) => ScanResultScreen(
             scanSessionId: scanSessionId,
-            initialStatus: kiriStatus,
+            status: kiriStatus.status,
+            processingStarted: true,
+            webDesignUrl: AppConfig.webUrl('/design/$scanSessionId'),
           ),
         ),
       );
@@ -143,9 +135,8 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
 
   String _stepLabel(int step) {
     return switch (step) {
-      1 => 'Đang tải vòng quét ngang',
-      2 => 'Đang tải vòng quét chéo trên',
-      3 => 'Đang gửi tới dịch vụ dựng 3D',
+      1 => 'Đang tải video 360° lên',
+      2 => 'Đang gửi tới dịch vụ dựng 3D AI (KIRI Engine)',
       _ => 'Đang chuẩn bị tải lên',
     };
   }
@@ -172,7 +163,7 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
               Text(_message, textAlign: TextAlign.center),
               const SizedBox(height: 8),
               Text(
-                _step == 0 ? 'Đang chuẩn bị' : 'Bước $_step / 3',
+                _step == 0 ? 'Đang chuẩn bị' : 'Bước $_step / 2',
                 textAlign: TextAlign.center,
               ),
               if (_failed) ...[

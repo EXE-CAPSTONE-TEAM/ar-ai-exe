@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -13,55 +14,34 @@ import '../services/backend_api.dart';
 import '../widgets/scan_guide_overlay.dart';
 import 'upload_progress_screen.dart';
 
-/// BR-34: a Scan Job accepts a video of at most 60 seconds, and at most 200MB
-/// in total across both passes. Recording stops automatically at the cap so an
-/// over-long clip is never uploaded only to be rejected.
-const maxPassDuration = Duration(seconds: 60);
+/// Single continuous 45s spiral orbit scan (0-20s eye-level + 20-45s top-down 45°).
+const maxScanDuration = Duration(seconds: 45);
+const minScanDuration = Duration(seconds: 25);
+const tierSwitchDuration = Duration(seconds: 20);
 
-/// Below this a 360-degree orbit cannot have been completed; the provider
-/// would fail reconstruction and BR-36 only refunds one bad input per cycle.
-const minPassDuration = Duration(seconds: 10);
-
-/// Recommended floor from the scan guide ("xoay quanh đôi giày 30-60 giây").
+// Backwards compatibility alias
+const maxPassDuration = maxScanDuration;
+const minPassDuration = minScanDuration;
 const recommendedPassDuration = Duration(seconds: 30);
 
-/// BR-34 total budget for one Scan Job, across both passes.
+/// BR-34 total budget for one Scan Job.
 const maxJobBytes = 200 * 1024 * 1024;
 
 enum ScanPass {
   sideOrbit,
   topOrbit;
 
-  String get apiValue => switch (this) {
-        ScanPass.sideOrbit => 'side-orbit',
-        ScanPass.topOrbit => 'top-orbit',
-      };
-
-  String get title => switch (this) {
-        ScanPass.sideOrbit => 'Vòng quét ngang',
-        ScanPass.topOrbit => 'Vòng quét chéo trên',
-      };
-
-  String get idleInstruction => switch (this) {
-        ScanPass.sideOrbit =>
-          'Giữ máy ngang tầm thân giày và đi vòng quanh 360°.',
-        ScanPass.topOrbit =>
-          'Giữ máy chếch 30-45° từ trên xuống và đi vòng quanh 360°.',
-      };
-
-  String get recordingInstruction => switch (this) {
-        ScanPass.sideOrbit =>
-          'Di chuyển chậm quanh thân giày. Giữ giày ở giữa khung.',
-        ScanPass.topOrbit =>
-          'Giữ phần mũ giày trong khung. Không cần quét đế giày.',
-      };
+  String get apiValue => 'single-video';
+  String get title => 'Quét 3D liên tục (45s)';
+  String get idleInstruction => 'Xoay 2 tầng quanh đôi giày trong 45 giây.';
+  String get recordingInstruction => 'Đi chậm quanh thân giày, giữ giày trong khung.';
 }
 
 class CameraScanScreen extends StatefulWidget {
   const CameraScanScreen({
     required this.api,
     required this.metadata,
-    required this.pass,
+    this.pass = ScanPass.sideOrbit,
     this.sideVideoFile,
     super.key,
   });
@@ -82,6 +62,7 @@ class _CameraScanScreenState extends State<CameraScanScreen>
   int _seconds = 0;
   bool _isRecording = false;
   bool _isStopping = false;
+  bool _tier2HapticFired = false;
   String? _error;
 
   /// True when the camera is unavailable because the user declined: the fix is
@@ -297,6 +278,7 @@ class _CameraScanScreenState extends State<CameraScanScreen>
       _isRecording = true;
       _seconds = 0;
       _error = null;
+      _tier2HapticFired = false;
     });
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -304,8 +286,12 @@ class _CameraScanScreenState extends State<CameraScanScreen>
         return;
       }
       setState(() => _seconds += 1);
-      if (_seconds >= maxPassDuration.inSeconds) {
-        // Hard stop at the BR-34 ceiling.
+      if (_seconds >= tierSwitchDuration.inSeconds && !_tier2HapticFired) {
+        _tier2HapticFired = true;
+        HapticFeedback.heavyImpact();
+      }
+      if (_seconds >= maxScanDuration.inSeconds) {
+        // Hard stop at the 45s continuous scan cap.
         unawaited(_stopRecording(reachedCap: true));
       }
     });
@@ -316,10 +302,10 @@ class _CameraScanScreenState extends State<CameraScanScreen>
     if (controller == null || !_isRecording || _isStopping) {
       return;
     }
-    if (!reachedCap && _seconds < minPassDuration.inSeconds) {
-      final remaining = minPassDuration.inSeconds - _seconds;
+    if (!reachedCap && _seconds < minScanDuration.inSeconds) {
+      final remaining = minScanDuration.inSeconds - _seconds;
       _showSnack(
-        'Quay thêm khoảng $remaining giây nữa để AI đủ dữ liệu dựng lưới 3D.',
+        'Quay thêm ít nhất $remaining giây nữa để AI có đủ dữ liệu dựng lưới 3D.',
       );
       return;
     }
@@ -336,17 +322,12 @@ class _CameraScanScreenState extends State<CameraScanScreen>
       if (await _rejectIfOverBudget(video)) {
         return;
       }
-      if (_seconds < recommendedPassDuration.inSeconds) {
-        _showSnack(
-          'Vòng quét hơi ngắn ($_seconds giây). Chất lượng lưới 3D có thể thấp.',
-        );
-      }
       if (mounted) {
         _goToNextStep(video);
       }
     } on CameraException catch (error) {
       await WakelockPlus.disable();
-      _setError('Không lưu được video (${error.code}). Hãy quét lại vòng này.');
+      _setError('Không lưu được video (${error.code}). Hãy quay lại.');
       if (mounted) {
         setState(() => _isRecording = false);
       }
@@ -371,17 +352,13 @@ class _CameraScanScreenState extends State<CameraScanScreen>
       _isRecording = false;
       _seconds = 0;
       _error =
-          'Lượt quay bị ngắt khi bạn rời ứng dụng. Hãy quay lại vòng quét này.';
+          'Lượt quay bị ngắt khi bạn rời ứng dụng. Hãy thực hiện lại lượt quét.';
     });
   }
 
-  /// BR-34: both passes together must stay under 200MB.
+  /// BR-34: Single continuous video under 200MB.
   Future<bool> _rejectIfOverBudget(XFile video) async {
-    var total = await File(video.path).length();
-    final sideVideo = widget.sideVideoFile;
-    if (sideVideo != null) {
-      total += await File(sideVideo.path).length();
-    }
+    final total = await File(video.path).length();
     if (total <= maxJobBytes) {
       return false;
     }
@@ -394,32 +371,12 @@ class _CameraScanScreenState extends State<CameraScanScreen>
   }
 
   void _goToNextStep(XFile video) {
-    if (widget.pass == ScanPass.sideOrbit) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => CameraScanScreen(
-            api: widget.api,
-            metadata: widget.metadata,
-            pass: ScanPass.topOrbit,
-            sideVideoFile: video,
-          ),
-        ),
-      );
-      return;
-    }
-
-    final sideVideoFile = widget.sideVideoFile;
-    if (sideVideoFile == null) {
-      _setError('Thiếu video vòng quét ngang. Hãy bắt đầu lại lượt quét.');
-      return;
-    }
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => UploadProgressScreen(
           api: widget.api,
           metadata: widget.metadata,
-          sideVideoFile: sideVideoFile,
-          topVideoFile: video,
+          videoFile: video,
         ),
       ),
     );
@@ -439,7 +396,7 @@ class _CameraScanScreenState extends State<CameraScanScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.pass.title)),
+      appBar: AppBar(title: const Text('Quét 3D sản phẩm (45s)')),
       body: SafeArea(child: _body()),
     );
   }
@@ -460,7 +417,11 @@ class _CameraScanScreenState extends State<CameraScanScreen>
       return const Center(child: CircularProgressIndicator());
     }
 
-    final remaining = maxPassDuration.inSeconds - _seconds;
+    final remaining = maxScanDuration.inSeconds - _seconds;
+    final tierNotice = _seconds < tierSwitchDuration.inSeconds
+        ? 'Tầng 1 (Ngang) · Còn ${tierSwitchDuration.inSeconds - _seconds}s sẽ chuyển góc'
+        : 'Tầng 2 (Nghiêng 45°) · Còn $remaining giây';
+
     return Stack(
       children: [
         Positioned.fill(child: CameraPreview(controller)),
@@ -468,9 +429,7 @@ class _CameraScanScreenState extends State<CameraScanScreen>
           child: ScanGuideOverlay(
             seconds: _seconds,
             isRecording: _isRecording,
-            passTitle: widget.pass.title,
-            idleInstruction: widget.pass.idleInstruction,
-            recordingInstruction: widget.pass.recordingInstruction,
+            tierSwitchSeconds: tierSwitchDuration.inSeconds,
           ),
         ),
         if (error != null)
@@ -500,8 +459,11 @@ class _CameraScanScreenState extends State<CameraScanScreen>
             children: [
               if (_isRecording)
                 Text(
-                  'Còn $remaining giây · tối đa ${maxPassDuration.inSeconds} giây',
-                  style: const TextStyle(color: Colors.white),
+                  tierNotice,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               const SizedBox(height: 8),
               FilledButton.icon(
@@ -511,7 +473,13 @@ class _CameraScanScreenState extends State<CameraScanScreen>
                 icon: Icon(
                   _isRecording ? Icons.stop : Icons.fiber_manual_record,
                 ),
-                label: Text(_isRecording ? 'Dừng ghi' : 'Bắt đầu ghi'),
+                label: Text(
+                  _isRecording
+                      ? (_seconds < minScanDuration.inSeconds
+                          ? 'Dừng ghi (${_seconds}s / tối thiểu 25s)'
+                          : 'Hoàn tất & Tải lên (${_seconds}s)')
+                      : 'Bắt đầu quét 45s',
+                ),
               ),
             ],
           ),

@@ -228,3 +228,145 @@ class ProjectPage {
     );
   }
 }
+
+/// `GET /api/v1/plans` → PlanResponse
+class BillingPlan {
+  const BillingPlan({
+    required this.id,
+    required this.tier,
+    this.billingCycle,
+    required this.priceVnd,
+    this.maxProjects,
+    this.maxExportsPerMonth,
+    required this.allowedExportFormats,
+    required this.bakePriority,
+    this.maxAiCreditsPerCycle,
+    this.maxScansPerCycle,
+    required this.allowDrawArtwork,
+  });
+
+  final String id;
+  final String tier;
+  final String? billingCycle;
+  final int priceVnd;
+  final int? maxProjects;
+  final int? maxExportsPerMonth;
+  final List<String> allowedExportFormats;
+  final String bakePriority;
+  final int? maxAiCreditsPerCycle;
+  final int? maxScansPerCycle;
+  final bool allowDrawArtwork;
+
+  String get tierLabel => switch (tier.toLowerCase()) {
+        'free' => 'MIỄN PHÍ',
+        'basic' => 'BASIC',
+        'pro' => 'PRO CHUYÊN NGHIỆP',
+        'team' || 'enterprise' => 'ENTERPRISE',
+        _ => tier.toUpperCase(),
+      };
+
+  String get formattedPrice {
+    if (priceVnd == 0) return '0 đ';
+    // Format 199000 -> 199.000 đ
+    final str = priceVnd.toString();
+    final buffer = StringBuffer();
+    int count = 0;
+    for (int i = str.length - 1; i >= 0; i--) {
+      buffer.write(str[i]);
+      count++;
+      if (count % 3 == 0 && i > 0) {
+        buffer.write('.');
+      }
+    }
+    return '${buffer.toString().split('').reversed.join()} đ';
+  }
+
+  factory BillingPlan.fromJson(Map<String, dynamic> json) {
+    final rawFormats = json['allowed_export_formats'] as List<dynamic>? ?? const [];
+    return BillingPlan(
+      id: _asString(json['id']),
+      tier: _asString(json['tier'], fallback: 'free'),
+      billingCycle: json['billing_cycle'] as String?,
+      priceVnd: _asInt(json['price_vnd']) ?? 0,
+      maxProjects: _asInt(json['max_projects']),
+      maxExportsPerMonth: _asInt(json['max_exports_per_month']),
+      allowedExportFormats: rawFormats.map((e) => e.toString()).toList(),
+      bakePriority: _asString(json['bake_priority'], fallback: 'normal'),
+      maxAiCreditsPerCycle: _asInt(json['max_ai_credits_per_cycle']),
+      maxScansPerCycle: _asInt(json['max_scans_per_cycle']),
+      allowDrawArtwork: json['allow_draw_artwork'] == true,
+    );
+  }
+}
+
+/// `GET /api/v1/subscription/invoices` → InvoiceResponse
+class InvoiceItem {
+  const InvoiceItem({
+    required this.id,
+    required this.orderCode,
+    required this.planTier,
+    required this.billingCycle,
+    required this.amountVnd,
+    required this.paymentMethod,
+    required this.status,
+    this.receiptNumber,
+    this.paidAt,
+    required this.createdAt,
+  });
+
+  final String id;
+  final int orderCode;
+  final String planTier;
+  final String billingCycle;
+  final int amountVnd;
+  final String paymentMethod;
+  final String status;
+  final String? receiptNumber;
+  final DateTime? paidAt;
+  final DateTime createdAt;
+
+  factory InvoiceItem.fromJson(Map<String, dynamic> json) {
+    return InvoiceItem(
+      id: _asString(json['id']),
+      orderCode: _asInt(json['order_code']) ?? 0,
+      planTier: _asString(json['plan_tier'], fallback: 'basic'),
+      billingCycle: _asString(json['billing_cycle'], fallback: 'monthly'),
+      amountVnd: _asInt(json['amount_vnd']) ?? 0,
+      paymentMethod: _asString(json['payment_method'], fallback: 'payos'),
+      status: _asString(json['status'], fallback: 'pending'),
+      receiptNumber: json['receipt_number'] as String?,
+      paidAt: _asDate(json['paid_at']),
+      createdAt: _asDate(json['created_at']) ?? DateTime.now(),
+    );
+  }
+}
+
+/// `GET /api/v1/exports` → ExportRecord
+class ExportItem {
+  const ExportItem({
+    required this.id,
+    required this.projectId,
+    required this.format,
+    required this.status,
+    this.fileSize,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String projectId;
+  final String format;
+  final String status;
+  final int? fileSize;
+  final DateTime createdAt;
+
+  factory ExportItem.fromJson(Map<String, dynamic> json) {
+    return ExportItem(
+      id: _asString(json['id']),
+      projectId: _asString(json['project_id']),
+      format: _asString(json['format'], fallback: 'glb'),
+      status: _asString(json['status'], fallback: 'completed'),
+      fileSize: _asInt(json['file_size']),
+      createdAt: _asDate(json['created_at']) ?? DateTime.now(),
+    );
+  }
+}

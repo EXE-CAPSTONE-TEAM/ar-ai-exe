@@ -246,7 +246,6 @@ class _ScanSetupScreenState extends State<ScanSetupScreen> {
         builder: (_) => CameraScanScreen(
           api: widget.api,
           metadata: metadata,
-          pass: ScanPass.sideOrbit,
         ),
       ),
     );

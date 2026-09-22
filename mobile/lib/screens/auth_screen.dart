@@ -10,11 +10,13 @@ class AuthScreen extends StatefulWidget {
   const AuthScreen({
     this.themeMode = ThemeMode.light,
     this.onThemeModeChanged,
+    this.initialRegister = false,
     super.key,
   });
 
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
+  final bool initialRegister;
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -26,9 +28,15 @@ class _AuthScreenState extends State<AuthScreen> {
   final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _isRegister = false;
+  late bool _isRegister;
   bool _isBusy = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _isRegister = widget.initialRegister;
+  }
 
   @override
   void dispose() {
@@ -44,14 +52,25 @@ class _AuthScreenState extends State<AuthScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
+        child: Stack(
+          children: [
+            Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (Navigator.of(context).canPop())
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: IconButton.filledTonal(
+                            icon: const Icon(Icons.arrow_back),
+                            tooltip: 'Quay lại',
+                            onPressed: () => Navigator.of(context).pop(),
+                          ),
+                        ),
                   // Brand Logo & Header
                   Center(
                     child: Container(
@@ -251,7 +270,25 @@ class _AuthScreenState extends State<AuthScreen> {
                             obscureText: true,
                             decoration: const InputDecoration(labelText: 'Mật khẩu'),
                           ),
-                          const SizedBox(height: 20),
+                          if (!_isRegister)
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton(
+                                onPressed: _isBusy ? null : _showForgotPasswordDialog,
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 2,
+                                  ),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                child: const Text(
+                                  'Quên mật khẩu?',
+                                  style: TextStyle(fontSize: 13),
+                                ),
+                              ),
+                            ),
+                          const SizedBox(height: 16),
                           FilledButton.icon(
                             onPressed: _isBusy ? null : _submit,
                             icon: Icon(
@@ -283,8 +320,10 @@ class _AuthScreenState extends State<AuthScreen> {
             ),
           ),
         ),
-      ),
-    );
+      ],
+    ),
+  ),
+);
   }
 
   void _continueAsGuest() {
@@ -360,6 +399,179 @@ class _AuthScreenState extends State<AuthScreen> {
           onThemeModeChanged: widget.onThemeModeChanged,
         ),
       ),
+    );
+  }
+
+  void _showForgotPasswordDialog() {
+    final emailController = TextEditingController(
+      text: _emailController.text.trim(),
+    );
+    final otpController = TextEditingController();
+    final newPasswordController = TextEditingController();
+    bool otpSent = false;
+    bool dialogBusy = false;
+    String? dialogError;
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            Future<void> handleSendOtp() async {
+              final email = emailController.text.trim();
+              if (email.isEmpty || !email.contains('@')) {
+                setDialogState(() => dialogError = 'Vui lòng nhập email hợp lệ');
+                return;
+              }
+              setDialogState(() {
+                dialogBusy = true;
+                dialogError = null;
+              });
+              try {
+                await _api.forgotPassword(email: email);
+                setDialogState(() {
+                  otpSent = true;
+                  dialogBusy = false;
+                });
+              } on ApiException catch (e) {
+                setDialogState(() {
+                  dialogBusy = false;
+                  dialogError = e.message;
+                });
+              } catch (e) {
+                setDialogState(() {
+                  dialogBusy = false;
+                  dialogError = 'Không thể gửi mã: $e';
+                });
+              }
+            }
+
+            Future<void> handleResetPassword() async {
+              final email = emailController.text.trim();
+              final otp = otpController.text.trim();
+              final newPass = newPasswordController.text;
+              if (otp.length < 6) {
+                setDialogState(() => dialogError = 'Mã OTP gồm 6 chữ số');
+                return;
+              }
+              if (newPass.length < 6) {
+                setDialogState(() => dialogError = 'Mật khẩu mới tối thiểu 6 ký tự');
+                return;
+              }
+              setDialogState(() {
+                dialogBusy = true;
+                dialogError = null;
+              });
+              try {
+                await _api.resetPassword(
+                  email: email,
+                  otpCode: otp,
+                  newPassword: newPass,
+                );
+                if (dialogCtx.mounted) {
+                  Navigator.of(dialogCtx).pop();
+                }
+                if (mounted) {
+                  _passwordController.text = newPass;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Đặt lại mật khẩu thành công! Bạn có thể đăng nhập ngay.'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } on ApiException catch (e) {
+                setDialogState(() {
+                  dialogBusy = false;
+                  dialogError = e.message;
+                });
+              } catch (e) {
+                setDialogState(() {
+                  dialogBusy = false;
+                  dialogError = 'Lỗi đặt lại mật khẩu: $e';
+                });
+              }
+            }
+
+            return AlertDialog(
+              title: Text(
+                otpSent ? 'Nhập mã xác nhận OTP' : 'Quên mật khẩu',
+                style: AppTheme.headingFont(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      otpSent
+                          ? 'Mã OTP 6 chữ số đã được gửi tới email ${emailController.text}. Hãy kiểm tra hòm thư.'
+                          : 'Nhập địa chỉ email tài khoản KusShoes để nhận mã OTP khôi phục mật khẩu.',
+                      style: AppTheme.bodyFont(fontSize: 13),
+                    ),
+                    const SizedBox(height: 16),
+                    if (!otpSent)
+                      TextField(
+                        controller: emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: const InputDecoration(
+                          labelText: 'Email tài khoản',
+                          prefixIcon: Icon(Icons.email_outlined),
+                        ),
+                      )
+                    else ...[
+                      TextField(
+                        controller: otpController,
+                        keyboardType: TextInputType.number,
+                        maxLength: 6,
+                        decoration: const InputDecoration(
+                          labelText: 'Mã OTP (6 chữ số)',
+                          prefixIcon: Icon(Icons.pin_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: newPasswordController,
+                        obscureText: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Mật khẩu mới',
+                          prefixIcon: Icon(Icons.lock_outline),
+                        ),
+                      ),
+                    ],
+                    if (dialogError != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        dialogError!,
+                        style: const TextStyle(color: Colors.red, fontSize: 12),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: dialogBusy ? null : () => Navigator.of(dialogCtx).pop(),
+                  child: const Text('Hủy'),
+                ),
+                FilledButton(
+                  onPressed: dialogBusy
+                      ? null
+                      : (otpSent ? handleResetPassword : handleSendOtp),
+                  child: dialogBusy
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : Text(otpSent ? 'Đổi mật khẩu' : 'Gửi mã OTP'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

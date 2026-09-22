@@ -27,12 +27,15 @@ from app.services.storage import StorageService, get_storage_service
 class ScanSessionService:
     allowed_content_types = {"video/mp4"}
     allowed_extensions = {".mp4"}
-    required_passes = ("side_orbit", "top_orbit")
+    required_passes = ("side_orbit",)
     pass_aliases = {
         "side-orbit": "side_orbit",
         "side_orbit": "side_orbit",
         "top-orbit": "top_orbit",
         "top_orbit": "top_orbit",
+        "single-video": "side_orbit",
+        "single_video": "side_orbit",
+        "scan": "side_orbit",
     }
 
     def __init__(self, db: Session, storage: StorageService | None = None):
@@ -195,9 +198,7 @@ class ScanSessionService:
     def is_ready_for_processing(cls, scan_session: ScanSession) -> bool:
         if scan_session.source_type == ScanSource.IMPORT:
             return scan_session.status == ScanStatus.COMPLETED
-        return all(
-            pass_type in cls.uploaded_passes(scan_session) for pass_type in cls.required_passes
-        )
+        return bool(scan_session.side_video_path or scan_session.raw_video_path)
 
     @classmethod
     def required_passes_for(cls, scan_session: ScanSession) -> list[str]:
