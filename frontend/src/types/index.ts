@@ -8,7 +8,7 @@ export type User = {
 };
 
 export type ProjectStatus = "draft" | "processing" | "ready" | "failed" | "archived";
-export type AssetStatus = "uploaded" | "processing" | "ready" | "failed";
+export type AssetStatus = "uploaded" | "processing" | "ready" | "raw" | "failed";
 export type DesignStatus = "draft" | "published" | "archived" | "exported";
 export type PreviewStatus = "none" | "pending" | "processing" | "ready" | "failed";
 export type JobStatus = "queued" | "processing" | "completed" | "failed";

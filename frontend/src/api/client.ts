@@ -80,6 +80,56 @@ function csrfHeader(method: string | undefined): Record<string, string> {
   return csrfToken ? { "X-CSRF-Token": decodeURIComponent(csrfToken) } : {};
 }
 
+// KusShoes editor content routes answer with a presigned storage URL instead of bytes
+// (KusShoes spec §B, ADR-004). The local sidecar still serves bytes on its own routes.
+const KUSSHOES_CONTENT_PATH = /^\/api\/v1\/editor\/(?:assets|exports)\/[0-9a-f-]{36}\/content(?:[?#]|$)/i;
+
+type PresignedContent = {
+  url: string;
+  expiresIn: number;
+  filename: string;
+  contentType: string;
+};
+
+export type StoredFile = { blob: Blob; filename: string | null };
+
+export function isPresignedContentPath(path: string): boolean {
+  return KUSSHOES_CONTENT_PATH.test(path);
+}
+
+function presignedUrl(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new ApiError("Storage URL is missing.", 502);
+  }
+  const url = new URL(value);
+  if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) {
+    throw new ApiError("Storage URL is invalid.", 502);
+  }
+  return url.toString();
+}
+
+/** Fetch a stored file from an API path, following a presigned URL when the API returns one. */
+export async function fetchStoredFile(path: string, cache?: RequestCache): Promise<StoredFile> {
+  const response = await fetch(apiUrl(path), {
+    credentials: "include",
+    headers: authHeader(),
+    cache,
+  });
+  if (!response.ok) {
+    throw new ApiError(await errorMessage(response), response.status);
+  }
+  if (!isPresignedContentPath(path)) {
+    return { blob: await response.blob(), filename: null };
+  }
+  const content = (await response.json()) as PresignedContent;
+  // Storage authenticates by the URL signature: never send cookies or the API bearer token.
+  const file = await fetch(presignedUrl(content.url), { credentials: "omit", cache });
+  if (!file.ok) {
+    throw new ApiError(`Storage download failed (${file.status}).`, file.status);
+  }
+  return { blob: await file.blob(), filename: content.filename || null };
+}
+
 function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -339,25 +389,13 @@ export const api = {
 
   async fetchDesignAssetBlobUrl(assetId: string): Promise<string> {
     const path = getActiveEditorSession() ? `/api/v1/editor/assets/${assetId}/content` : `/api/design-assets/${assetId}/download`;
-    const response = await fetch(apiUrl(path), {
-      credentials: "include",
-      headers: authHeader(),
-    });
-    if (!response.ok) {
-      throw new ApiError(await errorMessage(response), response.status);
-    }
-    return URL.createObjectURL(await response.blob());
+    const { blob } = await fetchStoredFile(path);
+    return URL.createObjectURL(blob);
   },
 
   async fetchModelBlobUrl(modelAsset: ModelAsset): Promise<string> {
-    const response = await fetch(apiUrl(modelAsset.canonicalGlbUrl ?? modelAsset.glbUrl), {
-      credentials: "include",
-      headers: authHeader(),
-    });
-    if (!response.ok) {
-      throw new ApiError(await errorMessage(response), response.status);
-    }
-    return URL.createObjectURL(await response.blob());
+    const { blob } = await fetchStoredFile(modelAsset.canonicalGlbUrl ?? modelAsset.glbUrl);
+    return URL.createObjectURL(blob);
   },
 
   async fetchDesignPreviewBlobUrl(design: Design): Promise<string | null> {
@@ -365,15 +403,8 @@ export const api = {
       return null;
     }
     const separator = design.previewGlbUrl.includes("?") ? "&" : "?";
-    const response = await fetch(apiUrl(`${design.previewGlbUrl}${separator}t=${Date.now()}`), {
-      credentials: "include",
-      headers: authHeader(),
-      cache: "no-store",
-    });
-    if (!response.ok) {
-      throw new ApiError(await errorMessage(response), response.status);
-    }
-    return URL.createObjectURL(await response.blob());
+    const { blob } = await fetchStoredFile(`${design.previewGlbUrl}${separator}t=${Date.now()}`, "no-store");
+    return URL.createObjectURL(blob);
   },
 
   async createDesign(modelAssetId: string, name: string, config: DesignConfig): Promise<Design> {
@@ -411,27 +442,13 @@ export const api = {
   },
 
   async downloadExport(exportPackage: ExportPackage): Promise<void> {
-    const response = await fetch(apiUrl(exportPackage.zipUrl ?? exportPackage.downloadUrl), {
-      credentials: "include",
-      headers: authHeader(),
-    });
-    if (!response.ok) {
-      throw new ApiError(await errorMessage(response), response.status);
-    }
-
-    downloadBlob(await response.blob(), `${exportPackage.id}.zip`);
+    const { blob, filename } = await fetchStoredFile(exportPackage.zipUrl ?? exportPackage.downloadUrl);
+    downloadBlob(blob, filename ?? `${exportPackage.id}.zip`);
   },
 
   async downloadModelFile(urlPath: string, filename: string): Promise<void> {
-    const response = await fetch(apiUrl(urlPath), {
-      credentials: "include",
-      headers: authHeader(),
-    });
-    if (!response.ok) {
-      throw new ApiError(await errorMessage(response), response.status);
-    }
-
-    downloadBlob(await response.blob(), filename);
+    const file = await fetchStoredFile(urlPath);
+    downloadBlob(file.blob, file.filename ?? filename);
   },
 };
 
