@@ -6,6 +6,8 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.schemas.scan import CropBox
+
 
 ExportFormat = Literal["glb", "obj"]
 ImageMimeType = Literal["image/png", "image/jpeg", "image/webp"]
@@ -111,6 +113,41 @@ class BakeWorkerExport(WorkerModel):
 
 class BakeWorkerResponse(WorkerModel):
     exports: list[BakeWorkerExport]
+
+
+class PrepareWorkerRequest(WorkerModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, populate_by_name=True)
+
+    job_id: uuid.UUID = Field(alias="jobId")
+    project_id: uuid.UUID = Field(alias="projectId")
+    crop_box: CropBox = Field(default_factory=CropBox, alias="cropBox")
+    source_model: SourceDownloadCapability = Field(alias="sourceModel")
+    outputs: list[OutputUploadCapability] = Field(min_length=1, max_length=5)
+
+    @model_validator(mode="after")
+    def validate_contract(self) -> Self:
+        for output in self.outputs:
+            if output.format != "glb":
+                raise ValueError("prepare outputs must have format 'glb'")
+            if output.content_type != "model/gltf-binary":
+                raise ValueError("prepare outputs must have content_type 'model/gltf-binary'")
+            if f"{self.project_id}/{self.job_id}" not in output.file_path or ".." in output.file_path:
+                raise ValueError("output capability does not match the canonical job path")
+        return self
+
+
+class PrepareWorkerOutput(WorkerModel):
+    format: ExportFormat = "glb"
+    file_path: str
+    file_size_bytes: int = Field(gt=0, strict=True)
+
+
+class PrepareWorkerResponse(WorkerModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, populate_by_name=True)
+
+    outputs: list[PrepareWorkerOutput]
+    cleanup_report: dict[str, Any] = Field(alias="cleanupReport")
+
 
 
 def _referenced_asset_ids(design_config: dict[str, Any]) -> set[uuid.UUID]:

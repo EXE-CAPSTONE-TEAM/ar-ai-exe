@@ -5,8 +5,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from app.core.config import get_settings
-from app.schemas.worker import BakeWorkerRequest, BakeWorkerResponse
+from app.schemas.worker import (
+    BakeWorkerRequest,
+    BakeWorkerResponse,
+    PrepareWorkerRequest,
+    PrepareWorkerResponse,
+)
 from app.services.control_plane_bake import ControlPlaneBakeService
+from app.services.control_plane_prepare import ControlPlanePrepareService
 
 
 router = APIRouter(tags=["worker"])
@@ -60,3 +66,25 @@ async def bake(
         return await ControlPlaneBakeService().execute(payload)
     finally:
         _bake_slots.release()
+
+
+@router.post(
+    "/prepare",
+    response_model=PrepareWorkerResponse,
+    response_model_by_alias=False,
+)
+async def prepare(
+    payload: PrepareWorkerRequest,
+    _: Annotated[None, Depends(require_control_plane_token)],
+) -> PrepareWorkerResponse:
+    if not _bake_slots.acquire(blocking=False):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Prepare worker is at capacity.",
+            headers={"Retry-After": "10"},
+        )
+    try:
+        return await ControlPlanePrepareService().execute(payload)
+    finally:
+        _bake_slots.release()
+
