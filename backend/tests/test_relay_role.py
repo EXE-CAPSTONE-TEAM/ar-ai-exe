@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.api.scan_deps import get_scan_actor
+from app.api.scan_sessions import get_preview_actor, scan_video_key
 from app.core.config import Settings
 from app.core.security import create_kiri_preview_ticket
 from app.db.database import Base, get_db
@@ -174,7 +175,7 @@ def test_video_uploaded_verifies_head_and_updates_status() -> None:
 
     app.dependency_overrides[get_scan_actor] = lambda: user
 
-    key = f"scan-sessions/{scan.id}/video_123.mp4"
+    key = scan_video_key(scan.id)
     storage.put_bytes(key, b"fake_mp4_bytes", "video/mp4")
 
     client = TestClient(app)
@@ -212,7 +213,7 @@ def test_video_uploaded_rejects_missing_object_and_deletes() -> None:
 
     app.dependency_overrides[get_scan_actor] = lambda: user
 
-    key = f"scan-sessions/{scan.id}/video_missing.mp4"
+    key = scan_video_key(scan.id)
     # Object is not in storage, so head will return None
 
     client = TestClient(app)
@@ -245,7 +246,7 @@ def test_video_uploaded_rejects_oversize_object_and_deletes() -> None:
 
     app.dependency_overrides[get_scan_actor] = lambda: user
 
-    key = f"scan-sessions/{scan.id}/video_oversize.mp4"
+    key = scan_video_key(scan.id)
     storage.custom_heads[key] = {
         "content_length": 251 * 1024 * 1024,
         "content_type": "video/mp4",
@@ -281,7 +282,7 @@ def test_video_uploaded_rejects_empty_object_and_deletes() -> None:
 
     app.dependency_overrides[get_scan_actor] = lambda: user
 
-    key = f"scan-sessions/{scan.id}/video_empty.mp4"
+    key = scan_video_key(scan.id)
     storage.custom_heads[key] = {
         "content_length": 0,
         "content_type": "video/mp4",
@@ -340,3 +341,92 @@ def test_kiri_preview_redirects_to_presigned_url_without_get_bytes() -> None:
     assert response.headers["Location"].startswith(f"https://storage.relay.test/{glb_key}")
     # Verify get_bytes was NEVER called (no bytes served through API memory)
     assert glb_key not in storage.get_bytes_calls
+
+
+def _relay_with_scan(status_value=ScanStatus.CREATED):
+    session = make_test_db()
+    storage = TrackingStorage()
+    app = create_app(Settings(_env_file=None, app_role="relay"))
+    app.dependency_overrides[get_db] = lambda: session
+    app.dependency_overrides[get_storage_service] = lambda: storage
+    user = User(name="Mobile User", email="mobile@example.com")
+    session.add(user)
+    session.commit()
+    scan = ScanSession(user=user, status=status_value)
+    session.add(scan)
+    session.commit()
+    session.refresh(scan)
+    app.dependency_overrides[get_scan_actor] = lambda: user
+    return app, session, storage, user, scan
+
+
+def test_video_uploaded_ignores_foreign_keys_and_never_touches_them() -> None:
+    """A client must not point its session at, or delete, another object in the bucket."""
+    app, _session, storage, _user, scan = _relay_with_scan()
+    victim = "raw-scans/someone-else/scan.mp4"
+    storage.put_bytes(victim, b"x" * (300 * 1024 * 1024 + 1), "video/mp4")  # oversize on purpose
+
+    response = TestClient(app).post(
+        f"/api/scan-sessions/{scan.id}/video-uploaded", json={"key": victim}
+    )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert victim in storage.objects
+    assert victim not in storage.deleted_keys
+
+
+def test_video_upload_url_uses_the_session_key_and_rejects_bad_requests() -> None:
+    app, _session, _storage, _user, scan = _relay_with_scan()
+    client = TestClient(app)
+
+    ok = client.post(
+        f"/api/scan-sessions/{scan.id}/video-upload-url",
+        json={"contentType": "video/mp4", "fileSizeBytes": 1024},
+    )
+    assert ok.status_code == 200
+    assert ok.json()["key"] == scan_video_key(scan.id)
+
+    wrong_type = client.post(
+        f"/api/scan-sessions/{scan.id}/video-upload-url",
+        json={"contentType": "video/quicktime", "fileSizeBytes": 1024},
+    )
+    assert wrong_type.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+    too_big = client.post(
+        f"/api/scan-sessions/{scan.id}/video-upload-url",
+        json={"contentType": "video/mp4", "fileSizeBytes": 10 * 1024 * 1024 * 1024},
+    )
+    assert too_big.status_code == status.HTTP_413_CONTENT_TOO_LARGE
+
+
+def test_kiri_preview_accepts_the_owner_scan_token_without_a_ticket() -> None:
+    """Mobile follows the redirect itself using its scan bearer token (Ticket-12 contract)."""
+    app, session, storage, _user, scan = _relay_with_scan(ScanStatus.KIRI_READY)
+    del app.dependency_overrides[get_scan_actor]  # only the preview dependency authenticates here
+    glb_key = f"kiri/{scan.id}/source.glb"
+    storage.put_bytes(glb_key, b"glTF" + b"\x00" * 16, "model/gltf-binary")
+    session.add(
+        KiriScanTask(
+            scan_session=scan,
+            provider_serialize="serial-1",
+            provider_status="successful",
+            status=KiriTaskStatus.READY_FOR_CROP,
+            source_glb_path=glb_key,
+        )
+    )
+    session.commit()
+    app.dependency_overrides[get_preview_actor] = lambda: _user
+
+    response = TestClient(app).get(
+        f"/api/scan-sessions/{scan.id}/kiri/preview", follow_redirects=False
+    )
+
+    assert response.status_code == status.HTTP_307_TEMPORARY_REDIRECT
+    assert response.headers["Location"].startswith(f"https://storage.relay.test/{glb_key}")
+
+
+def test_kiri_preview_without_ticket_or_token_is_rejected() -> None:
+    app, _session, _storage, _user, scan = _relay_with_scan(ScanStatus.KIRI_READY)
+    del app.dependency_overrides[get_scan_actor]
+    response = TestClient(app).get(f"/api/scan-sessions/{scan.id}/kiri/preview", follow_redirects=False)
+    assert response.status_code in {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN}

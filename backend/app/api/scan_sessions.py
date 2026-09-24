@@ -8,11 +8,14 @@ from fastapi import (
     Depends,
     HTTPException,
     Query,
+    Request,
     status,
 )
 from fastapi.responses import RedirectResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
+from app.api.deps import bearer_scheme
 from app.api.scan_deps import ScanActor, get_scan_actor
 from app.core.config import get_settings
 from app.core.scan_identity import ControlPlaneScanPrincipal
@@ -27,6 +30,7 @@ from app.schemas.scan import (
     ScanSessionResponse,
     ScanStatusResponse,
     ScanUploadResponse,
+    VideoUploadUrlRequest,
     VideoUploadUrlResponse,
     VideoUploadedRequest,
 )
@@ -40,6 +44,28 @@ from app.workers.reconstruction_worker import process_scan_session
 
 
 router = APIRouter(prefix="/scan-sessions", tags=["scan-sessions"])
+
+VIDEO_CONTENT_TYPE = "video/mp4"
+
+
+def scan_video_key(scan_session_id: str) -> str:
+    """The only storage key a session's scan video may use; derived server-side, never from input."""
+    return f"raw-scans/{scan_session_id}/scan.mp4"
+
+
+def _max_video_bytes() -> int:
+    return get_settings().max_upload_size_mb * 1024 * 1024
+
+
+def get_preview_actor(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    db: Annotated[Session, Depends(get_db)],
+) -> ScanActor | None:
+    """No actor needed when a preview ticket is supplied; otherwise the session owner's token."""
+    if request.query_params.get("ticket"):
+        return None
+    return get_scan_actor(request, credentials, db)
 
 ACTIVE_PROCESSING_STATUSES = {
     ScanStatus.QUEUED,
@@ -136,15 +162,26 @@ def get_video_upload_url(
     scan_actor: Annotated[ScanActor, Depends(get_scan_actor)],
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[StorageService, Depends(get_storage_service)],
+    payload: Annotated[VideoUploadUrlRequest | None, Body()] = None,
 ) -> VideoUploadUrlResponse:
     service = ScanSessionService(db, storage=storage)
     scan_session = service.get_for_actor(scan_session_id, scan_actor)
-    key = f"raw-scans/{scan_session_id}/scan.mp4"
-    settings = get_settings()
-    ttl = settings.signed_url_ttl_seconds
+    request = payload or VideoUploadUrlRequest()
+    if request.content_type != VIDEO_CONTENT_TYPE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Scan video must be video/mp4.",
+        )
+    if request.file_size_bytes is not None and request.file_size_bytes > _max_video_bytes():
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"Scan video must be at most {get_settings().max_upload_size_mb} MB.",
+        )
+    key = scan_video_key(scan_session.id)
+    ttl = get_settings().signed_url_ttl_seconds
     upload_url = storage.create_upload_url(
         key,
-        content_type="video/mp4",
+        content_type=VIDEO_CONTENT_TYPE,
         expires_in=ttl,
     )
     scan_session.raw_video_path = key
@@ -167,11 +204,13 @@ def video_uploaded(
 ) -> ScanUploadResponse:
     service = ScanSessionService(db, storage=storage)
     scan_session = service.get_for_actor(scan_session_id, scan_actor)
-    key = (
-        (payload.key if payload and payload.key else None)
-        or scan_session.raw_video_path
-        or f"raw-scans/{scan_session_id}/scan.mp4"
-    )
+    key = scan_video_key(scan_session.id)
+    if payload and payload.key and payload.key != key:
+        # Never let a client point its session at (or delete) another object in the bucket.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Upload key does not belong to this scan session.",
+        )
     head_info = storage.head(key)
     if not head_info:
         storage.delete(key)
@@ -180,8 +219,7 @@ def video_uploaded(
             detail="Uploaded video not found in storage.",
         )
     size = head_info.get("content_length", 0)
-    max_bytes = get_settings().max_upload_size_mb * 1024 * 1024
-    if size <= 0 or size > max_bytes:
+    if size <= 0 or size > _max_video_bytes():
         storage.delete(key)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -280,19 +318,27 @@ def save_kiri_project(
 def get_kiri_preview(
     scan_session_id: str,
     db: Annotated[Session, Depends(get_db)],
-    ticket: Annotated[str, Query(min_length=1)],
     storage: Annotated[StorageService, Depends(get_storage_service)],
+    actor: Annotated[ScanActor | None, Depends(get_preview_actor)],
+    ticket: Annotated[str | None, Query(min_length=1)] = None,
 ) -> RedirectResponse:
-    try:
-        ticket_scan_id = decode_kiri_preview_ticket(ticket)
-    except jwt.InvalidTokenError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid preview ticket."
-        ) from exc
-    if ticket_scan_id != scan_session_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid preview ticket."
-        )
+    # Either the short-lived preview ticket embedded in `previewUrl` (web <model-viewer>), or the
+    # scan bearer token of the session owner (mobile app, which follows the redirect itself).
+    if ticket is not None:
+        try:
+            ticket_scan_id = decode_kiri_preview_ticket(ticket)
+        except jwt.InvalidTokenError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid preview ticket."
+            ) from exc
+        if ticket_scan_id != scan_session_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid preview ticket."
+            )
+    elif actor is not None:
+        ScanSessionService(db, storage=storage).get_for_actor(scan_session_id, actor)
+    else:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
     service = KiriPipelineService(db, storage=storage)
     task = service.require_task(scan_session_id)
     if not task.source_glb_path or not storage.exists(task.source_glb_path):
