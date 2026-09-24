@@ -10,6 +10,9 @@ $repoRoot = Resolve-Path (Join-Path $desktopDir "..")
 $backendDir = Join-Path $repoRoot "backend"
 $python = Join-Path $backendDir ".venv\Scripts\python.exe"
 $entrypoint = Join-Path $backendDir "app\desktop_entrypoint.py"
+# Blender runs crop_math.py as a file beside its generated script (crop_baker.py copies it),
+# and a --onefile build keeps only bytecode, so ship the source as data.
+$cropMath = Join-Path $backendDir "app\services\crop_math.py"
 $sidecarDir = Join-Path $desktopDir "sidecars"
 
 if (-not (Test-Path -LiteralPath $python)) {
@@ -34,6 +37,7 @@ try {
         --distpath $sidecarDir `
         --workpath (Join-Path $backendDir "build\desktop-sidecar") `
         --specpath (Join-Path $backendDir "build\desktop-sidecar") `
+        --add-data "$cropMath;app/services" `
         $entrypoint
 }
 finally {

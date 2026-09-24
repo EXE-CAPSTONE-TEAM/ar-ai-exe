@@ -34,7 +34,11 @@ class CropBakeService:
         )
         self._write_script(script_path)
         # The script imports the shared crop maths (axis + Euler-order conversion) from beside itself.
-        shutil.copyfile(Path(__file__).with_name("crop_math.py"), work_dir / "crop_math.py")
+        crop_math_source = Path(__file__).with_name("crop_math.py")
+        if not crop_math_source.is_file():
+            # Frozen sidecar built without `--add-data` for crop_math.py (build-backend-sidecar.ps1).
+            raise RuntimeError(f"Blender crop bake is missing its helper module: {crop_math_source}")
+        shutil.copyfile(crop_math_source, work_dir / "crop_math.py")
         result = self.runner.run(
             [
                 self.blender.require_available(),

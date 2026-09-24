@@ -50,6 +50,9 @@ AUTH_COOKIE_SECURE=false
 
 ## Development
 
+Step-by-step Windows setup against the deployed KusShoes server (dev run, installer build,
+mobile APK, end-to-end checklist): [docs/windows-kusstudio-runbook.md](../docs/windows-kusstudio-runbook.md).
+
 Prerequisites for developers:
 
 - Node.js 20 or newer.

@@ -87,3 +87,28 @@ def test_degenerate_size_is_floored_not_zero():
     corners = [transform_point(matrix, corner) for corner in UNIT_CORNERS]
     low, high = _extent(corners, 2)
     assert high - low > 0
+
+
+def test_desktop_sidecar_build_ships_crop_math_source():
+    """A --onefile PyInstaller build keeps only bytecode; Blender needs crop_math.py as a real file."""
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parents[2] / "desktop" / "scripts" / "build-backend-sidecar.ps1"
+    text = script.read_text(encoding="utf-8")
+    assert 'app\\services\\crop_math.py"' in text
+    assert '--add-data "$cropMath;app/services"' in text
+
+
+def test_crop_bake_fails_clearly_when_crop_math_source_is_missing(tmp_path, monkeypatch):
+    from app.schemas.scan import CropBox
+    from app.services import crop_baker
+
+    class _Blender:
+        def require_available(self):
+            raise AssertionError("Blender must not start without its helper module")
+
+    monkeypatch.setattr(crop_baker, "__file__", str(tmp_path / "frozen" / "crop_baker.pyc"))
+    service = crop_baker.CropBakeService(blender=_Blender(), runner=object())
+    crop = CropBox.model_validate(_crop())
+    with pytest.raises(RuntimeError, match="missing its helper module"):
+        service.bake(tmp_path / "in.glb", tmp_path / "out" / "out.glb", crop)
