@@ -15,6 +15,7 @@ import type {
   User,
 } from "../types";
 import { clearAccessToken, storeAccessToken, storedAccessToken } from "./authStorage";
+import { editorClient } from "./editorClient";
 import { getActiveEditorSession } from "./editorLaunch";
 import { apiUrl, getApiBaseUrl } from "./runtimeConfig";
 
@@ -24,6 +25,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly code?: string,
   ) {
     super(message);
   }
@@ -426,23 +428,38 @@ export const api = {
   },
 
   async exportDesign(designId: string): Promise<ExportPackage> {
+    if (getActiveEditorSession()) {
+      return editorClient.exportDesign(designId);
+    }
     return request<ExportPackage>(`/api/designs/${designId}/export`, {
       method: "POST",
     });
   },
 
   async bakeDesign(designId: string): Promise<Job> {
+    if (getActiveEditorSession()) {
+      return editorClient.bakeDesign(designId);
+    }
     return request<Job>(`/api/designs/${designId}/bake`, {
       method: "POST",
     });
   },
 
   async getJob(jobId: string): Promise<Job> {
+    if (getActiveEditorSession()) {
+      return editorClient.getJob(jobId);
+    }
     return request<Job>(`/api/jobs/${jobId}`);
   },
 
   async downloadExport(exportPackage: ExportPackage): Promise<void> {
-    const { blob, filename } = await fetchStoredFile(exportPackage.zipUrl ?? exportPackage.downloadUrl);
+    const exportPath = exportPackage.zipUrl ?? exportPackage.downloadUrl;
+    if (getActiveEditorSession() || isPresignedContentPath(exportPath)) {
+      // KusShoes exports (up to 2 GiB) are saved by the desktop sidecar, never buffered here.
+      await editorClient.downloadExport(exportPackage);
+      return;
+    }
+    const { blob, filename } = await fetchStoredFile(exportPath);
     downloadBlob(blob, filename ?? `${exportPackage.id}.zip`);
   },
 

@@ -38,6 +38,12 @@ class OutputUploadCapability(WorkerModel):
     content_type: str = Field(min_length=1, max_length=100)
 
 
+class BakeWatermark(WorkerModel):
+    required: bool = False
+    text: str | None = None
+    opacity_percent: int | float | None = None
+
+
 class BakeWorkerRequest(WorkerModel):
     job_id: uuid.UUID
     project_id: uuid.UUID
@@ -49,6 +55,7 @@ class BakeWorkerRequest(WorkerModel):
         max_length=50,
     )
     outputs: list[OutputUploadCapability] = Field(min_length=1, max_length=2)
+    watermark: BakeWatermark | None = None
 
     @model_validator(mode="after")
     def validate_contract(self) -> Self:
@@ -174,3 +181,19 @@ def _referenced_asset_ids(design_config: dict[str, Any]) -> set[uuid.UUID]:
             except (ValueError, TypeError, AttributeError) as exc:
                 raise ValueError("design decal asset ID is invalid") from exc
     return result
+
+
+class SidecarHandshakeResponse(WorkerModel):
+    # HMAC-SHA256(key=service token, msg=nonce), hex — proves the process holds the token
+    # the desktop shell generated for this launch (KusShoes spec §F.2).
+    proof: str
+
+
+class DesktopDownloadRequest(WorkerModel):
+    url: str = Field(min_length=1, max_length=4096)
+    filename: str = Field(min_length=1, max_length=255)
+
+
+class DesktopDownloadResponse(WorkerModel):
+    path: str
+    file_size_bytes: int

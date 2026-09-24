@@ -11,7 +11,14 @@ export type ProjectStatus = "draft" | "processing" | "ready" | "failed" | "archi
 export type AssetStatus = "uploaded" | "processing" | "ready" | "raw" | "failed";
 export type DesignStatus = "draft" | "published" | "archived" | "exported";
 export type PreviewStatus = "none" | "pending" | "processing" | "ready" | "failed";
-export type JobStatus = "queued" | "processing" | "completed" | "failed";
+export type JobStatus =
+  | "queued"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "awaiting_client"
+  | "claimed"
+  | "cancelled";
 
 export type Project = {
   id: string;
@@ -131,6 +138,9 @@ export type DesktopRuntime = {
   logsPath: string;
   appVersion: string;
   lastError?: string | null;
+  /** X-Service-Token for the local sidecar's /bake, /prepare, /downloads. Only present once the
+   * sidecar passed the launch handshake (KusShoes spec §F). Keep in memory only. */
+  sidecarToken?: string | null;
 };
 
 export type InstallProgress = {
@@ -281,12 +291,13 @@ export type EditorContext = {
 
 export type Job = {
   id: string;
-  type: "bake";
+  type: "bake" | "prepare" | string;
   status: JobStatus;
   progress: number;
   errorMessage: string | null;
   designId?: string | null;
   projectId?: string | null;
+  leaseExpiresAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };

@@ -22,6 +22,11 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        # Packaged Tauri webview origins (Windows serves http(s)://tauri.localhost, others
+        # tauri://localhost) — the desktop editor calls this sidecar from them (spec §E.4).
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+        "tauri://localhost",
     ]
 
     storage_root: Path = Path("storage")
@@ -58,6 +63,8 @@ class Settings(BaseSettings):
     # storage access; this service never receives object-store credentials.
     control_plane_service_token: str = ""
     worker_allowed_storage_origins: list[str] = []
+    # Where the desktop sidecar saves exports (spec §E.5); None = the user's ~/Downloads.
+    desktop_downloads_dir: Path | None = None
     worker_request_timeout_seconds: int = 600
     worker_max_source_size_mb: int = 500
     worker_max_asset_size_mb: int = 5
