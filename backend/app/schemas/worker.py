@@ -174,3 +174,19 @@ def _referenced_asset_ids(design_config: dict[str, Any]) -> set[uuid.UUID]:
             except (ValueError, TypeError, AttributeError) as exc:
                 raise ValueError("design decal asset ID is invalid") from exc
     return result
+
+
+class SidecarHandshakeResponse(WorkerModel):
+    # HMAC-SHA256(key=service token, msg=nonce), hex — proves the process holds the token
+    # the desktop shell generated for this launch (KusShoes spec §F.2).
+    proof: str
+
+
+class DesktopDownloadRequest(WorkerModel):
+    url: str = Field(min_length=1, max_length=4096)
+    filename: str = Field(min_length=1, max_length=255)
+
+
+class DesktopDownloadResponse(WorkerModel):
+    path: str
+    file_size_bytes: int

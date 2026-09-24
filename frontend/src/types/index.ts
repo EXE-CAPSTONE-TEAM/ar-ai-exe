@@ -131,6 +131,9 @@ export type DesktopRuntime = {
   logsPath: string;
   appVersion: string;
   lastError?: string | null;
+  /** X-Service-Token for the local sidecar's /bake, /prepare, /downloads. Only present once the
+   * sidecar passed the launch handshake (KusShoes spec §F). Keep in memory only. */
+  sidecarToken?: string | null;
 };
 
 export type InstallProgress = {
