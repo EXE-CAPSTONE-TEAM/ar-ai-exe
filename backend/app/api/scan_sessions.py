@@ -6,14 +6,11 @@ from fastapi import (
     BackgroundTasks,
     Body,
     Depends,
-    File,
-    Form,
     HTTPException,
     Query,
-    Response,
-    UploadFile,
     status,
 )
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.api.scan_deps import ScanActor, get_scan_actor
@@ -21,23 +18,25 @@ from app.core.config import get_settings
 from app.core.scan_identity import ControlPlaneScanPrincipal
 from app.core.security import decode_kiri_preview_ticket
 from app.db.database import get_db
-from app.models import KiriTaskStatus, ScanSession, ScanStatus
+from app.models import KiriTaskStatus, ProjectStatus, ScanSession, ScanStatus
 from app.schemas.scan import (
-    ScanMetadata,
-    CropBox,
     KiriStatusResponse,
     SaveKiriProjectRequest,
+    ScanMetadata,
     ScanSessionCreate,
     ScanSessionResponse,
     ScanStatusResponse,
     ScanUploadResponse,
+    VideoUploadUrlResponse,
+    VideoUploadedRequest,
 )
-from app.services.reconstruction_toolchain import ReconstructionToolchainService
 from app.services.kiri_pipeline import KiriPipelineService
+from app.services.reconstruction_toolchain import ReconstructionToolchainService
 from app.services.scan_metadata import parse_scan_metadata
 from app.services.scan_sessions import ScanSessionService
-from app.workers.reconstruction_worker import process_scan_session
+from app.services.storage import StorageService, get_storage_service
 from app.workers.kiri_worker import bake_kiri_project, start_kiri_processing
+from app.workers.reconstruction_worker import process_scan_session
 
 
 router = APIRouter(prefix="/scan-sessions", tags=["scan-sessions"])
@@ -131,65 +130,81 @@ def create_scan_session(
     return scan_response(scan_session, None)
 
 
-@router.post("/{scan_session_id}/upload-video", response_model=ScanUploadResponse)
-async def upload_video(
+@router.post("/{scan_session_id}/video-upload-url", response_model=VideoUploadUrlResponse)
+def get_video_upload_url(
     scan_session_id: str,
-    background_tasks: BackgroundTasks,
     scan_actor: Annotated[ScanActor, Depends(get_scan_actor)],
     db: Annotated[Session, Depends(get_db)],
-    metadata: Annotated[str, Form()],
-    video: Annotated[UploadFile, File()],
-) -> ScanUploadResponse:
-    service = ScanSessionService(db)
+    storage: Annotated[StorageService, Depends(get_storage_service)],
+) -> VideoUploadUrlResponse:
+    service = ScanSessionService(db, storage=storage)
     scan_session = service.get_for_actor(scan_session_id, scan_actor)
-    parsed_metadata = parse_metadata(metadata)
-    saved_session = service.save_upload(
-        scan_session=scan_session,
-        file_name=video.filename,
-        content_type=video.content_type,
-        video_bytes=await video.read(),
-        metadata=parsed_metadata,
+    key = f"raw-scans/{scan_session_id}/scan.mp4"
+    settings = get_settings()
+    ttl = settings.signed_url_ttl_seconds
+    upload_url = storage.create_upload_url(
+        key,
+        content_type="video/mp4",
+        expires_in=ttl,
     )
+    scan_session.raw_video_path = key
+    scan_session.side_video_path = key
+    db.commit()
+    return VideoUploadUrlResponse(
+        uploadUrl=upload_url,
+        key=key,
+        expiresIn=ttl,
+    )
+
+
+@router.post("/{scan_session_id}/video-uploaded", response_model=ScanUploadResponse)
+def video_uploaded(
+    scan_session_id: str,
+    scan_actor: Annotated[ScanActor, Depends(get_scan_actor)],
+    db: Annotated[Session, Depends(get_db)],
+    storage: Annotated[StorageService, Depends(get_storage_service)],
+    payload: Annotated[VideoUploadedRequest | None, Body()] = None,
+) -> ScanUploadResponse:
+    service = ScanSessionService(db, storage=storage)
+    scan_session = service.get_for_actor(scan_session_id, scan_actor)
+    key = (
+        (payload.key if payload and payload.key else None)
+        or scan_session.raw_video_path
+        or f"raw-scans/{scan_session_id}/scan.mp4"
+    )
+    head_info = storage.head(key)
+    if not head_info:
+        storage.delete(key)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Uploaded video not found in storage.",
+        )
+    size = head_info.get("content_length", 0)
+    max_bytes = get_settings().max_upload_size_mb * 1024 * 1024
+    if size <= 0 or size > max_bytes:
+        storage.delete(key)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Uploaded video must be between 1 byte and {get_settings().max_upload_size_mb} MB.",
+        )
+    scan_session.raw_video_path = key
+    scan_session.side_video_path = key
+    scan_session.raw_video_size_bytes = size
+    scan_session.side_video_size_bytes = size
+    scan_session.status = ScanStatus.UPLOADED
+    scan_session.error_message = None
+    if scan_session.project:
+        scan_session.project.status = ProjectStatus.PROCESSING
+    db.commit()
+    db.refresh(scan_session)
     return ScanUploadResponse(
-        scanSession=scan_response(saved_session, service.get_model_asset_id(saved_session.id)),
+        scanSession=scan_response(scan_session, service.get_model_asset_id(scan_session.id)),
         passType="side_orbit",
-        uploadedPasses=service.uploaded_passes(saved_session),
+        uploadedPasses=service.uploaded_passes(scan_session),
         requiredPasses=list(service.required_passes),
-        readyForProcessing=service.is_ready_for_processing(saved_session),
+        readyForProcessing=service.is_ready_for_processing(scan_session),
         processingStarted=False,
-        webDesignUrl=saved_session.web_design_url or service.web_design_url(saved_session.id),
-    )
-
-
-@router.post("/{scan_session_id}/videos/{pass_type}", response_model=ScanUploadResponse)
-async def upload_video_pass(
-    scan_session_id: str,
-    pass_type: str,
-    scan_actor: Annotated[ScanActor, Depends(get_scan_actor)],
-    db: Annotated[Session, Depends(get_db)],
-    video: Annotated[UploadFile, File()],
-    metadata: Annotated[str | None, Form()] = None,
-) -> ScanUploadResponse:
-    service = ScanSessionService(db)
-    scan_session = service.get_for_actor(scan_session_id, scan_actor)
-    parsed_metadata = parse_metadata(metadata) if metadata else None
-    normalized_pass = service.normalize_pass_type(pass_type)
-    saved_session = service.save_pass_upload(
-        scan_session=scan_session,
-        pass_type=normalized_pass,
-        file_name=video.filename,
-        content_type=video.content_type,
-        video_bytes=await video.read(),
-        metadata=parsed_metadata,
-    )
-    return ScanUploadResponse(
-        scanSession=scan_response(saved_session, service.get_model_asset_id(saved_session.id)),
-        passType=normalized_pass,
-        uploadedPasses=service.uploaded_passes(saved_session),
-        requiredPasses=list(service.required_passes),
-        readyForProcessing=service.is_ready_for_processing(saved_session),
-        processingStarted=False,
-        webDesignUrl=saved_session.web_design_url or service.web_design_url(saved_session.id),
+        webDesignUrl=scan_session.web_design_url or service.web_design_url(scan_session.id),
     )
 
 
@@ -242,18 +257,6 @@ def get_kiri_status(
     return service.response(task)
 
 
-@router.post("/{scan_session_id}/crop", response_model=KiriStatusResponse)
-def configure_kiri_crop(
-    scan_session_id: str,
-    payload: CropBox,
-    scan_actor: Annotated[ScanActor, Depends(get_scan_actor)],
-    db: Annotated[Session, Depends(get_db)],
-) -> KiriStatusResponse:
-    ScanSessionService(db).get_for_actor(scan_session_id, scan_actor)
-    service = KiriPipelineService(db)
-    return service.response(service.set_crop(service.require_task(scan_session_id), payload))
-
-
 @router.post("/{scan_session_id}/save-project", response_model=KiriStatusResponse)
 def save_kiri_project(
     scan_session_id: str,
@@ -267,7 +270,6 @@ def save_kiri_project(
     task = service.queue_save(
         service.require_task(scan_session_id),
         payload.project_name,
-        payload.crop_box,
     )
     if task.status == KiriTaskStatus.CROP_BAKING:
         background_tasks.add_task(bake_kiri_project, scan_session_id)
@@ -279,7 +281,8 @@ def get_kiri_preview(
     scan_session_id: str,
     db: Annotated[Session, Depends(get_db)],
     ticket: Annotated[str, Query(min_length=1)],
-) -> Response:
+    storage: Annotated[StorageService, Depends(get_storage_service)],
+) -> RedirectResponse:
     try:
         ticket_scan_id = decode_kiri_preview_ticket(ticket)
     except jwt.InvalidTokenError as exc:
@@ -290,19 +293,22 @@ def get_kiri_preview(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid preview ticket."
         )
-    service = KiriPipelineService(db)
+    service = KiriPipelineService(db, storage=storage)
     task = service.require_task(scan_session_id)
-    if not task.source_glb_path:
+    if not task.source_glb_path or not storage.exists(task.source_glb_path):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Kiri preview not found.")
-    return Response(
-        content=service.storage.get_bytes(task.source_glb_path),
-        media_type="model/gltf-binary",
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Cache-Control": "private, max-age=300",
-            "Cross-Origin-Resource-Policy": "cross-origin",
-            "Referrer-Policy": "no-referrer",
-        },
+    signed_url = storage.create_signed_url(
+        task.source_glb_path,
+        expires_in=get_settings().signed_url_ttl_seconds,
+    )
+    if not signed_url:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Kiri preview URL could not be generated.",
+        )
+    return RedirectResponse(
+        url=signed_url,
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
     )
 
 

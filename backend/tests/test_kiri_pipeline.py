@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import io
+import tempfile
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -14,7 +16,6 @@ from app.core.config import Settings
 from app.core.security import create_kiri_preview_ticket, decode_kiri_preview_ticket
 from app.db.database import Base
 from app.models import (
-    AssetVersionType,
     KiriScanTask,
     KiriTaskStatus,
     Project,
@@ -23,12 +24,11 @@ from app.models import (
     User,
 )
 from app.schemas.scan import CropBox
-from app.services.asset_versions import AssetVersionService
 from app.services.command_runner import CommandResult
+from app.services.control_plane_mobile import ControlPlanePublishResult
 from app.services.crop_baker import CropBakeService
 from app.services.kiri_client import KiriApiClient, KiriError
 from app.services.kiri_pipeline import KiriPipelineService
-from app.services.mesh_cleanup import MeshCleanupReport
 from app.services.scan_sessions import ScanSessionService
 from app.services.storage import StoredObject, checksum_bytes
 
@@ -102,8 +102,6 @@ def test_successful_kiri_status_downloads_glb_before_marking_ready() -> None:
             db,
             api=FakeKiriApi("successful", model_zip()),
             storage=storage,
-            crop_baker=object(),
-            mesh_cleanup=object(),
         )
 
         refreshed = service.refresh(task)
@@ -111,6 +109,7 @@ def test_successful_kiri_status_downloads_glb_before_marking_ready() -> None:
         assert refreshed.status == KiriTaskStatus.READY_FOR_CROP
         assert refreshed.scan_session.status == ScanStatus.KIRI_READY
         assert refreshed.source_glb_path == f"kiri/{refreshed.scan_session_id}/source.glb"
+        assert not any("zip" in k or "video" in k for k in storage.get_bytes_calls)
         assert storage.get_bytes(refreshed.source_glb_path).startswith(b"glTF")
 
 
@@ -149,45 +148,80 @@ def test_transient_kiri_error_keeps_task_retryable() -> None:
         assert "temporarily unavailable" in refreshed.error_message
 
 
-def test_save_project_bakes_crop_and_creates_canonical_model_asset() -> None:
+def test_publish_saved_project_publishes_raw_glb_to_control_plane() -> None:
+    with database_session() as db:
+        scan = ScanSession(
+            status=ScanStatus.KIRI_READY,
+            control_plane_user_id="cp-user-1",
+            control_plane_project_id="cp-proj-1",
+            control_plane_project_name="Sneaker Scan",
+            control_plane_completion_token="complete-token-1",
+            web_design_url="https://kusshoes.vn/projects/cp-proj-1",
+        )
+        db.add(scan)
+        db.commit()
+        db.refresh(scan)
+
+        task = KiriScanTask(
+            scan_session=scan,
+            provider_serialize="serial-1",
+            provider_status="successful",
+            status=KiriTaskStatus.READY_FOR_CROP,
+            source_glb_path=f"kiri/{scan.id}/source.glb",
+        )
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+
+        storage = MemoryStorage()
+        glb_data = b"glTF" + b"\x00" * 28
+        storage.put_bytes(task.source_glb_path, glb_data, "model/gltf-binary")
+
+        cp_client = FakeControlPlaneClient(status="raw")
+        service = KiriPipelineService(
+            db,
+            api=FakeKiriApi("successful", model_zip()),
+            storage=storage,
+            control_plane=cp_client,
+        )
+
+        service.publish_saved_project(scan.id)
+
+        db.refresh(task)
+        db.refresh(scan)
+
+        assert task.status == KiriTaskStatus.READY
+        assert scan.status == ScanStatus.CROP_READY
+        assert scan.control_plane_model_asset_id == "asset-control-plane-1"
+        assert scan.control_plane_published_at is not None
+        assert b"".join(cp_client.published_chunks) == glb_data
+        assert cp_client.call_args["file_size_bytes"] == len(glb_data)
+
+
+def test_publish_saved_project_creates_local_model_asset() -> None:
     with database_session() as db:
         task = create_task(db)
         storage = MemoryStorage()
         source_key = f"kiri/{task.scan_session_id}/source.glb"
         storage.put_bytes(source_key, b"glTF" + b"\x00" * 16, "model/gltf-binary")
         task.source_glb_path = source_key
-        task.crop_box_json = CropBox().model_dump_json(by_alias=True)
         task.status = KiriTaskStatus.CROP_BAKING
         task.scan_session.status = ScanStatus.CROP_BAKING
         db.commit()
-        crop_baker = FakeCropBaker()
+
         service = KiriPipelineService(
             db,
             api=FakeKiriApi("successful", model_zip()),
             storage=storage,
-            crop_baker=crop_baker,
-            mesh_cleanup=FakeMeshCleanup(),
         )
 
-        service.bake_saved_project(task.scan_session_id)
+        service.publish_saved_project(task.scan_session_id)
 
         db.refresh(task)
-        version = AssetVersionService(db).latest_published(
-            task.scan_session.project_id,
-            AssetVersionType.MODEL,
-        )
-        assert version is not None
         assert task.status == KiriTaskStatus.READY
         assert task.scan_session.status == ScanStatus.CROP_READY
         assert task.scan_session.model_asset is not None
-        assert crop_baker.calls == 1
-        assert all(
-            item.storage_key.startswith(
-                f"projects/{task.scan_session.project_id}/assets/model/primary/versions/{version.id}/"
-            )
-            for item in version.files
-        )
-        assert not storage.exists(f"models/{task.scan_session_id}/shoe_preview.glb")
+        assert task.scan_session.model_asset.glb_path == source_key
 
 
 def test_scan_session_ownership_is_required_for_kiri_routes() -> None:
@@ -237,9 +271,93 @@ def test_start_processing_with_single_video_uploads_directly() -> None:
         service.start_processing(scan.id)
 
         db.refresh(task)
+        db.refresh(scan)
         assert task.status == KiriTaskStatus.PROCESSING
         assert task.provider_serialize == "serialize-single"
         assert api.uploaded_bytes == b"fake_mp4_video"
+        # Streaming via download_to, NEVER get_bytes for the video
+        assert "videos/single.mp4" in storage.download_to_calls
+        assert "videos/single.mp4" not in storage.get_bytes_calls
+        # Video is deleted from storage once KIRI accepts
+        assert "videos/single.mp4" in storage.deleted_keys
+        assert not storage.exists("videos/single.mp4")
+        assert scan.raw_video_path is None
+
+
+def test_start_processing_cleans_temp_dir_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    with database_session() as db:
+        user = User(name="Owner", email="owner@example.com")
+        project = Project(user=user, name="Single scan")
+        scan = ScanSession(
+            user=user,
+            project=project,
+            status=ScanStatus.QUEUED,
+            raw_video_path="videos/single.mp4",
+        )
+        db.add(scan)
+        db.commit()
+
+        task = KiriScanTask(scan_session=scan, status=KiriTaskStatus.QUEUED)
+        db.add(task)
+        db.commit()
+
+        storage = MemoryStorage()
+        storage.put_bytes("videos/single.mp4", b"fake_mp4_video", "video/mp4")
+
+        created_dirs: list[str] = []
+        real_mkdtemp = tempfile.mkdtemp
+
+        def tracked_mkdtemp(*args: Any, **kwargs: Any) -> str:
+            d = real_mkdtemp(*args, **kwargs)
+            created_dirs.append(d)
+            return d
+
+        monkeypatch.setattr(tempfile, "mkdtemp", tracked_mkdtemp)
+
+        class CrashingKiriApi:
+            def upload_video(self, path: Path) -> str:
+                raise RuntimeError("Network timeout during upload")
+
+        service = KiriPipelineService(db, api=CrashingKiriApi(), storage=storage)
+        service.start_processing(scan.id)
+
+        db.refresh(task)
+        assert task.status == KiriTaskStatus.FAILED
+        assert len(created_dirs) == 1
+        assert not Path(created_dirs[0]).exists()
+
+
+def test_download_source_glb_cleans_temp_dir_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    with database_session() as db:
+        task = create_task(db)
+        storage = MemoryStorage()
+
+        created_dirs: list[str] = []
+        real_mkdtemp = tempfile.mkdtemp
+
+        def tracked_mkdtemp(*args: Any, **kwargs: Any) -> str:
+            d = real_mkdtemp(*args, **kwargs)
+            created_dirs.append(d)
+            return d
+
+        monkeypatch.setattr(tempfile, "mkdtemp", tracked_mkdtemp)
+
+        class CorruptZipKiriApi(FakeKiriApi):
+            def download_model_zip_to(self, _model_url: str, target_path: Path) -> Path:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                target_path.write_bytes(b"not-a-zip-file")
+                return target_path
+
+        service = KiriPipelineService(
+            db,
+            api=CorruptZipKiriApi("successful", b"not-a-zip-file"),
+            storage=storage,
+        )
+
+        refreshed = service.refresh(task)
+        assert "invalid model ZIP" in (refreshed.error_message or "")
+        assert len(created_dirs) == 1
+        assert not Path(created_dirs[0]).exists()
 
 
 class database_session:
@@ -249,7 +367,7 @@ class database_session:
         self.session = Session(self.engine)
         return self.session
 
-    def __exit__(self, *_args) -> None:
+    def __exit__(self, *_args: Any) -> None:
         self.session.close()
         self.engine.dispose()
 
@@ -277,6 +395,38 @@ def model_zip() -> bytes:
     return buffer.getvalue()
 
 
+class FakeControlPlaneClient:
+    def __init__(self, status: str = "raw") -> None:
+        self.status = status
+        self.published_chunks: list[bytes] = []
+        self.call_args: dict[str, Any] = {}
+
+    def publish_glb(
+        self,
+        *,
+        completion_token: str,
+        expected_project_id: str,
+        project_name: str,
+        web_project_url: str,
+        file_size_bytes: int,
+        chunks: Any,
+    ) -> ControlPlanePublishResult:
+        self.published_chunks = list(chunks)
+        self.call_args = {
+            "completion_token": completion_token,
+            "expected_project_id": expected_project_id,
+            "project_name": project_name,
+            "web_project_url": web_project_url,
+            "file_size_bytes": file_size_bytes,
+        }
+        return ControlPlanePublishResult(
+            project_id=expected_project_id,
+            model_asset_id="asset-control-plane-1",
+            status=self.status,
+            web_project_url=web_project_url,
+        )
+
+
 class FakeKiriApi:
     def __init__(self, provider_status: str, zip_bytes: bytes) -> None:
         self.provider_status = provider_status
@@ -291,67 +441,15 @@ class FakeKiriApi:
     def download_model_zip(self, _model_url: str) -> bytes:
         return self.zip_bytes
 
+    def download_model_zip_to(self, _model_url: str, target_path: Path) -> Path:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes(self.zip_bytes)
+        return target_path
+
 
 class FailingKiriApi:
     def get_status(self, _serialize: str) -> str:
         raise KiriError("Kiri is temporarily unavailable.")
-
-
-class FakeCropBaker:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def is_available(self) -> bool:
-        return True
-
-    def bake(self, source_glb, output_glb, crop_box) -> None:
-        self.calls += 1
-        assert source_glb.read_bytes().startswith(b"glTF")
-        assert crop_box.coordinate_space == "normalized"
-        output_glb.write_bytes(source_glb.read_bytes())
-
-
-class UnavailableCropBaker:
-    def is_available(self) -> bool:
-        return False
-
-    def bake(self, source_glb, output_glb, crop_box) -> None:
-        raise RuntimeError("Blender binary not found.")
-
-
-def test_save_project_falls_back_when_blender_unavailable_on_server() -> None:
-    with database_session() as db:
-        task = create_task(db)
-        storage = MemoryStorage()
-        source_key = f"kiri/{task.scan_session_id}/source.glb"
-        raw_glb = b"glTF" + b"\x00" * 32
-        storage.put_bytes(source_key, raw_glb, "model/gltf-binary")
-        task.source_glb_path = source_key
-        task.crop_box_json = CropBox().model_dump_json(by_alias=True)
-        task.status = KiriTaskStatus.CROP_BAKING
-        task.scan_session.status = ScanStatus.CROP_BAKING
-        db.commit()
-
-        service = KiriPipelineService(
-            db,
-            api=FakeKiriApi("successful", model_zip()),
-            storage=storage,
-            crop_baker=UnavailableCropBaker(),
-            mesh_cleanup=FakeMeshCleanup(),
-        )
-
-        service.bake_saved_project(task.scan_session_id)
-
-        db.refresh(task)
-        assert task.status == KiriTaskStatus.READY
-        assert task.scan_session.status == ScanStatus.CROP_READY
-        assert task.scan_session.model_asset is not None
-        version = AssetVersionService(db).latest_published(
-            task.scan_session.project_id,
-            AssetVersionType.MODEL,
-        )
-        assert version is not None
-
 
 
 class FakeBlender:
@@ -363,49 +461,65 @@ class CaptureCropRunner:
     def __init__(self) -> None:
         self.command: list[str] = []
 
-    def run(self, command, **_kwargs) -> CommandResult:
+    def run(self, command: Any, **_kwargs: Any) -> CommandResult:
         self.command = command
         Path(command[-2]).write_bytes(b"glTF")
         return CommandResult(command=command, return_code=0, stdout="", stderr="")
 
 
-class FakeMeshCleanup:
-    def cleanup(self, source_model, output_dir, **_kwargs) -> MeshCleanupReport:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        (output_dir / "shoe_preview.glb").write_bytes(source_model.read_bytes())
-        (output_dir / "shoe.obj").write_text("o shoe\n", encoding="utf-8")
-        (output_dir / "shoe.mtl").write_text("newmtl shoe\n", encoding="utf-8")
-        (output_dir / "shoe_texture.png").write_bytes(b"png")
-        return MeshCleanupReport.from_payload(
-            {
-                "editorReady": True,
-                "editorReadyScore": 95,
-                "meshObjectCount": 1,
-                "boundingBox": {"after": {"maxDimension": 2.4}},
-                "normalizedScale": 1,
-                "triangleCountBefore": 100,
-                "triangleCountAfter": 80,
-                "cleanupWarnings": [],
-            }
-        )
-
-
 class MemoryStorage:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
+        self.get_bytes_calls: list[str] = []
+        self.download_to_calls: list[str] = []
+        self.deleted_keys: list[str] = []
+        self.put_file_calls: list[str] = []
 
     def put_bytes(self, key: str, data: bytes, content_type: str) -> StoredObject:
         self.objects[key] = data
         return StoredObject(key, len(data), content_type, checksum_bytes(data))
 
+    def put_file(self, key: str, file_path: Path, content_type: str) -> StoredObject:
+        data = file_path.read_bytes()
+        self.put_file_calls.append(key)
+        return self.put_bytes(key, data, content_type)
+
     def get_bytes(self, key: str) -> bytes:
+        self.get_bytes_calls.append(key)
+        if key not in self.objects:
+            raise KeyError(key)
         return self.objects[key]
+
+    def download_to(self, key: str, target_path: Path) -> Path:
+        self.download_to_calls.append(key)
+        if key not in self.objects:
+            raise KeyError(key)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes(self.objects[key])
+        return target_path
+
+    def delete(self, key: str) -> None:
+        self.deleted_keys.append(key)
+        self.objects.pop(key, None)
+
+    def head(self, key: str) -> dict[str, Any] | None:
+        if key not in self.objects:
+            return None
+        return {"content_length": len(self.objects[key]), "content_type": "binary/octet-stream"}
+
+    def iter_bytes(self, key: str, chunk_size: int = 1024 * 1024):
+        if key not in self.objects:
+            raise KeyError(key)
+        yield self.objects[key]
 
     def exists(self, key: str) -> bool:
         return key in self.objects
 
-    def create_signed_url(self, key: str, expires_in: int = 300) -> str | None:
-        return None
+    def create_upload_url(self, key: str, content_type: str = "video/mp4", expires_in: int = 900) -> str:
+        return f"https://storage.example.com/{key}?upload=1"
+
+    def create_signed_url(self, key: str, expires_in: int = 900) -> str | None:
+        return f"https://storage.example.com/{key}?signed=1"
 
     def local_path(self, key: str) -> Path | None:
         return None

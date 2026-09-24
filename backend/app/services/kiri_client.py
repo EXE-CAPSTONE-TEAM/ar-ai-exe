@@ -59,29 +59,38 @@ class KiriApiClient:
         self._validate_download_url(str(model_url))
         return str(model_url)
 
-    def download_model_zip(self, model_url: str) -> bytes:
+    def download_model_zip_to(self, model_url: str, target_path: Path) -> Path:
         self._validate_download_url(model_url)
         max_bytes = self.settings.kiri_max_download_size_mb * 1024 * 1024
+        target_path.parent.mkdir(parents=True, exist_ok=True)
         client = self.client or httpx.Client(timeout=self.settings.kiri_request_timeout_seconds)
         close_client = self.client is None
         try:
             with client.stream("GET", model_url) as response:
                 response.raise_for_status()
-                chunks: list[bytes] = []
                 total = 0
-                for chunk in response.iter_bytes():
-                    total += len(chunk)
-                    if total > max_bytes:
-                        raise KiriError(
-                            f"Kiri model ZIP exceeds {self.settings.kiri_max_download_size_mb} MB."
-                        )
-                    chunks.append(chunk)
-                return b"".join(chunks)
+                with target_path.open("wb") as stream:
+                    for chunk in response.iter_bytes():
+                        total += len(chunk)
+                        if total > max_bytes:
+                            raise KiriError(
+                                f"Kiri model ZIP exceeds {self.settings.kiri_max_download_size_mb} MB."
+                            )
+                        stream.write(chunk)
+            return target_path
         except httpx.HTTPError as exc:
             raise KiriError(f"Kiri model download failed: {exc}") from exc
         finally:
             if close_client:
                 client.close()
+
+    def download_model_zip(self, model_url: str) -> bytes:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".zip") as tmp:
+            tmp_path = Path(tmp.name)
+            self.download_model_zip_to(model_url, tmp_path)
+            return tmp_path.read_bytes()
 
     def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         url = f"{self.settings.kiri_api_base_url.rstrip('/')}/{path.lstrip('/')}"

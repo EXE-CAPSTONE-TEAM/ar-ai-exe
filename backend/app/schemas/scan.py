@@ -107,7 +107,16 @@ class CropBox(CamelModel):
 
 class SaveKiriProjectRequest(CamelModel):
     project_name: str = Field(min_length=1, max_length=160, alias="projectName")
-    crop_box: CropBox | None = Field(default=None, alias="cropBox")
+
+
+class VideoUploadUrlResponse(CamelModel):
+    upload_url: str = Field(alias="uploadUrl")
+    key: str
+    expires_in: int = Field(alias="expiresIn")
+
+
+class VideoUploadedRequest(CamelModel):
+    key: str | None = None
 
 
 class KiriStatusResponse(CamelModel):

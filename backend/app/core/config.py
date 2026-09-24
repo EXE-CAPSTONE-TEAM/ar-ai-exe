@@ -13,7 +13,9 @@ class Settings(BaseSettings):
     app_name: str = "Shoe Visual Customizer API"
     environment: str = "local"
     debug: bool = True
+    app_role: str = "full"
     api_prefix: str = "/api"
+    signed_url_ttl_seconds: int = 900  # provenance: NFR-SEC-05, spec §Parameter & Data Provenance
 
     cors_origins: list[str] = [
         "http://localhost:5173",
@@ -101,6 +103,10 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
+
+    def model_post_init(self, __context: object) -> None:
+        if self.app_role.lower() == "relay":
+            self.control_plane_service_token = ""
 
     @property
     def resolved_storage_root(self) -> Path:
