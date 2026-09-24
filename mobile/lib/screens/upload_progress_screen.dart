@@ -80,9 +80,8 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
         _step = 1;
         _message = _stepLabel(1);
       });
-      await _api.uploadScanPass(
+      await _api.uploadScanVideo(
         scanSessionId: scanSessionId,
-        passType: 'single-video',
         videoFile: widget.videoFile,
         onProgress: _updateProgress,
       );
@@ -100,8 +99,10 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (_) => ScanResultScreen(
+            api: _api,
             scanSessionId: scanSessionId,
             status: kiriStatus.status,
+            initialStatus: kiriStatus,
             processingStarted: true,
             webDesignUrl: AppConfig.webUrl('/design/$scanSessionId'),
           ),

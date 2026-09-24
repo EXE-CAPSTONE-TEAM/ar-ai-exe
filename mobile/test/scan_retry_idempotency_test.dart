@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:shoe_visual_customizer_mobile/models/scan_metadata.dart';
-import 'package:shoe_visual_customizer_mobile/models/scan_upload_result.dart';
 import 'package:shoe_visual_customizer_mobile/screens/upload_progress_screen.dart';
 import 'package:shoe_visual_customizer_mobile/services/api_exception.dart';
 import 'package:shoe_visual_customizer_mobile/services/backend_api.dart';
@@ -35,11 +34,10 @@ class _RecordingApi extends BackendApi {
   }
 
   @override
-  Future<ScanUploadResult> uploadScanPass({
+  Future<void> uploadScanVideo({
     required String scanSessionId,
-    required String passType,
     required XFile videoFile,
-    required void Function(int sent, int total) onProgress,
+    void Function(int sent, int total)? onProgress,
   }) async {
     uploadAttempts += 1;
     throw const ApiException(message: 'Mất kết nối khi tải lên.');

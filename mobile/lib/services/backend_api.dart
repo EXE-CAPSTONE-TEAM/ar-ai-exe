@@ -15,7 +15,6 @@ import '../models/template_models.dart';
 import '../models/reconstruction_readiness.dart';
 import '../models/kiri_status.dart';
 import '../models/scan_metadata.dart';
-import '../models/scan_upload_result.dart';
 import 'api_exception.dart';
 import 'token_storage.dart';
 
@@ -60,6 +59,7 @@ class LoginOutcome {
 class BackendApi {
   BackendApi({
     Dio? dio,
+    Dio? storageDio,
     FlutterSecureStorage? secureStorage,
     TokenStorage? tokenStorage,
     String? kusshoesBaseUrl,
@@ -69,7 +69,10 @@ class BackendApi {
         _computeBaseUrl = computeBaseUrl ?? AppConfig.computeBaseUrl,
         _tokenStorage = tokenStorage ?? TokenStorage(secureStorage),
         _injectedCookieJar = cookieJar,
-        _dio = dio ?? Dio() {
+        _dio = dio ?? Dio(),
+        // Presigned storage URLs carry their own signature: requests to them go through a
+        // client with no auth/cookie interceptors, so no bearer token or cookie can leak.
+        _storageDio = storageDio ?? Dio() {
     _dio.options.connectTimeout ??= const Duration(seconds: 20);
     _dio.options.receiveTimeout ??= const Duration(seconds: 60);
     _dio.interceptors.add(InterceptorsWrapper(onError: _onError));
@@ -84,6 +87,11 @@ class BackendApi {
   @visibleForTesting
   static set shared(BackendApi api) => _shared = api;
 
+  @visibleForTesting
+  void setScanTokenForTesting(String token) {
+    _scanAccessToken = token;
+  }
+
   static const _accessTokenKey = 'kusshoes_access_token';
 
   /// Written by an earlier build that expected a refresh token in the response
@@ -92,6 +100,7 @@ class BackendApi {
   static const _legacyRefreshTokenKey = 'kusshoes_refresh_token';
 
   final Dio _dio;
+  final Dio _storageDio;
   final TokenStorage _tokenStorage;
   final String _kusshoesBaseUrl;
   final CookieJar? _injectedCookieJar;
@@ -648,33 +657,95 @@ class BackendApi {
     );
   }
 
-  Future<ScanUploadResult> uploadScanPass({
+  /// Requests a presigned PUT URL to upload the scan video directly to storage.
+  /// POST {compute}/api/scan-sessions/{id}/video-upload-url
+  /// Body: {"contentType": "video/mp4", "fileSizeBytes": <int>}
+  /// Response: {"uploadUrl": "...", "key": "...", "expiresIn": ...}
+  Future<Map<String, dynamic>> getVideoUploadUrl({
     required String scanSessionId,
-    required String passType,
-    required XFile videoFile,
-    required void Function(int sent, int total) onProgress,
+    required int fileSizeBytes,
+    String contentType = 'video/mp4',
   }) async {
     _ensureScanToken();
-    await _ensureCookieJar();
+    return await _post(
+      '$_computeBaseUrl/api/scan-sessions/$scanSessionId/video-upload-url',
+      body: {
+        'contentType': contentType,
+        'fileSizeBytes': fileSizeBytes,
+      },
+      scanScoped: true,
+    );
+  }
+
+  /// Streams the video file directly to the presigned storage upload URL via HTTP PUT.
+  /// Sends Header Content-Type: video/mp4 and NO Authorization header (storage rejects
+  /// requests carrying both a bearer token and a signed URL).
+  Future<void> uploadVideoToStorage({
+    required String uploadUrl,
+    required XFile videoFile,
+    void Function(int sent, int total)? onProgress,
+  }) async {
+    final fileLength = await videoFile.length();
+    final stream = videoFile.openRead();
     try {
-      // Streamed from disk rather than read into memory: a 60s 1080p pass can
-      // run to tens of MB and BR-34 allows up to 200MB per job.
-      final formData = FormData.fromMap({
-        'video': await MultipartFile.fromFile(
-          videoFile.path,
-          filename: '$passType.mp4',
+      await _storageDio.put<void>(
+        uploadUrl,
+        data: stream,
+        options: Options(
+          headers: {
+            Headers.contentTypeHeader: 'video/mp4',
+            Headers.contentLengthHeader: fileLength,
+          },
         ),
-      });
-      final response = await _dio.post<Map<String, dynamic>>(
-        '$_computeBaseUrl/api/scan-sessions/$scanSessionId/videos/$passType',
-        data: formData,
-        options: _scanAuthOptions(contentType: 'multipart/form-data'),
         onSendProgress: onProgress,
       );
-      return ScanUploadResult.fromJson(response.data!);
     } catch (error) {
       throw ApiException.from(error);
     }
+  }
+
+  /// Confirms that the video file was uploaded to storage.
+  /// POST {compute}/api/scan-sessions/{id}/video-uploaded
+  /// Body: {"key": <key>}
+  Future<Map<String, dynamic>> notifyVideoUploaded({
+    required String scanSessionId,
+    required String key,
+  }) async {
+    _ensureScanToken();
+    return await _post(
+      '$_computeBaseUrl/api/scan-sessions/$scanSessionId/video-uploaded',
+      body: {'key': key},
+      scanScoped: true,
+    );
+  }
+
+  /// Orchestrates the 3-step presigned video upload:
+  /// (1) POST video-upload-url -> {uploadUrl, key, expiresIn}
+  /// (2) HTTP PUT streaming video file to uploadUrl (no Auth header)
+  /// (3) POST video-uploaded -> {key}
+  Future<void> uploadScanVideo({
+    required String scanSessionId,
+    required XFile videoFile,
+    void Function(int sent, int total)? onProgress,
+  }) async {
+    final fileLength = await videoFile.length();
+    final uploadInfo = await getVideoUploadUrl(
+      scanSessionId: scanSessionId,
+      fileSizeBytes: fileLength,
+    );
+    final uploadUrl = uploadInfo['uploadUrl'] as String;
+    final key = uploadInfo['key'] as String;
+
+    await uploadVideoToStorage(
+      uploadUrl: uploadUrl,
+      videoFile: videoFile,
+      onProgress: onProgress,
+    );
+
+    await notifyVideoUploaded(
+      scanSessionId: scanSessionId,
+      key: key,
+    );
   }
 
   Future<String> startProcessing({required String scanSessionId}) async {
@@ -710,33 +781,91 @@ class BackendApi {
     );
   }
 
-  Future<KiriStatus> configureCrop({
-    required String scanSessionId,
-    required CropBox cropBox,
-  }) async {
-    _ensureScanToken();
-    return _kiriStatus(
-      await _post(
-        '$_computeBaseUrl/api/scan-sessions/$scanSessionId/crop',
-        body: cropBox.toJson(),
-        scanScoped: true,
-      ),
-    );
-  }
-
+  /// Saves the reconstructed KIRI scan to a project.
+  /// POST {compute}/api/scan-sessions/{id}/save-project
+  /// Body: {"projectName": <name>} only — no cropBox.
   Future<KiriStatus> saveKiriProject({
     required String scanSessionId,
     required String projectName,
-    required CropBox cropBox,
   }) async {
     _ensureScanToken();
     return _kiriStatus(
       await _post(
         '$_computeBaseUrl/api/scan-sessions/$scanSessionId/save-project',
-        body: {'projectName': projectName, 'cropBox': cropBox.toJson()},
+        body: {'projectName': projectName},
         scanScoped: true,
       ),
     );
+  }
+
+  /// Requests GET {compute}/api/scan-sessions/{id}/kiri/preview with redirects disabled.
+  /// Returns the presigned Location URL from the 307 redirect.
+  Future<String> getKiriPreviewLocationUrl({
+    required String scanSessionId,
+  }) async {
+    _ensureScanToken();
+    try {
+      final response = await _dio.get<dynamic>(
+        '$_computeBaseUrl/api/scan-sessions/$scanSessionId/kiri/preview',
+        options: _scanAuthOptions().copyWith(
+          followRedirects: false,
+          validateStatus: (status) =>
+              status != null &&
+              ((status >= 200 && status < 300) ||
+                  status == 307 ||
+                  status == 302 ||
+                  status == 303),
+        ),
+      );
+
+      if (response.statusCode == 307 ||
+          response.statusCode == 302 ||
+          response.statusCode == 303) {
+        final location = response.headers.value('location');
+        if (location != null && location.isNotEmpty) {
+          return location;
+        }
+      }
+
+      if (response.data is Map<String, dynamic> &&
+          response.data['url'] != null) {
+        return response.data['url'] as String;
+      }
+
+      final directLocation = response.headers.value('location');
+      if (directLocation != null && directLocation.isNotEmpty) {
+        return directLocation;
+      }
+
+      throw const ApiException(message: 'Không lấy được đường dẫn xem trước model.');
+    } on ApiException {
+      rethrow;
+    } catch (error) {
+      throw ApiException.from(error);
+    }
+  }
+
+  /// Downloads raw preview GLB model bytes:
+  /// Follows the 307 redirect from /kiri/preview, then GETs the Location URL
+  /// WITHOUT the Authorization header.
+  Future<List<int>> getKiriPreviewBytes({
+    required String scanSessionId,
+  }) async {
+    final locationUrl = await getKiriPreviewLocationUrl(
+      scanSessionId: scanSessionId,
+    );
+    try {
+      final response = await _storageDio.get<List<int>>(
+        locationUrl,
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: const <String, dynamic>{}, // NO Authorization header
+        ),
+      );
+      return response.data ?? <int>[];
+    } catch (error) {
+      throw ApiException.from(error);
+    }
   }
 
   KiriStatus _kiriStatus(Map<String, dynamic> payload) {
@@ -757,7 +886,6 @@ class BackendApi {
       providerStatus: status.providerStatus,
       progress: status.progress,
       previewUrl: '$_computeBaseUrl$previewUrl',
-      cropBox: status.cropBox,
       modelAssetId: status.modelAssetId,
       errorMessage: status.errorMessage,
     );
