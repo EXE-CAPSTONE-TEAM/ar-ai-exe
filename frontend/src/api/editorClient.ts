@@ -83,79 +83,7 @@ export const editorClient = {
       method: "POST",
     });
 
-    // 2. Claim the job
-    const claim = await request<EditorJobClaimResponse>(`/api/v1/editor/jobs/${job.id}/claim`, {
-      method: "POST",
-      body: JSON.stringify({ deviceLabel: "desktop" }),
-    });
-
-    const claimToken = claim.claimToken ?? (claim as unknown as { claim_token?: string }).claim_token;
-    if (!claimToken) {
-      throw new EditorApiError("Claim response did not contain a claim token.", 502, "CLAIM_FAILED");
-    }
-
-    const sidecarBaseUrl = runtime.apiBaseUrl.replace(/\/+$/, "");
-
-    // 3. Post to sidecar /bake with header X-Service-Token: runtime.sidecarToken and claim payload
-    let sidecarResponse: Response;
-    try {
-      sidecarResponse = await fetch(`${sidecarBaseUrl}/bake`, {
-        method: "POST",
-        credentials: "omit",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Service-Token": runtime.sidecarToken,
-        },
-        body: JSON.stringify(claim.payload),
-      });
-    } catch (networkError) {
-      const code = "SIDECAR_UNAVAILABLE";
-      const message = String(networkError instanceof Error ? networkError.message : "Sidecar connection failed").slice(0, 500);
-      return failJob(job.id, claimToken, { code, message });
-    }
-
-    if (!sidecarResponse.ok) {
-      const errPayload = await sidecarResponse.json().catch(() => null);
-      const code = String(
-        errPayload?.code ??
-        errPayload?.error?.code ??
-        (sidecarResponse.status === 503 ? "WORKER_BUSY" : "SIDECAR_BAKE_FAILED"),
-      ).slice(0, 64);
-      const message = String(
-        errPayload?.message ??
-        errPayload?.detail ??
-        errPayload?.error?.message ??
-        `Sidecar bake failed with status ${sidecarResponse.status}`,
-      ).slice(0, 500);
-      return failJob(job.id, claimToken, { code, message });
-    }
-
-    let sidecarData: Record<string, unknown>;
-    try {
-      sidecarData = (await sidecarResponse.json()) as Record<string, unknown>;
-    } catch {
-      return failJob(job.id, claimToken, {
-        code: "SIDECAR_INVALID_RESPONSE",
-        message: "Sidecar returned an invalid JSON response.",
-      });
-    }
-
-    const rawExports = (sidecarData.exports ?? sidecarData.outputs) as Array<Record<string, unknown>> | undefined;
-    if (!Array.isArray(rawExports) || rawExports.length === 0) {
-      return failJob(job.id, claimToken, {
-        code: "SIDECAR_OUTPUT_MISSING",
-        message: "Sidecar completed without returning export outputs.",
-      });
-    }
-
-    const outputs = rawExports.map((item) => ({
-      format: String(item.format),
-      filePath: String(item.filePath ?? item.file_path),
-      fileSizeBytes: Number(item.fileSizeBytes ?? item.file_size_bytes),
-    }));
-
-    // 4. Complete the job with X-Claim-Token and watermarkApplied: false (no Authorization header)
-    return completeJob(job.id, claimToken, outputs);
+    return runClaimedJob(job.id, runtime, "/bake", "BAKE");
   },
 
   async prepareModel(
@@ -180,85 +108,7 @@ export const editorClient = {
       body: JSON.stringify({ cropBox, confirmResetDesign }),
     });
 
-    // 2. Claim the job
-    const claim = await request<EditorJobClaimResponse>(`/api/v1/editor/jobs/${job.id}/claim`, {
-      method: "POST",
-      body: JSON.stringify({ deviceLabel: "desktop" }),
-    });
-
-    const claimToken = claim.claimToken ?? (claim as unknown as { claim_token?: string }).claim_token;
-    if (!claimToken) {
-      throw new EditorApiError("Claim response did not contain a claim token.", 502, "CLAIM_FAILED");
-    }
-
-    const sidecarBaseUrl = runtime.apiBaseUrl.replace(/\/+$/, "");
-
-    // 3. Post to sidecar /prepare with header X-Service-Token: runtime.sidecarToken and claim payload
-    onProgress?.("cropping");
-    let sidecarResponse: Response;
-    try {
-      sidecarResponse = await fetch(`${sidecarBaseUrl}/prepare`, {
-        method: "POST",
-        credentials: "omit",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Service-Token": runtime.sidecarToken,
-        },
-        body: JSON.stringify(claim.payload),
-      });
-    } catch (networkError) {
-      const code = "SIDECAR_UNAVAILABLE";
-      const message = String(networkError instanceof Error ? networkError.message : "Sidecar connection failed").slice(0, 500);
-      return failJob(job.id, claimToken, { code, message });
-    }
-
-    if (!sidecarResponse.ok) {
-      const errPayload = await sidecarResponse.json().catch(() => null);
-      const code = String(
-        errPayload?.code ??
-        errPayload?.error?.code ??
-        (sidecarResponse.status === 503 ? "WORKER_BUSY" : "SIDECAR_PREPARE_FAILED"),
-      ).slice(0, 64);
-      const message = String(
-        errPayload?.message ??
-        errPayload?.detail ??
-        errPayload?.error?.message ??
-        `Sidecar prepare failed with status ${sidecarResponse.status}`,
-      ).slice(0, 500);
-      return failJob(job.id, claimToken, { code, message });
-    }
-
-    let sidecarData: Record<string, unknown>;
-    try {
-      sidecarData = (await sidecarResponse.json()) as Record<string, unknown>;
-    } catch {
-      return failJob(job.id, claimToken, {
-        code: "SIDECAR_INVALID_RESPONSE",
-        message: "Sidecar returned an invalid JSON response.",
-      });
-    }
-
-    const rawOutputs = (sidecarData.outputs ?? sidecarData.exports) as Array<Record<string, unknown>> | undefined;
-    if (!Array.isArray(rawOutputs) || rawOutputs.length === 0) {
-      return failJob(job.id, claimToken, {
-        code: "SIDECAR_OUTPUT_MISSING",
-        message: "Sidecar completed without returning prepare outputs.",
-      });
-    }
-
-    const outputs = rawOutputs.map((item) => ({
-      format: String(item.format),
-      filePath: String(item.filePath ?? item.file_path),
-      fileSizeBytes: Number(item.fileSizeBytes ?? item.file_size_bytes),
-    }));
-
-    const cleanupReport = (sidecarData.cleanupReport ?? sidecarData.cleanup_report) as Record<string, unknown> | undefined;
-
-    // 4. Complete the job with X-Claim-Token and optional cleanupReport (no Authorization header)
-    onProgress?.("uploading");
-    const completedJob = await completeJob(job.id, claimToken, outputs, cleanupReport);
-    onProgress?.("done");
-    return completedJob;
+    return runClaimedJob(job.id, runtime, "/prepare", "PREPARE", onProgress);
   },
 
   async getJob(jobId: string): Promise<Job> {
@@ -357,6 +207,92 @@ export const editorClient = {
     return {};
   },
 };
+
+type DesktopRuntimeLike = { apiBaseUrl: string; sidecarToken?: string | null };
+type PrepareStep = "downloading" | "cropping" | "cleaning" | "uploading" | "done";
+
+/** Claim a KusShoes job, run it on the local sidecar, then complete or fail it (spec §A, §G.1).
+ * complete/fail authenticate with the claim token only — the editor session may have expired. */
+async function runClaimedJob(
+  jobId: string,
+  runtime: DesktopRuntimeLike,
+  sidecarPath: "/bake" | "/prepare",
+  errorLabel: "BAKE" | "PREPARE",
+  onProgress?: (step: PrepareStep) => void,
+): Promise<Job> {
+  const claim = await request<EditorJobClaimResponse>(`/api/v1/editor/jobs/${jobId}/claim`, {
+    method: "POST",
+    body: JSON.stringify({ deviceLabel: "desktop" }),
+  });
+  const claimToken = claim.claimToken ?? (claim as unknown as { claim_token?: string }).claim_token;
+  if (!claimToken) {
+    throw new EditorApiError("Claim response did not contain a claim token.", 502, "CLAIM_FAILED");
+  }
+
+  onProgress?.("cropping");
+  let sidecarResponse: Response;
+  try {
+    sidecarResponse = await fetch(`${runtime.apiBaseUrl.replace(/\/+$/, "")}${sidecarPath}`, {
+      method: "POST",
+      credentials: "omit",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Service-Token": runtime.sidecarToken ?? "",
+      },
+      body: JSON.stringify(claim.payload),
+    });
+  } catch (networkError) {
+    const message = String(networkError instanceof Error ? networkError.message : "Sidecar connection failed");
+    return failJob(jobId, claimToken, { code: "SIDECAR_UNAVAILABLE", message: message.slice(0, 500) });
+  }
+
+  if (!sidecarResponse.ok) {
+    const errPayload = await sidecarResponse.json().catch(() => null);
+    const code = String(
+      errPayload?.code ??
+        errPayload?.error?.code ??
+        (sidecarResponse.status === 503 ? "WORKER_BUSY" : `SIDECAR_${errorLabel}_FAILED`),
+    ).slice(0, 64);
+    const message = String(
+      errPayload?.message ??
+        errPayload?.detail ??
+        errPayload?.error?.message ??
+        `Sidecar ${sidecarPath.slice(1)} failed with status ${sidecarResponse.status}`,
+    ).slice(0, 500);
+    return failJob(jobId, claimToken, { code, message });
+  }
+
+  let sidecarData: Record<string, unknown>;
+  try {
+    sidecarData = (await sidecarResponse.json()) as Record<string, unknown>;
+  } catch {
+    return failJob(jobId, claimToken, {
+      code: "SIDECAR_INVALID_RESPONSE",
+      message: "Sidecar returned an invalid JSON response.",
+    });
+  }
+
+  const rawOutputs = (sidecarData.outputs ?? sidecarData.exports) as Array<Record<string, unknown>> | undefined;
+  if (!Array.isArray(rawOutputs) || rawOutputs.length === 0) {
+    return failJob(jobId, claimToken, {
+      code: "SIDECAR_OUTPUT_MISSING",
+      message: `Sidecar completed without returning ${sidecarPath.slice(1)} outputs.`,
+    });
+  }
+  const outputs = rawOutputs.map((item) => ({
+    format: String(item.format),
+    filePath: String(item.filePath ?? item.file_path),
+    fileSizeBytes: Number(item.fileSizeBytes ?? item.file_size_bytes),
+  }));
+  const cleanupReport = (sidecarData.cleanupReport ?? sidecarData.cleanup_report) as
+    | Record<string, unknown>
+    | undefined;
+
+  onProgress?.("uploading");
+  const completed = await completeJob(jobId, claimToken, outputs, cleanupReport);
+  onProgress?.("done");
+  return completed;
+}
 
 async function completeJob(
   jobId: string,
