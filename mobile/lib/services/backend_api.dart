@@ -59,6 +59,7 @@ class LoginOutcome {
 class BackendApi {
   BackendApi({
     Dio? dio,
+    Dio? storageDio,
     FlutterSecureStorage? secureStorage,
     TokenStorage? tokenStorage,
     String? kusshoesBaseUrl,
@@ -68,7 +69,10 @@ class BackendApi {
         _computeBaseUrl = computeBaseUrl ?? AppConfig.computeBaseUrl,
         _tokenStorage = tokenStorage ?? TokenStorage(secureStorage),
         _injectedCookieJar = cookieJar,
-        _dio = dio ?? Dio() {
+        _dio = dio ?? Dio(),
+        // Presigned storage URLs carry their own signature: requests to them go through a
+        // client with no auth/cookie interceptors, so no bearer token or cookie can leak.
+        _storageDio = storageDio ?? Dio() {
     _dio.options.connectTimeout ??= const Duration(seconds: 20);
     _dio.options.receiveTimeout ??= const Duration(seconds: 60);
     _dio.interceptors.add(InterceptorsWrapper(onError: _onError));
@@ -96,6 +100,7 @@ class BackendApi {
   static const _legacyRefreshTokenKey = 'kusshoes_refresh_token';
 
   final Dio _dio;
+  final Dio _storageDio;
   final TokenStorage _tokenStorage;
   final String _kusshoesBaseUrl;
   final CookieJar? _injectedCookieJar;
@@ -683,7 +688,7 @@ class BackendApi {
     final fileLength = await videoFile.length();
     final stream = videoFile.openRead();
     try {
-      await _dio.put<void>(
+      await _storageDio.put<void>(
         uploadUrl,
         data: stream,
         options: Options(
@@ -832,7 +837,9 @@ class BackendApi {
         return directLocation;
       }
 
-      return '$_computeBaseUrl/api/scan-sessions/$scanSessionId/kiri/preview';
+      throw const ApiException(message: 'Không lấy được đường dẫn xem trước model.');
+    } on ApiException {
+      rethrow;
     } catch (error) {
       throw ApiException.from(error);
     }
@@ -848,7 +855,7 @@ class BackendApi {
       scanSessionId: scanSessionId,
     );
     try {
-      final response = await _dio.get<List<int>>(
+      final response = await _storageDio.get<List<int>>(
         locationUrl,
         options: Options(
           responseType: ResponseType.bytes,

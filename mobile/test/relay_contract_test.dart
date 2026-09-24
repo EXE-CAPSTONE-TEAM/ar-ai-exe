@@ -91,6 +91,7 @@ void main() {
 
       final api = BackendApi(
         dio: dio,
+        storageDio: dio,
         computeBaseUrl: 'https://compute.example.com',
       );
       api.setScanTokenForTesting('scan-secret-token');
@@ -195,6 +196,7 @@ void main() {
 
       final api = BackendApi(
         dio: dio,
+        storageDio: dio,
         computeBaseUrl: 'https://compute.example.com',
       );
       api.setScanTokenForTesting('scan-secret-token');
@@ -330,6 +332,7 @@ void main() {
 
       final api = BackendApi(
         dio: dio,
+        storageDio: dio,
         computeBaseUrl: 'https://compute.example.com',
       );
       api.setScanTokenForTesting('scan-secret-token');
