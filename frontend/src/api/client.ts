@@ -15,6 +15,8 @@ import type {
   User,
 } from "../types";
 import { clearAccessToken, storeAccessToken, storedAccessToken } from "./authStorage";
+import { getDesktopRuntime } from "./desktopRuntime";
+import { editorClient } from "./editorClient";
 import { getActiveEditorSession } from "./editorLaunch";
 import { apiUrl, getApiBaseUrl } from "./runtimeConfig";
 
@@ -24,6 +26,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly code?: string,
   ) {
     super(message);
   }
@@ -426,23 +429,68 @@ export const api = {
   },
 
   async exportDesign(designId: string): Promise<ExportPackage> {
+    if (getActiveEditorSession()) {
+      return editorClient.exportDesign(designId);
+    }
     return request<ExportPackage>(`/api/designs/${designId}/export`, {
       method: "POST",
     });
   },
 
   async bakeDesign(designId: string): Promise<Job> {
+    if (getActiveEditorSession()) {
+      return editorClient.bakeDesign(designId);
+    }
     return request<Job>(`/api/designs/${designId}/bake`, {
       method: "POST",
     });
   },
 
   async getJob(jobId: string): Promise<Job> {
+    if (getActiveEditorSession()) {
+      return editorClient.getJob(jobId);
+    }
     return request<Job>(`/api/jobs/${jobId}`);
   },
 
   async downloadExport(exportPackage: ExportPackage): Promise<void> {
-    const { blob, filename } = await fetchStoredFile(exportPackage.zipUrl ?? exportPackage.downloadUrl);
+    const exportPath = exportPackage.zipUrl ?? exportPackage.downloadUrl;
+    if (getActiveEditorSession() || isPresignedContentPath(exportPath)) {
+      const runtime = await getDesktopRuntime();
+      if (!runtime.sidecarToken) {
+        throw new ApiError(
+          "KusStudio Desktop (Windows) is required for this action.",
+          400,
+          "DESKTOP_REQUIRED",
+        );
+      }
+      const response = await fetch(apiUrl(exportPath), {
+        credentials: "include",
+        headers: authHeader(),
+      });
+      if (!response.ok) {
+        throw new ApiError(await errorMessage(response), response.status);
+      }
+      const content = (await response.json()) as PresignedContent;
+      const sidecarBaseUrl = runtime.apiBaseUrl.replace(/\/+$/, "");
+      const downloadResponse = await fetch(`${sidecarBaseUrl}/downloads`, {
+        method: "POST",
+        credentials: "omit",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Service-Token": runtime.sidecarToken,
+        },
+        body: JSON.stringify({
+          url: content.url,
+          filename: content.filename || `${exportPackage.id}.zip`,
+        }),
+      });
+      if (!downloadResponse.ok) {
+        throw new ApiError(`Desktop download failed (${downloadResponse.status}).`, downloadResponse.status);
+      }
+      return;
+    }
+    const { blob, filename } = await fetchStoredFile(exportPath);
     downloadBlob(blob, filename ?? `${exportPackage.id}.zip`);
   },
 

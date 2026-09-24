@@ -921,11 +921,17 @@ export function App() {
         localStorage.setItem(designStorageKey(modelAsset.id), refreshedDesign.id);
       }
       const hasPreview = await loadBakedPreview(refreshedDesign);
-      if (completedJob.status === "failed" || refreshedDesign.previewStatus === "failed") {
+      if (
+        completedJob.status === "failed" ||
+        completedJob.status === "cancelled" ||
+        refreshedDesign.previewStatus === "failed"
+      ) {
         const message =
           completedJob.errorMessage ??
           refreshedDesign.previewErrorMessage ??
-          "Move the sticker/text closer to the shoe and save again.";
+          (completedJob.status === "cancelled"
+            ? "Bake job was cancelled."
+            : "Move the sticker/text closer to the shoe and save again.");
         setPreviewErrorMessage(message);
         setStatusMessage(message);
       } else {
@@ -2496,7 +2502,7 @@ function loginRedirectUrl(): string {
 async function waitForBakeJob(jobId: string, getJob: (jobId: string) => Promise<Job>): Promise<Job> {
   for (let attempt = 0; attempt < 180; attempt += 1) {
     const job = await getJob(jobId);
-    if (job.status === "completed" || job.status === "failed") {
+    if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
       return job;
     }
     await delay(2000);

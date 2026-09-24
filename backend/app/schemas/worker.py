@@ -38,6 +38,12 @@ class OutputUploadCapability(WorkerModel):
     content_type: str = Field(min_length=1, max_length=100)
 
 
+class BakeWatermark(WorkerModel):
+    required: bool = False
+    text: str | None = None
+    opacity_percent: int | float | None = None
+
+
 class BakeWorkerRequest(WorkerModel):
     job_id: uuid.UUID
     project_id: uuid.UUID
@@ -49,6 +55,7 @@ class BakeWorkerRequest(WorkerModel):
         max_length=50,
     )
     outputs: list[OutputUploadCapability] = Field(min_length=1, max_length=2)
+    watermark: BakeWatermark | None = None
 
     @model_validator(mode="after")
     def validate_contract(self) -> Self:

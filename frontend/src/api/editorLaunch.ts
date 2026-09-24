@@ -69,6 +69,10 @@ export function clearEditorLaunchSession(): void {
   activeEditorSession = null;
 }
 
+export function setActiveEditorSessionForTesting(session: ActiveEditorSession | null): void {
+  activeEditorSession = session ? { ...session, scopes: [...session.scopes] } : null;
+}
+
 export function getKusShoesApiBaseUrl(): string {
   const configured =
     import.meta.env.VITE_KUSSHOES_API_BASE_URL ??
