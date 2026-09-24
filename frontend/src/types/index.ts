@@ -287,6 +287,42 @@ export type EditorContext = {
   modelAsset: ModelAsset | null;
   latestDesign: Design | null;
   permissions: EditorPermissions;
+  modelStatus?: "raw" | "ready" | string;
+  rawModelAssetId?: string | null;
+};
+
+// provenance: bounds mirror app/schemas/scan.py CropBox and KusShoes EditorCropBox (centre ±0.5, size (0.01, 1], rotation ±180)
+export type CropVector = {
+  x: number;
+  y: number;
+  z: number;
+};
+
+export type CropSize = {
+  x: number;
+  y: number;
+  z: number;
+};
+
+export type CropRotation = {
+  x: number;
+  y: number;
+  z: number;
+};
+
+export type CropBox = {
+  center: CropVector;
+  size: CropSize;
+  rotation: CropRotation;
+  coordinateSpace: "normalized";
+};
+
+// provenance: bounds mirror app/schemas/scan.py CropBox and KusShoes EditorCropBox (centre ±0.5, size (0.01, 1], rotation ±180)
+export const DEFAULT_CROP_BOX: CropBox = {
+  center: { x: 0, y: 0, z: 0 },
+  size: { x: 1, y: 1, z: 1 },
+  rotation: { x: 0, y: 0, z: 0 },
+  coordinateSpace: "normalized",
 };
 
 export type Job = {

@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ExportPackage } from "../types";
+import type { CropBox, ExportPackage } from "../types";
+import { DEFAULT_CROP_BOX } from "../types";
 import { storeEphemeralAccessToken } from "./authStorage";
 import { api } from "./client";
 import { EditorApiError, editorClient, isTerminalJobStatus } from "./editorClient";
 import { clearEditorLaunchSession, setActiveEditorSessionForTesting } from "./editorLaunch";
+import { messageFromError } from "../utils/editorMessages";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -13,7 +15,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-describe("editorClient (Ticket-06)", () => {
+describe("editorClient (Ticket-06 & Ticket-09)", () => {
   beforeEach(() => {
     const store = new Map<string, string>();
     vi.stubGlobal("localStorage", {
@@ -42,6 +44,28 @@ describe("editorClient (Ticket-06)", () => {
       vi.stubGlobal("fetch", fetchMock);
 
       await expect(editorClient.bakeDesign("design-001")).rejects.toSatisfy((err: unknown) => {
+        return err instanceof EditorApiError && err.code === "DESKTOP_REQUIRED";
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("prepareModel returns DESKTOP_REQUIRED without network calls", async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(editorClient.prepareModel("project-456", DEFAULT_CROP_BOX)).rejects.toSatisfy((err: unknown) => {
+        return err instanceof EditorApiError && err.code === "DESKTOP_REQUIRED";
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("api.prepareModel returns DESKTOP_REQUIRED without network calls", async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(api.prepareModel("project-456", DEFAULT_CROP_BOX)).rejects.toSatisfy((err: unknown) => {
         return err instanceof EditorApiError && err.code === "DESKTOP_REQUIRED";
       });
 
@@ -549,6 +573,393 @@ describe("editorClient (Ticket-06)", () => {
 
       const exp = await editorClient.exportDesign("design-001");
       expect(exp.id).toBe("local-exp-1");
+    });
+  });
+
+  describe("Desktop mode prepareModel lifecycle", () => {
+    function setupDesktopTauri() {
+      vi.stubGlobal("window", {
+        __TAURI__: {
+          core: {
+            invoke: vi.fn().mockImplementation(async (command: string) => {
+              if (command === "get_desktop_runtime") {
+                return {
+                  apiBaseUrl: "http://127.0.0.1:8000",
+                  backendStatus: "ready",
+                  blenderStatus: "installed",
+                  demoProjectStatus: "ready",
+                  diagnosticSummary: "",
+                  backendPort: 8000,
+                  storagePath: "",
+                  blenderPath: "",
+                  logsPath: "",
+                  appVersion: "1.0.0",
+                  sidecarToken: "sidecar-token-prepare-xyz",
+                };
+              }
+              return null;
+            }),
+          },
+        },
+      });
+    }
+
+    const testCropBox: CropBox = {
+      center: { x: 0.1, y: -0.1, z: 0.05 },
+      size: { x: 0.8, y: 0.9, z: 0.7 },
+      rotation: { x: 10, y: 0, z: -5 },
+      coordinateSpace: "normalized",
+    };
+
+    it("completes full create -> claim -> sidecar -> complete sequence with X-Claim-Token and cleanupReport", async () => {
+      setupDesktopTauri();
+
+      const prepareJobId = "job-prepare-123";
+      const claimToken = "claim-token-prep-abc";
+      const sidecarPayload = {
+        job_id: prepareJobId,
+        project_id: "project-456",
+        crop_box: testCropBox,
+        source_model: {
+          asset_id: "asset-raw-1",
+          download_url: "https://r2.test/raw.glb",
+          file_size_bytes: 2048,
+          mime_type: "model/gltf-binary",
+        },
+        outputs: [
+          {
+            format: "glb",
+            file_path: `staging/project-456/${prepareJobId}/claim-1/prepared.glb`,
+            upload_url: "https://r2.test/upload-prepared",
+            content_type: "model/gltf-binary",
+          },
+        ],
+      };
+
+      const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+        const urlStr = String(url);
+        // Step 1: create prepare job on KusShoes BE
+        if (urlStr.endsWith("/api/v1/editor/projects/project-456/prepare")) {
+          expect(init?.headers).toMatchObject({
+            Authorization: "Bearer editor-session-token",
+          });
+          const body = JSON.parse(String(init?.body));
+          expect(body.cropBox).toEqual(testCropBox);
+          expect(body.confirmResetDesign).toBe(false);
+
+          return jsonResponse({
+            id: prepareJobId,
+            type: "prepare",
+            status: "awaiting_client",
+            progress: 0,
+            errorMessage: null,
+            projectId: "project-456",
+            createdAt: "2026-09-24T00:00:00Z",
+            updatedAt: "2026-09-24T00:00:00Z",
+          });
+        }
+        // Step 2: claim job on KusShoes BE
+        if (urlStr.endsWith(`/api/v1/editor/jobs/${prepareJobId}/claim`)) {
+          expect(init?.headers).toMatchObject({
+            Authorization: "Bearer editor-session-token",
+          });
+          return jsonResponse({
+            claimId: "claim-uuid-prep-1",
+            claimToken,
+            leaseExpiresAt: "2026-09-24T01:00:00Z",
+            payload: sidecarPayload,
+          });
+        }
+        // Step 3: sidecar POST /prepare
+        if (urlStr === "http://127.0.0.1:8000/prepare") {
+          expect((init?.headers as Record<string, string>)["X-Service-Token"]).toBe("sidecar-token-prepare-xyz");
+          expect(JSON.parse(String(init?.body))).toEqual(sidecarPayload);
+          return jsonResponse({
+            outputs: [
+              {
+                format: "glb",
+                file_path: `staging/project-456/${prepareJobId}/claim-1/prepared.glb`,
+                file_size_bytes: 8192,
+              },
+            ],
+            cleanup_report: {
+              editorReady: true,
+              editorReadyScore: 98,
+              meshObjectCount: 1,
+            },
+          });
+        }
+        // Step 4: complete on KusShoes BE
+        if (urlStr.endsWith(`/api/v1/editor/jobs/${prepareJobId}/complete`)) {
+          const headers = (init?.headers ?? {}) as Record<string, string>;
+          expect(headers["X-Claim-Token"]).toBe(claimToken);
+          expect(headers.Authorization).toBeUndefined();
+
+          const body = JSON.parse(String(init?.body));
+          expect(body.outputs).toEqual([
+            {
+              format: "glb",
+              filePath: `staging/project-456/${prepareJobId}/claim-1/prepared.glb`,
+              fileSizeBytes: 8192,
+            },
+          ]);
+          expect(body.cleanupReport).toEqual({
+            editorReady: true,
+            editorReadyScore: 98,
+            meshObjectCount: 1,
+          });
+          expect(body.watermarkApplied).toBe(false);
+
+          return jsonResponse({
+            id: prepareJobId,
+            type: "prepare",
+            status: "completed",
+            progress: 100,
+            errorMessage: null,
+            projectId: "project-456",
+            createdAt: "2026-09-24T00:00:00Z",
+            updatedAt: "2026-09-24T00:01:00Z",
+          });
+        }
+        throw new Error(`Unexpected fetch call: ${urlStr}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const job = await editorClient.prepareModel("project-456", testCropBox);
+      expect(job.status).toBe("completed");
+      expect(job.id).toBe(prepareJobId);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    });
+
+    it("sends confirmResetDesign: true when requested", async () => {
+      setupDesktopTauri();
+
+      const prepareJobId = "job-prepare-reset";
+      const claimToken = "claim-token-reset-1";
+
+      const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+        const urlStr = String(url);
+        if (urlStr.endsWith("/api/v1/editor/projects/project-456/prepare")) {
+          const body = JSON.parse(String(init?.body));
+          expect(body.confirmResetDesign).toBe(true);
+          return jsonResponse({
+            id: prepareJobId,
+            type: "prepare",
+            status: "awaiting_client",
+          });
+        }
+        if (urlStr.endsWith(`/api/v1/editor/jobs/${prepareJobId}/claim`)) {
+          return jsonResponse({
+            claimId: "claim-uuid-reset",
+            claimToken,
+            payload: {},
+          });
+        }
+        if (urlStr === "http://127.0.0.1:8000/prepare") {
+          return jsonResponse({
+            outputs: [{ format: "glb", filePath: "path/prepared.glb", fileSizeBytes: 1024 }],
+          });
+        }
+        if (urlStr.endsWith(`/api/v1/editor/jobs/${prepareJobId}/complete`)) {
+          return jsonResponse({
+            id: prepareJobId,
+            type: "prepare",
+            status: "completed",
+          });
+        }
+        throw new Error(`Unexpected fetch: ${urlStr}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const job = await editorClient.prepareModel("project-456", testCropBox, true);
+      expect(job.status).toBe("completed");
+    });
+
+    it("propagates 409 EDITOR_DESIGN_RESET_REQUIRED when re-crop requires confirmation", async () => {
+      setupDesktopTauri();
+
+      const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+        const urlStr = String(url);
+        if (urlStr.endsWith("/api/v1/editor/projects/project-456/prepare")) {
+          return jsonResponse(
+            {
+              code: "EDITOR_DESIGN_RESET_REQUIRED",
+              message: "Cắt lại sẽ xoá thiết kế hiện tại. Bạn có chắc?",
+            },
+            409,
+          );
+        }
+        throw new Error(`Unexpected fetch: ${urlStr}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(
+        editorClient.prepareModel("project-456", testCropBox, false),
+      ).rejects.toSatisfy((err: unknown) => {
+        return (
+          err instanceof EditorApiError &&
+          err.status === 409 &&
+          err.code === "EDITOR_DESIGN_RESET_REQUIRED"
+        );
+      });
+    });
+
+    it("calls /fail on sidecar network error without Authorization header", async () => {
+      setupDesktopTauri();
+
+      const prepareJobId = "job-prep-net-fail";
+      const claimToken = "claim-token-net-fail";
+
+      const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+        const urlStr = String(url);
+        if (urlStr.endsWith("/api/v1/editor/projects/project-456/prepare")) {
+          return jsonResponse({ id: prepareJobId, status: "awaiting_client" });
+        }
+        if (urlStr.endsWith(`/api/v1/editor/jobs/${prepareJobId}/claim`)) {
+          return jsonResponse({ claimToken, payload: {} });
+        }
+        if (urlStr === "http://127.0.0.1:8000/prepare") {
+          throw new TypeError("Failed to fetch (sidecar crashed)");
+        }
+        if (urlStr.endsWith(`/api/v1/editor/jobs/${prepareJobId}/fail`)) {
+          const headers = (init?.headers ?? {}) as Record<string, string>;
+          expect(headers["X-Claim-Token"]).toBe(claimToken);
+          expect(headers.Authorization).toBeUndefined();
+
+          const body = JSON.parse(String(init?.body));
+          expect(body.code).toBe("SIDECAR_UNAVAILABLE");
+          expect(body.message).toContain("sidecar crashed");
+
+          return jsonResponse({
+            id: prepareJobId,
+            type: "prepare",
+            status: "failed",
+            errorMessage: body.message,
+          });
+        }
+        throw new Error(`Unexpected fetch: ${urlStr}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const failedJob = await editorClient.prepareModel("project-456", testCropBox);
+      expect(failedJob.status).toBe("failed");
+      expect(failedJob.id).toBe(prepareJobId);
+    });
+
+    it("calls /fail on sidecar 503 error", async () => {
+      setupDesktopTauri();
+
+      const prepareJobId = "job-prep-503";
+      const claimToken = "claim-token-503";
+
+      const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+        const urlStr = String(url);
+        if (urlStr.endsWith("/api/v1/editor/projects/project-456/prepare")) {
+          return jsonResponse({ id: prepareJobId, status: "awaiting_client" });
+        }
+        if (urlStr.endsWith(`/api/v1/editor/jobs/${prepareJobId}/claim`)) {
+          return jsonResponse({ claimToken, payload: {} });
+        }
+        if (urlStr === "http://127.0.0.1:8000/prepare") {
+          return jsonResponse({ detail: "Prepare worker is at capacity." }, 503);
+        }
+        if (urlStr.endsWith(`/api/v1/editor/jobs/${prepareJobId}/fail`)) {
+          const body = JSON.parse(String(init?.body));
+          expect(body.code).toBe("WORKER_BUSY");
+          return jsonResponse({
+            id: prepareJobId,
+            status: "failed",
+            errorMessage: body.message,
+          });
+        }
+        throw new Error(`Unexpected fetch: ${urlStr}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const failedJob = await editorClient.prepareModel("project-456", testCropBox);
+      expect(failedJob.status).toBe("failed");
+    });
+
+    it("calls /fail when sidecar returns empty outputs", async () => {
+      setupDesktopTauri();
+
+      const prepareJobId = "job-prep-empty";
+      const claimToken = "claim-token-empty";
+
+      const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+        const urlStr = String(url);
+        if (urlStr.endsWith("/api/v1/editor/projects/project-456/prepare")) {
+          return jsonResponse({ id: prepareJobId, status: "awaiting_client" });
+        }
+        if (urlStr.endsWith(`/api/v1/editor/jobs/${prepareJobId}/claim`)) {
+          return jsonResponse({ claimToken, payload: {} });
+        }
+        if (urlStr === "http://127.0.0.1:8000/prepare") {
+          return jsonResponse({ outputs: [] });
+        }
+        if (urlStr.endsWith(`/api/v1/editor/jobs/${prepareJobId}/fail`)) {
+          const body = JSON.parse(String(init?.body));
+          expect(body.code).toBe("SIDECAR_OUTPUT_MISSING");
+          return jsonResponse({
+            id: prepareJobId,
+            status: "failed",
+            errorMessage: body.message,
+          });
+        }
+        throw new Error(`Unexpected fetch: ${urlStr}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const failedJob = await editorClient.prepareModel("project-456", testCropBox);
+      expect(failedJob.status).toBe("failed");
+    });
+
+    it("notifies progress steps during prepare execution", async () => {
+      setupDesktopTauri();
+
+      const prepareJobId = "job-prep-prog";
+      const claimToken = "claim-token-prog";
+
+      const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+        const urlStr = String(url);
+        if (urlStr.endsWith("/api/v1/editor/projects/project-456/prepare")) {
+          return jsonResponse({ id: prepareJobId, status: "awaiting_client" });
+        }
+        if (urlStr.endsWith(`/api/v1/editor/jobs/${prepareJobId}/claim`)) {
+          return jsonResponse({ claimToken, payload: {} });
+        }
+        if (urlStr === "http://127.0.0.1:8000/prepare") {
+          return jsonResponse({
+            outputs: [{ format: "glb", filePath: "path/prepared.glb", fileSizeBytes: 1024 }],
+          });
+        }
+        if (urlStr.endsWith(`/api/v1/editor/jobs/${prepareJobId}/complete`)) {
+          return jsonResponse({
+            id: prepareJobId,
+            status: "completed",
+          });
+        }
+        throw new Error(`Unexpected fetch: ${urlStr}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const progressSteps: string[] = [];
+      await editorClient.prepareModel("project-456", testCropBox, false, (step) => {
+        progressSteps.push(step);
+      });
+
+      expect(progressSteps).toEqual(["downloading", "cropping", "uploading", "done"]);
+    });
+
+    it("maps PRD §3 error codes to Vietnamese messages via messageFromError", () => {
+      const errReset = new EditorApiError("reset required", 409, "EDITOR_DESIGN_RESET_REQUIRED");
+      expect(messageFromError(errReset)).toBe("Cắt lại sẽ xoá thiết kế hiện tại. Bạn có chắc?");
+
+      const errNoRaw = new EditorApiError("no raw model", 409, "EDITOR_NO_RAW_MODEL");
+      expect(messageFromError(errNoRaw)).toBe("Project không có model scan để chuẩn bị.");
+
+      const errDesktop = new EditorApiError("desktop required", 400, "DESKTOP_REQUIRED");
+      expect(messageFromError(errDesktop)).toBe("Tính năng này cần KusStudio Desktop (Windows).");
     });
   });
 });

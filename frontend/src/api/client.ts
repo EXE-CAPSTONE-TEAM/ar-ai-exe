@@ -1,4 +1,5 @@
 import type {
+  CropBox,
   Design,
   DesignAsset,
   DesignAssetSource,
@@ -443,6 +444,15 @@ export const api = {
     return request<Job>(`/api/designs/${designId}/bake`, {
       method: "POST",
     });
+  },
+
+  async prepareModel(
+    projectId: string,
+    cropBox: CropBox,
+    confirmResetDesign = false,
+    onProgress?: (step: "downloading" | "cropping" | "cleaning" | "uploading" | "done") => void,
+  ): Promise<Job> {
+    return editorClient.prepareModel(projectId, cropBox, confirmResetDesign, onProgress);
   },
 
   async getJob(jobId: string): Promise<Job> {

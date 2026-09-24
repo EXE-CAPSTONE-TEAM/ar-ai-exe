@@ -1,4 +1,4 @@
-import type { Design, DesignConfig, EditorContext, ExportPackage, Job, User } from "../types";
+import type { CropBox, Design, DesignConfig, EditorContext, ExportPackage, Job, User } from "../types";
 import { storedAccessToken } from "./authStorage";
 import { getDesktopRuntime } from "./desktopRuntime";
 import { getActiveEditorSession } from "./editorLaunch";
@@ -158,6 +158,109 @@ export const editorClient = {
     return completeJob(job.id, claimToken, outputs);
   },
 
+  async prepareModel(
+    projectId: string,
+    cropBox: CropBox,
+    confirmResetDesign = false,
+    onProgress?: (step: "downloading" | "cropping" | "cleaning" | "uploading" | "done") => void,
+  ): Promise<Job> {
+    const runtime = await getDesktopRuntime();
+    if (!runtime.sidecarToken) {
+      throw new EditorApiError(
+        "KusStudio Desktop (Windows) is required for this action.",
+        400,
+        "DESKTOP_REQUIRED",
+      );
+    }
+
+    // 1. Create prepare job on KusShoes BE
+    onProgress?.("downloading");
+    const job = await request<Job>(`/api/v1/editor/projects/${projectId}/prepare`, {
+      method: "POST",
+      body: JSON.stringify({ cropBox, confirmResetDesign }),
+    });
+
+    // 2. Claim the job
+    const claim = await request<EditorJobClaimResponse>(`/api/v1/editor/jobs/${job.id}/claim`, {
+      method: "POST",
+      body: JSON.stringify({ deviceLabel: "desktop" }),
+    });
+
+    const claimToken = claim.claimToken ?? (claim as unknown as { claim_token?: string }).claim_token;
+    if (!claimToken) {
+      throw new EditorApiError("Claim response did not contain a claim token.", 502, "CLAIM_FAILED");
+    }
+
+    const sidecarBaseUrl = runtime.apiBaseUrl.replace(/\/+$/, "");
+
+    // 3. Post to sidecar /prepare with header X-Service-Token: runtime.sidecarToken and claim payload
+    onProgress?.("cropping");
+    let sidecarResponse: Response;
+    try {
+      sidecarResponse = await fetch(`${sidecarBaseUrl}/prepare`, {
+        method: "POST",
+        credentials: "omit",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Service-Token": runtime.sidecarToken,
+        },
+        body: JSON.stringify(claim.payload),
+      });
+    } catch (networkError) {
+      const code = "SIDECAR_UNAVAILABLE";
+      const message = String(networkError instanceof Error ? networkError.message : "Sidecar connection failed").slice(0, 500);
+      return failJob(job.id, claimToken, { code, message });
+    }
+
+    if (!sidecarResponse.ok) {
+      const errPayload = await sidecarResponse.json().catch(() => null);
+      const code = String(
+        errPayload?.code ??
+        errPayload?.error?.code ??
+        (sidecarResponse.status === 503 ? "WORKER_BUSY" : "SIDECAR_PREPARE_FAILED"),
+      ).slice(0, 64);
+      const message = String(
+        errPayload?.message ??
+        errPayload?.detail ??
+        errPayload?.error?.message ??
+        `Sidecar prepare failed with status ${sidecarResponse.status}`,
+      ).slice(0, 500);
+      return failJob(job.id, claimToken, { code, message });
+    }
+
+    let sidecarData: Record<string, unknown>;
+    try {
+      sidecarData = (await sidecarResponse.json()) as Record<string, unknown>;
+    } catch {
+      return failJob(job.id, claimToken, {
+        code: "SIDECAR_INVALID_RESPONSE",
+        message: "Sidecar returned an invalid JSON response.",
+      });
+    }
+
+    const rawOutputs = (sidecarData.outputs ?? sidecarData.exports) as Array<Record<string, unknown>> | undefined;
+    if (!Array.isArray(rawOutputs) || rawOutputs.length === 0) {
+      return failJob(job.id, claimToken, {
+        code: "SIDECAR_OUTPUT_MISSING",
+        message: "Sidecar completed without returning prepare outputs.",
+      });
+    }
+
+    const outputs = rawOutputs.map((item) => ({
+      format: String(item.format),
+      filePath: String(item.filePath ?? item.file_path),
+      fileSizeBytes: Number(item.fileSizeBytes ?? item.file_size_bytes),
+    }));
+
+    const cleanupReport = (sidecarData.cleanupReport ?? sidecarData.cleanup_report) as Record<string, unknown> | undefined;
+
+    // 4. Complete the job with X-Claim-Token and optional cleanupReport (no Authorization header)
+    onProgress?.("uploading");
+    const completedJob = await completeJob(job.id, claimToken, outputs, cleanupReport);
+    onProgress?.("done");
+    return completedJob;
+  },
+
   async getJob(jobId: string): Promise<Job> {
     return request<Job>(editorRoute(`/api/jobs/${jobId}`, `/api/v1/editor/jobs/${jobId}`));
   },
@@ -259,7 +362,15 @@ async function completeJob(
   jobId: string,
   claimToken: string,
   outputs: Array<{ format: string; filePath: string; fileSizeBytes: number }>,
+  cleanupReport?: Record<string, unknown>,
 ): Promise<Job> {
+  const body: Record<string, unknown> = {
+    outputs,
+    watermarkApplied: false,
+  };
+  if (cleanupReport !== undefined) {
+    body.cleanupReport = cleanupReport;
+  }
   const response = await fetch(apiUrl(`/api/v1/editor/jobs/${jobId}/complete`), {
     method: "POST",
     credentials: "omit",
@@ -268,10 +379,7 @@ async function completeJob(
       "X-Claim-Token": claimToken,
       ...csrfHeader("POST"),
     },
-    body: JSON.stringify({
-      outputs,
-      watermarkApplied: false,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {

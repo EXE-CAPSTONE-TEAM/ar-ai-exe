@@ -54,7 +54,11 @@ export function useEditorContext(projectId: string | null) {
         const loadedContext = await editorClient.getEditorContext(activeProjectId);
         if (cancelled) return;
         setContext(loadedContext);
-        setState(loadedContext.modelAsset?.status === "ready" ? "EDITOR_READY" : "MODEL_PROCESSING");
+        const isReadyForEditor =
+          loadedContext.modelStatus === "raw" ||
+          loadedContext.modelAsset?.status === "ready" ||
+          loadedContext.modelAsset?.status === "raw";
+        setState(isReadyForEditor ? "EDITOR_READY" : "MODEL_PROCESSING");
       } catch (error) {
         if (cancelled) return;
         if (error instanceof EditorApiError && error.code === "PROJECT_NOT_FOUND") {
