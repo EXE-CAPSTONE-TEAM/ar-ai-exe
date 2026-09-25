@@ -32,6 +32,9 @@ Mở PowerShell **mới** rồi kiểm tra: `git --version; node -v; cargo -V; u
 
 Blender 4.5.1: tự tải `blender-4.5.1-windows-x64.zip` từ trang release chính thức của Blender
 (Blender4.5) về máy, ví dụ `C:\artifacts\blender-4.5.1-windows-x64.zip`. Không cần giải nén.
+`download.blender.org` có thể trả 403 cho `curl`/script; khi đó tải từ mirror chính thức (vd.
+`https://mirrors.ocf.berkeley.edu/blender/release/Blender4.5/`). SHA-256 đúng:
+`ae2eadb2656d710ffd6ca74a899519fccb800c7a18e6c05b6f39627e48d17aed` (399 708 581 byte).
 
 ## Bước 1 — Lấy code
 
@@ -103,6 +106,9 @@ npm run build:production
 ```
 
 Script này: chuẩn bị Blender → đóng gói backend thành `kusshoes-backend.exe` (PyInstaller) → `tauri build`.
+Chạy từ PowerShell 7 (`pwsh`) mà báo `Get-FileHash ... is not recognized`: script con chạy bằng
+Windows PowerShell 5.1 và thừa hưởng `PSModulePath` của pwsh 7 — chạy `Remove-Item Env:PSModulePath`
+trong cửa sổ đó rồi chạy lại.
 Bộ cài nằm ở `desktop\src-tauri\target\release\bundle\` (`nsis\*.exe` hoặc `msi\*.msi`). Cài bản đó;
 bộ cài đăng ký scheme `kusshoes-editor://` với Windows.
 
@@ -145,6 +151,6 @@ Tiền đề: Vercel Production đã redeploy với `VITE_API_BASE_URL=https://1
 ## Khi lỗi — gửi gì cho team
 
 - Output lệnh bị lỗi (copy nguyên văn).
-- Log app: `%LOCALAPPDATA%\KusShoes Editor\runtime\logs\` (hoặc nút "Open logs"/"Copy diagnostics" trong app).
+- Log app: `%APPDATA%\com.kusshoes.editor\runtime\logs\` (`backend.log`, `backend.err.log`; hoặc nút "Open logs"/"Copy diagnostics" trong app).
 - Thời điểm lỗi (giờ VN) để đối chiếu log server.
 - Với T14: số thứ tự bước + ảnh chụp màn hình.
