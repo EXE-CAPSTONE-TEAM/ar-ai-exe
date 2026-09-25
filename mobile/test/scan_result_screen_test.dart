@@ -5,13 +5,9 @@ import 'package:shoe_visual_customizer_mobile/screens/scan_result_screen.dart';
 import 'package:shoe_visual_customizer_mobile/services/backend_api.dart';
 
 class _MockResultApi extends BackendApi {
-  _MockResultApi({
-    this.statusToReturn,
-    this.previewLocation = 'https://storage.example.com/models/raw.glb',
-  });
+  _MockResultApi({this.statusToReturn});
 
   final KiriStatus? statusToReturn;
-  final String previewLocation;
 
   String? savedProjectName;
   int saveCallCount = 0;
@@ -32,7 +28,9 @@ class _MockResultApi extends BackendApi {
   Future<String> getKiriPreviewLocationUrl({
     required String scanSessionId,
   }) async {
-    return previewLocation;
+    // A preview URL would mount ModelViewer, which needs a platform WebView that
+    // widget tests do not have; the screen keeps working without a preview.
+    throw Exception('no preview in widget tests');
   }
 
   @override
@@ -60,11 +58,6 @@ void main() {
   group('ScanResultScreen', () {
     testWidgets('displays raw model preview card, "Lưu project", and "Mở trên Desktop"',
         (tester) async {
-      tester.view.physicalSize = const Size(390, 844);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-
       final api = _MockResultApi(
         statusToReturn: const KiriStatus(
           scanSessionId: 'sess-100',
@@ -116,6 +109,8 @@ void main() {
       final saveButton = find.text('Lưu project');
       expect(saveButton, findsOneWidget);
 
+      await tester.ensureVisible(saveButton);
+      await tester.pump();
       await tester.tap(saveButton);
       await _flush(tester);
 
