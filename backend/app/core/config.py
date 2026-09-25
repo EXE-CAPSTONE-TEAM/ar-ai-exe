@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     rq_queue_name: str = "kusshoes-jobs"
     rq_job_timeout_seconds: int = 7200
     enable_inline_bake_fallback: bool = False
+    # False runs bakes in-process and never touches Redis. The desktop sidecar has no RQ
+    # worker, and any Redis on localhost (e.g. another stack's container) would strand its jobs.
+    bake_queue_enabled: bool = True
 
     # Stateless control-plane bake worker. Capabilities carry short-lived
     # storage access; this service never receives object-store credentials.

@@ -29,6 +29,7 @@ def main() -> None:
     os.environ.setdefault("DATABASE_URL", f"sqlite:///{(storage_root / 'app.db').as_posix()}")
     os.environ.setdefault("DATABASE_AUTO_CREATE_TABLES", "true")
     os.environ.setdefault("ENABLE_INLINE_BAKE_FALLBACK", "true")
+    os.environ.setdefault("BAKE_QUEUE_ENABLED", "false")
     os.environ.setdefault("ENABLE_REAL_RECONSTRUCTION", "false")
     os.environ.setdefault("AUTH_COOKIE_SECURE", "false")
     os.environ.setdefault(
