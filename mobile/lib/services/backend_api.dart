@@ -1,11 +1,15 @@
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:cookie_jar/cookie_jar.dart';
+import 'package:crypto/crypto.dart';
 import 'package:cross_file/cross_file.dart';
 import 'package:dio/dio.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../config/app_config.dart';
@@ -56,6 +60,19 @@ class LoginOutcome {
   final String? method;
 }
 
+/// Opens [url] in a browser tab and resolves with the URL it finally redirects
+/// to on [callbackUrlScheme]. Injected in tests.
+typedef WebAuthenticator = Future<String> Function({
+  required String url,
+  required String callbackUrlScheme,
+});
+
+Future<String> _browserTabAuthenticator({
+  required String url,
+  required String callbackUrlScheme,
+}) =>
+    FlutterWebAuth2.authenticate(url: url, callbackUrlScheme: callbackUrlScheme);
+
 class BackendApi {
   BackendApi({
     Dio? dio,
@@ -65,7 +82,9 @@ class BackendApi {
     String? kusshoesBaseUrl,
     String? computeBaseUrl,
     CookieJar? cookieJar,
-  })  : _kusshoesBaseUrl = kusshoesBaseUrl ?? AppConfig.kusshoesBaseUrl,
+    WebAuthenticator? webAuthenticator,
+  })  : _webAuthenticator = webAuthenticator ?? _browserTabAuthenticator,
+        _kusshoesBaseUrl = kusshoesBaseUrl ?? AppConfig.kusshoesBaseUrl,
         _computeBaseUrl = computeBaseUrl ?? AppConfig.computeBaseUrl,
         _tokenStorage = tokenStorage ?? TokenStorage(secureStorage),
         _injectedCookieJar = cookieJar,
@@ -101,6 +120,7 @@ class BackendApi {
 
   final Dio _dio;
   final Dio _storageDio;
+  final WebAuthenticator _webAuthenticator;
   final TokenStorage _tokenStorage;
   final String _kusshoesBaseUrl;
   final CookieJar? _injectedCookieJar;
@@ -201,6 +221,85 @@ class BackendApi {
     );
     await _storeAccessToken(data);
   }
+
+  /// Scheme of `MOBILE_GOOGLE_REDIRECT_URI` on KusShoes; the manifest's
+  /// flutter_web_auth_2 CallbackActivity listens on it.
+  static const googleCallbackScheme = 'vn.kusshoes.mobile';
+
+  /// Same Google sign-in as the KusShoes web app, run in a browser tab (Google
+  /// blocks embedded WebViews). The callback hands back a one-time code instead
+  /// of tokens; only this instance holds the PKCE verifier that redeems it, and
+  /// the exchange sets the refresh cookie on this client like `/auth/login`.
+  Future<void> signInWithGoogle() async {
+    final verifier = _newPkceVerifier();
+    final startUrl = Uri.parse('$_kusshoesBaseUrl/api/v1/auth/google').replace(
+      queryParameters: {
+        'client': 'mobile',
+        'code_challenge': _pkceS256(verifier),
+      },
+    );
+
+    final String callback;
+    try {
+      callback = await _webAuthenticator(
+        url: startUrl.toString(),
+        callbackUrlScheme: googleCallbackScheme,
+      );
+    } on PlatformException catch (error) {
+      if (error.code == 'CANCELED') {
+        throw const ApiException(
+          message: 'Bạn đã đóng trang đăng nhập Google.',
+          code: 'GOOGLE_SIGN_IN_CANCELED',
+        );
+      }
+      throw ApiException(
+        message: 'Không mở được trang đăng nhập Google: ${error.message ?? error.code}',
+        code: 'GOOGLE_SIGN_IN_UNAVAILABLE',
+      );
+    }
+
+    final params = Uri.parse(callback).queryParameters;
+    final errorCode = params['error'];
+    if (errorCode != null) {
+      throw ApiException(message: _googleSignInErrorMessage(errorCode), code: errorCode);
+    }
+    final code = params['code'];
+    if (code == null || code.isEmpty) {
+      throw const ApiException(
+        message: 'Đăng nhập Google không hoàn tất. Vui lòng thử lại.',
+        code: 'AUTH_OAUTH_FAILED',
+      );
+    }
+
+    final data = await _post(
+      '$_kusshoesBaseUrl/api/v1/auth/google/mobile/exchange',
+      body: {'code': code, 'code_verifier': verifier},
+    );
+    await _storeAccessToken(data);
+  }
+
+  static String _googleSignInErrorMessage(String code) {
+    switch (code) {
+      case 'AUTH_ACCOUNT_BANNED':
+        return 'Tài khoản bị vô hiệu hóa. Vui lòng liên hệ quản trị viên.';
+      case 'AUTH_GOOGLE_NO_EMAIL':
+        return 'Không lấy được email từ tài khoản Google này.';
+      case 'AUTH_OAUTH_STATE_INVALID':
+        return 'Phiên đăng nhập Google đã hết hạn. Vui lòng thử lại.';
+      default:
+        return 'Đăng nhập Google thất bại. Vui lòng thử lại.';
+    }
+  }
+
+  /// RFC 7636 verifier: 32 random bytes as unpadded base64url (43 chars).
+  static String _newPkceVerifier() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(32, (_) => random.nextInt(256));
+    return base64Url.encode(bytes).replaceAll('=', '');
+  }
+
+  static String _pkceS256(String verifier) =>
+      base64Url.encode(sha256.convert(ascii.encode(verifier)).bytes).replaceAll('=', '');
 
   Future<void> logout() async {
     if (_accessToken != null) {
