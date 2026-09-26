@@ -127,7 +127,7 @@ flutter build apk --release `
   --dart-define=KUSSHOES_WEB_URL=https://kusshoes.vercel.app
 ```
 
-Thiếu `--dart-define` thì app gọi domain mặc định cũ (`api.kusshoes.vn`, `compute.kusshoes.vn`) — không tồn tại.
+Ba `--dart-define` trên trùng với giá trị mặc định trong `mobile/lib/config/app_config.dart`; chỉ cần truyền khi trỏ sang server khác.
 APK: `mobile\build\app\outputs\flutter-apk\app-release.apk` → cài lên điện thoại.
 
 ## Bước 5 — T14: test end-to-end

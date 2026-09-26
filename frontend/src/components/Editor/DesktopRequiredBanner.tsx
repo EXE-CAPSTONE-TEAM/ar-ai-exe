@@ -9,7 +9,7 @@ type DesktopRequiredBannerProps = {
 export function DesktopRequiredBanner({
   onClose,
   deepLinkUrl = "kusshoes-editor://launch",
-  downloadUrl = "https://kusshoes.vn/download",
+  downloadUrl = "https://kusshoes.vercel.app/products",
 }: DesktopRequiredBannerProps) {
   return (
     <div className="desktop-required-banner" role="alert" aria-live="assertive">
@@ -63,7 +63,7 @@ type RawModelWebBannerProps = {
 
 export function RawModelWebBanner({
   deepLinkUrl = "kusshoes-editor://launch",
-  downloadUrl = "https://kusshoes.vn/download",
+  downloadUrl = "https://kusshoes.vercel.app/products",
 }: RawModelWebBannerProps) {
   return (
     <div className="raw-model-web-banner" role="status">

@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./storage/app.db"
     database_auto_create_tables: bool = True
     web_app_base_url: str = "http://localhost:5173"
-    marketing_login_url: str = "https://kusshoes.vn/login"
+    marketing_login_url: str = "https://kusshoes.vercel.app/login"
     jwt_secret_key: str = "local-dev-jwt-secret-change-me-32bytes-min"
     jwt_algorithm: str = "HS256"
     jwt_access_token_minutes: int = 1440

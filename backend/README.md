@@ -99,7 +99,7 @@ Important values:
 STORAGE_ROOT=storage
 DATABASE_URL=sqlite:///./storage/app.db
 DATABASE_AUTO_CREATE_TABLES=true
-MARKETING_LOGIN_URL=https://kusshoes.vn/login
+MARKETING_LOGIN_URL=https://kusshoes.vercel.app/login
 AUTH_COOKIE_NAME=kusshoes_access_token
 AUTH_COOKIE_DOMAIN=.kusshoes.vn
 AUTH_COOKIE_SECURE=true

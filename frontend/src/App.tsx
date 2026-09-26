@@ -74,7 +74,7 @@ import {
   noticeFromStatus,
 } from "./utils/editorMessages";
 
-const MARKETING_LOGIN_URL = import.meta.env.VITE_MARKETING_LOGIN_URL ?? "https://kusshoes.vn/login";
+const MARKETING_LOGIN_URL = import.meta.env.VITE_MARKETING_LOGIN_URL ?? "https://kusshoes.vercel.app/login";
 const DESKTOP_DEMO_PROJECT_ID = import.meta.env.VITE_DESKTOP_DEMO_PROJECT_ID ?? "proj_desktop_demo";
 const DESKTOP_CLOUD_API_BASE_URL = (import.meta.env.VITE_DESKTOP_CLOUD_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
 const DEFAULT_EDITOR_PERMISSIONS: EditorPermissions = { canEdit: true, canBake: true, canExport: true };
