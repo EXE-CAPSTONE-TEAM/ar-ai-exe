@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 
 import httpx
 
@@ -37,7 +39,7 @@ def test_reports_successful_kiri_call_with_expected_payload() -> None:
         cost_vnd=1500,
         user_id="c908600f-d74e-42eb-af8b-36f91d8e59ae",
         reference="serial-1",
-    )
+    ).result(timeout=2)
 
     assert len(seen) == 1
     request = seen[0]
@@ -73,7 +75,7 @@ def test_reports_failed_kiri_call() -> None:
         cost_vnd=0,
         user_id=None,
         reference="scan_abc",
-    )
+    ).result(timeout=2)
 
     assert len(seen) == 1
     body = json.loads(seen[0].content)
@@ -91,7 +93,7 @@ def test_control_plane_500_does_not_raise() -> None:
         client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
-    reporter.report_kiri_call(operation="download", status="success", cost_vnd=0)
+    reporter.report_kiri_call(operation="download", status="success", cost_vnd=0).result(timeout=2)
 
 
 def test_timeout_does_not_raise() -> None:
@@ -103,7 +105,7 @@ def test_timeout_does_not_raise() -> None:
         client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
-    reporter.report_kiri_call(operation="download", status="failed", cost_vnd=0)
+    reporter.report_kiri_call(operation="download", status="failed", cost_vnd=0).result(timeout=2)
 
 
 def test_unset_control_plane_base_url_skips_request() -> None:
@@ -119,7 +121,7 @@ def test_unset_control_plane_base_url_skips_request() -> None:
         client_factory=factory,
     )
 
-    reporter.report_kiri_call(operation="process", status="success", cost_vnd=100)
+    reporter.report_kiri_call(operation="process", status="success", cost_vnd=100).result(timeout=2)
 
     assert called is False
 
@@ -133,4 +135,38 @@ def test_missing_service_token_skips_request() -> None:
         client_factory=factory,
     )
 
-    reporter.report_kiri_call(operation="process", status="success", cost_vnd=100)
+    reporter.report_kiri_call(operation="process", status="success", cost_vnd=100).result(timeout=2)
+
+
+def test_report_kiri_call_returns_immediately_even_when_control_plane_is_slow() -> None:
+    """The HTTP call must run off the caller's thread (a scan request must never wait on it)."""
+    release = threading.Event()
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        release.wait(timeout=2)
+        return httpx.Response(201)
+
+    reporter = ApiCostReporter(
+        settings=cost_reporter_settings(),
+        client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    started = time.monotonic()
+    future = reporter.report_kiri_call(operation="status", status="success", cost_vnd=0)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.5, "report_kiri_call must not block on the network call"
+
+    release.set()
+    future.result(timeout=2)
+
+
+def test_unexpected_reporter_error_is_swallowed() -> None:
+    reporter = ApiCostReporter(settings=cost_reporter_settings())
+
+    def boom(**_kwargs: object) -> None:
+        raise RuntimeError("bug in the reporter")
+
+    reporter._report = boom  # type: ignore[method-assign]
+
+    reporter.report_kiri_call(operation="process", status="success", cost_vnd=0).result(timeout=2)

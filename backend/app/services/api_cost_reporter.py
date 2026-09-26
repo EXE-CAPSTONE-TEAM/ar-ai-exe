@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
 from typing import Any
 
@@ -17,12 +18,21 @@ logger = logging.getLogger(__name__)
 # care about the status code, never the body.
 MAX_API_COST_RESPONSE_BYTES = 8 * 1024
 
+# report_kiri_call() is invoked from synchronous request paths (e.g. the
+# polled GET .../kiri/status endpoint) and from the scan pipeline. The actual
+# network call must never block those callers, so it runs on this small,
+# bounded pool instead of the caller's thread. Bounded (rather than one
+# thread per call) so a slow/unreachable ledger can't pile up unbounded
+# threads under heavy polling.
+_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="api-cost-reporter")
+
 
 class ApiCostReporter:
     """Best-effort client for the control-plane API cost ledger (SRS SF-14 / BR-108).
 
-    Every method here swallows its own errors: a scan must never fail, retry
-    storm, or slow down because the cost ledger is unreachable or misconfigured.
+    Every method here swallows its own errors and never blocks its caller: a
+    scan must never fail, retry storm, or slow down because the cost ledger
+    is unreachable or misconfigured.
     """
 
     def __init__(
@@ -43,8 +53,14 @@ class ApiCostReporter:
         user_id: str | None = None,
         reference: str | None = None,
         occurred_at: datetime | None = None,
-    ) -> None:
-        self._report(
+    ) -> Future[None]:
+        """Fire-and-forget: the HTTP call runs on a background thread.
+
+        Returns the `Future` so callers that need to (tests, mainly) can wait
+        for completion; ordinary callers can and should ignore it.
+        """
+        return _EXECUTOR.submit(
+            self._report_safely,
             provider="kiri",
             operation=operation,
             status=status,
@@ -53,6 +69,13 @@ class ApiCostReporter:
             reference=reference,
             occurred_at=occurred_at,
         )
+
+    def _report_safely(self, **kwargs: Any) -> None:
+        try:
+            self._report(**kwargs)
+        except Exception:
+            # Never let an unexpected bug here surface anywhere but the log.
+            logger.warning("Unexpected error while reporting API cost.", exc_info=True)
 
     def _report(
         self,

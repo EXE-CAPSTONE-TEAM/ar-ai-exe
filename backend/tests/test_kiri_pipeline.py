@@ -554,6 +554,40 @@ def test_download_source_glb_cleans_temp_dir_on_failure(monkeypatch: pytest.Monk
         assert not Path(created_dirs[0]).exists()
 
 
+def test_download_source_glb_reports_failed_download_cost_on_extraction_failure() -> None:
+    with database_session() as db:
+        task = create_task(db)
+        storage = MemoryStorage()
+        cost_reporter = FakeCostReporter()
+
+        class CorruptZipKiriApi(FakeKiriApi):
+            def download_model_zip_to(self, _model_url: str, target_path: Path) -> Path:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                target_path.write_bytes(b"not-a-zip-file")
+                return target_path
+
+        service = KiriPipelineService(
+            db,
+            api=CorruptZipKiriApi("successful", b"not-a-zip-file"),
+            storage=storage,
+            cost_reporter=cost_reporter,
+        )
+
+        refreshed = service.refresh(task)
+
+        assert "invalid model ZIP" in (refreshed.error_message or "")
+        download_calls = [call for call in cost_reporter.calls if call["operation"] == "download"]
+        assert download_calls == [
+            {
+                "operation": "download",
+                "status": "failed",
+                "cost_vnd": 0,
+                "user_id": None,
+                "reference": "serial-1",
+            }
+        ]
+
+
 class database_session:
     def __enter__(self) -> Session:
         self.engine = create_engine("sqlite:///:memory:")
