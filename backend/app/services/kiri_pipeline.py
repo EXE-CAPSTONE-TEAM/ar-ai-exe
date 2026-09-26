@@ -165,15 +165,6 @@ class KiriPipelineService:
             return task
         try:
             provider_status = self.api.get_status(task.provider_serialize)
-        except Exception as exc:
-            self._report_kiri_cost(
-                task.scan_session, "status", "failed", task.provider_serialize
-            )
-            task.error_message = str(exc)[:2000]
-            self.db.commit()
-            return task
-        self._report_kiri_cost(task.scan_session, "status", "success", task.provider_serialize)
-        try:
             task.provider_status = provider_status
             if provider_status in PROVIDER_ACTIVE_STATUSES:
                 task.error_message = None
@@ -468,7 +459,6 @@ class KiriPipelineService:
 
     _KIRI_COST_SETTINGS_ATTR = {
         "process": "kiri_cost_vnd_process",
-        "status": "kiri_cost_vnd_status",
         "download": "kiri_cost_vnd_download",
     }
 

@@ -99,7 +99,6 @@ class Settings(BaseSettings):
     # ledger (SRS SF-14 / BR-108). Must come from the current KIRI price list;
     # 0 disables cost tracking for that operation without disabling reporting.
     kiri_cost_vnd_process: int = 0
-    kiri_cost_vnd_status: int = 0
     kiri_cost_vnd_download: int = 0
     api_cost_report_timeout_seconds: int = 5
     reconstruction_frame_fps: float = 2.0

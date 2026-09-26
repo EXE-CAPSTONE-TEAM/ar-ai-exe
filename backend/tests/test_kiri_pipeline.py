@@ -234,7 +234,7 @@ def test_start_processing_reports_failed_process_cost_when_kiri_rejects_upload()
         ]
 
 
-def test_refresh_reports_status_and_download_cost_on_success() -> None:
+def test_refresh_reports_download_cost_on_success() -> None:
     with database_session() as db:
         task = create_task(db)
         storage = MemoryStorage()
@@ -249,11 +249,13 @@ def test_refresh_reports_status_and_download_cost_on_success() -> None:
         service.refresh(task)
 
         operations = [(call["operation"], call["status"]) for call in cost_reporter.calls]
-        assert operations == [("status", "success"), ("download", "success")]
+        assert operations == [("download", "success")]
         assert all(call["reference"] == "serial-1" for call in cost_reporter.calls)
 
 
-def test_refresh_reports_failed_status_cost_on_transient_kiri_error() -> None:
+def test_refresh_does_not_report_status_polls_as_api_cost() -> None:
+    # Mobile polls /kiri/status every 3s; a poll is not a billable KIRI call, and
+    # recording each one would flood the control-plane ledger's call counts.
     with database_session() as db:
         task = create_task(db)
         cost_reporter = FakeCostReporter()
@@ -268,15 +270,7 @@ def test_refresh_reports_failed_status_cost_on_transient_kiri_error() -> None:
 
         service.refresh(task)
 
-        assert cost_reporter.calls == [
-            {
-                "operation": "status",
-                "status": "failed",
-                "cost_vnd": 0,
-                "user_id": None,
-                "reference": "serial-1",
-            }
-        ]
+        assert cost_reporter.calls == []
 
 
 def test_refresh_reports_control_plane_user_id_for_canonical_scans() -> None:
@@ -303,7 +297,7 @@ def test_refresh_reports_control_plane_user_id_for_canonical_scans() -> None:
         cost_reporter = FakeCostReporter()
         service = KiriPipelineService(
             db,
-            api=FakeKiriApi("processing", b""),
+            api=FakeKiriApi("successful", model_zip()),
             storage=MemoryStorage(),
             cost_reporter=cost_reporter,
         )
@@ -312,7 +306,7 @@ def test_refresh_reports_control_plane_user_id_for_canonical_scans() -> None:
 
         assert cost_reporter.calls == [
             {
-                "operation": "status",
+                "operation": "download",
                 "status": "success",
                 "cost_vnd": 0,
                 "user_id": "cp-user-9",
