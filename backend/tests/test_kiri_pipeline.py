@@ -148,6 +148,200 @@ def test_transient_kiri_error_keeps_task_retryable() -> None:
         assert "temporarily unavailable" in refreshed.error_message
 
 
+def test_start_processing_reports_successful_process_cost() -> None:
+    with database_session() as db:
+        user = User(name="Owner", email="owner-cost-ok@example.com")
+        project = Project(user=user, name="Single scan")
+        scan = ScanSession(
+            user=user,
+            project=project,
+            status=ScanStatus.QUEUED,
+            raw_video_path="videos/single.mp4",
+        )
+        db.add(scan)
+        db.commit()
+        db.refresh(scan)
+
+        task = KiriScanTask(scan_session=scan, status=KiriTaskStatus.QUEUED)
+        db.add(task)
+        db.commit()
+
+        storage = MemoryStorage()
+        storage.put_bytes("videos/single.mp4", b"fake_mp4_video", "video/mp4")
+
+        class RecordingKiriApi:
+            def upload_video(self, _path: Path) -> str:
+                return "serialize-cost-1"
+
+        cost_reporter = FakeCostReporter()
+        service = KiriPipelineService(
+            db, api=RecordingKiriApi(), storage=storage, cost_reporter=cost_reporter
+        )
+        service.start_processing(scan.id)
+
+        assert cost_reporter.calls == [
+            {
+                "operation": "process",
+                "status": "success",
+                "cost_vnd": 0,
+                "user_id": None,
+                "reference": "serialize-cost-1",
+            }
+        ]
+
+
+def test_start_processing_reports_failed_process_cost_when_kiri_rejects_upload() -> None:
+    with database_session() as db:
+        user = User(name="Owner", email="owner-cost-fail@example.com")
+        project = Project(user=user, name="Single scan")
+        scan = ScanSession(
+            user=user,
+            project=project,
+            status=ScanStatus.QUEUED,
+            raw_video_path="videos/single.mp4",
+        )
+        db.add(scan)
+        db.commit()
+        db.refresh(scan)
+
+        task = KiriScanTask(scan_session=scan, status=KiriTaskStatus.QUEUED)
+        db.add(task)
+        db.commit()
+
+        storage = MemoryStorage()
+        storage.put_bytes("videos/single.mp4", b"fake_mp4_video", "video/mp4")
+
+        class CrashingKiriApi:
+            def upload_video(self, _path: Path) -> str:
+                raise KiriError("Kiri rejected the upload")
+
+        cost_reporter = FakeCostReporter()
+        service = KiriPipelineService(
+            db, api=CrashingKiriApi(), storage=storage, cost_reporter=cost_reporter
+        )
+        service.start_processing(scan.id)
+
+        db.refresh(task)
+        assert task.status == KiriTaskStatus.FAILED
+        assert cost_reporter.calls == [
+            {
+                "operation": "process",
+                "status": "failed",
+                "cost_vnd": 0,
+                "user_id": None,
+                "reference": scan.id,
+            }
+        ]
+
+
+def test_refresh_reports_status_and_download_cost_on_success() -> None:
+    with database_session() as db:
+        task = create_task(db)
+        storage = MemoryStorage()
+        cost_reporter = FakeCostReporter()
+        service = KiriPipelineService(
+            db,
+            api=FakeKiriApi("successful", model_zip()),
+            storage=storage,
+            cost_reporter=cost_reporter,
+        )
+
+        service.refresh(task)
+
+        operations = [(call["operation"], call["status"]) for call in cost_reporter.calls]
+        assert operations == [("status", "success"), ("download", "success")]
+        assert all(call["reference"] == "serial-1" for call in cost_reporter.calls)
+
+
+def test_refresh_reports_failed_status_cost_on_transient_kiri_error() -> None:
+    with database_session() as db:
+        task = create_task(db)
+        cost_reporter = FakeCostReporter()
+        service = KiriPipelineService(
+            db,
+            api=FailingKiriApi(),
+            storage=MemoryStorage(),
+            crop_baker=object(),
+            mesh_cleanup=object(),
+            cost_reporter=cost_reporter,
+        )
+
+        service.refresh(task)
+
+        assert cost_reporter.calls == [
+            {
+                "operation": "status",
+                "status": "failed",
+                "cost_vnd": 0,
+                "user_id": None,
+                "reference": "serial-1",
+            }
+        ]
+
+
+def test_refresh_reports_control_plane_user_id_for_canonical_scans() -> None:
+    with database_session() as db:
+        scan = ScanSession(
+            status=ScanStatus.KIRI_PROCESSING,
+            control_plane_user_id="cp-user-9",
+            control_plane_project_id="cp-proj-9",
+            control_plane_completion_token="complete-token-9",
+        )
+        db.add(scan)
+        db.commit()
+        db.refresh(scan)
+        task = KiriScanTask(
+            scan_session=scan,
+            provider_serialize="serial-9",
+            provider_status="processing",
+            status=KiriTaskStatus.PROCESSING,
+        )
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+
+        cost_reporter = FakeCostReporter()
+        service = KiriPipelineService(
+            db,
+            api=FakeKiriApi("processing", b""),
+            storage=MemoryStorage(),
+            cost_reporter=cost_reporter,
+        )
+
+        service.refresh(task)
+
+        assert cost_reporter.calls == [
+            {
+                "operation": "status",
+                "status": "success",
+                "cost_vnd": 0,
+                "user_id": "cp-user-9",
+                "reference": "serial-9",
+            }
+        ]
+
+
+def test_cost_reporter_exception_never_breaks_the_pipeline() -> None:
+    with database_session() as db:
+        task = create_task(db)
+        storage = MemoryStorage()
+
+        class ExplodingCostReporter:
+            def report_kiri_call(self, **_kwargs: Any) -> None:
+                raise RuntimeError("ledger unreachable")
+
+        service = KiriPipelineService(
+            db,
+            api=FakeKiriApi("successful", model_zip()),
+            storage=storage,
+            cost_reporter=ExplodingCostReporter(),
+        )
+
+        refreshed = service.refresh(task)
+
+        assert refreshed.status == KiriTaskStatus.READY_FOR_CROP
+
+
 def test_publish_saved_project_publishes_raw_glb_to_control_plane() -> None:
     with database_session() as db:
         scan = ScanSession(
@@ -393,6 +587,14 @@ def model_zip() -> bytes:
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr("result/model.glb", b"glTF" + b"\x00" * 16)
     return buffer.getvalue()
+
+
+class FakeCostReporter:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def report_kiri_call(self, **kwargs: Any) -> None:
+        self.calls.append(kwargs)
 
 
 class FakeControlPlaneClient:
