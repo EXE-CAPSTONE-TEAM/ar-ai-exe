@@ -186,6 +186,7 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
     final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!opened && mounted) {
       await Clipboard.setData(ClipboardData(text: targetUrl));
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Đã sao chép liên kết mở trên Desktop.')),
       );
@@ -363,7 +364,7 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                                   Text(
                                     _loadingPreview
                                         ? 'ĐANG TẢI MÔ HÌNH 3D...'
-                                        : 'ĐANG DỰNG LƯỚI 3D RAW (${_progress}%)',
+                                        : 'ĐANG DỰNG LƯỚI 3D RAW ($_progress%)',
                                     style: AppTheme.monoFont(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w700,

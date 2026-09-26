@@ -316,4 +316,3 @@ def test_bake_worker_request_rejects_unknown_root_fields():
     payload["unknown_extra_root_field"] = "unexpected"
     with pytest.raises(ValidationError):
         BakeWorkerRequest.model_validate(payload)
-
