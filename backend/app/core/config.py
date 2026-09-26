@@ -13,13 +13,20 @@ class Settings(BaseSettings):
     app_name: str = "Shoe Visual Customizer API"
     environment: str = "local"
     debug: bool = True
+    app_role: str = "full"
     api_prefix: str = "/api"
+    signed_url_ttl_seconds: int = 900  # provenance: NFR-SEC-05, spec §Parameter & Data Provenance
 
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        # Packaged Tauri webview origins (Windows serves http(s)://tauri.localhost, others
+        # tauri://localhost) — the desktop editor calls this sidecar from them (spec §E.4).
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+        "tauri://localhost",
     ]
 
     storage_root: Path = Path("storage")
@@ -33,7 +40,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./storage/app.db"
     database_auto_create_tables: bool = True
     web_app_base_url: str = "http://localhost:5173"
-    marketing_login_url: str = "https://kusshoes.vn/login"
+    marketing_login_url: str = "https://kusshoes.vercel.app/login"
     jwt_secret_key: str = "local-dev-jwt-secret-change-me-32bytes-min"
     jwt_algorithm: str = "HS256"
     jwt_access_token_minutes: int = 1440
@@ -51,11 +58,16 @@ class Settings(BaseSettings):
     rq_queue_name: str = "kusshoes-jobs"
     rq_job_timeout_seconds: int = 7200
     enable_inline_bake_fallback: bool = False
+    # False runs bakes in-process and never touches Redis. The desktop sidecar has no RQ
+    # worker, and any Redis on localhost (e.g. another stack's container) would strand its jobs.
+    bake_queue_enabled: bool = True
 
     # Stateless control-plane bake worker. Capabilities carry short-lived
     # storage access; this service never receives object-store credentials.
     control_plane_service_token: str = ""
     worker_allowed_storage_origins: list[str] = []
+    # Where the desktop sidecar saves exports (spec §E.5); None = the user's ~/Downloads.
+    desktop_downloads_dir: Path | None = None
     worker_request_timeout_seconds: int = 600
     worker_max_source_size_mb: int = 500
     worker_max_asset_size_mb: int = 5
@@ -83,6 +95,12 @@ class Settings(BaseSettings):
     kiri_request_timeout_seconds: int = 180
     kiri_preview_ticket_minutes: int = 5
     kiri_max_download_size_mb: int = 500
+    # VND cost per billable KIRI call, reported to the control-plane API cost
+    # ledger (SRS SF-14 / BR-108). Must come from the current KIRI price list;
+    # 0 disables cost tracking for that operation without disabling reporting.
+    kiri_cost_vnd_process: int = 0
+    kiri_cost_vnd_download: int = 0
+    api_cost_report_timeout_seconds: int = 5
     reconstruction_frame_fps: float = 2.0
     reconstruction_max_frames_per_pass: int = 90
     reconstruction_min_brightness: float = 28.0
@@ -101,6 +119,10 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
+
+    def model_post_init(self, __context: object) -> None:
+        if self.app_role.lower() == "relay":
+            self.control_plane_service_token = ""
 
     @property
     def resolved_storage_root(self) -> Path:

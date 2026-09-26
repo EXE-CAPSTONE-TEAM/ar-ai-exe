@@ -303,7 +303,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
                   // Google OAuth button
                   OutlinedButton.icon(
-                    onPressed: _isBusy ? null : () => _continueAsGuest(),
+                    onPressed: _isBusy ? null : _signInWithGoogle,
                     icon: const Icon(Icons.g_mobiledata, size: 28, color: AppTheme.orange),
                     label: const Text('Tiếp tục với Google / Gmail'),
                   ),
@@ -363,6 +363,30 @@ class _AuthScreenState extends State<AuthScreen> {
       setState(() => _error = error.message);
     } catch (error) {
       setState(() => _error = 'Xác thực thất bại: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _isBusy = false);
+      }
+    }
+  }
+
+  Future<void> _signInWithGoogle() async {
+    setState(() {
+      _isBusy = true;
+      _error = null;
+    });
+    try {
+      await _api.signInWithGoogle();
+      _openScanner(isGuest: false);
+    } on ApiException catch (error) {
+      // Closing the Google tab is a choice, not a failure worth a red message.
+      if (mounted && error.code != 'GOOGLE_SIGN_IN_CANCELED') {
+        setState(() => _error = error.message);
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = 'Đăng nhập Google thất bại: $error');
+      }
     } finally {
       if (mounted) {
         setState(() => _isBusy = false);

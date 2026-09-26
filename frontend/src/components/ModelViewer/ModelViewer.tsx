@@ -5,7 +5,7 @@ import { Fragment, Suspense, useEffect, useMemo, useRef } from "react";
 import type { RefObject } from "react";
 import * as THREE from "three";
 
-import type { DesignConfig, StickerLayer, TextLayer } from "../../types";
+import type { CropBox, DesignConfig, StickerLayer, TextLayer } from "../../types";
 import { isCustomizableMeshName, resolveCustomizableMeshName } from "../../utils/customizationZones";
 import { ErrorBoundary } from "../Layout/ErrorBoundary";
 
@@ -27,6 +27,9 @@ type ModelViewerProps = {
   onMeshBoundsUpdate: (bounds: { center: [number, number, number]; size: [number, number, number] }) => void;
   onSurfaceApplyResult: (message: string) => void;
   gizmoMode: "translate" | "rotate" | "scale";
+  isCropMode?: boolean;
+  cropBox?: CropBox | null;
+  onCropBoxChange?: (cropBox: CropBox) => void;
 };
 
 export function ModelViewer({
@@ -39,6 +42,9 @@ export function ModelViewer({
   previewErrorMessage,
   surfaceApplyRequest,
   gizmoMode,
+  isCropMode = false,
+  cropBox = null,
+  onCropBoxChange,
   onConfigChange,
   onActiveLayerChange,
   onMeshBoundsUpdate,
@@ -74,6 +80,9 @@ export function ModelViewer({
                    isSaving={isSaving}
                    surfaceApplyRequest={surfaceApplyRequest}
                    gizmoMode={gizmoMode}
+                   isCropMode={isCropMode}
+                   cropBox={cropBox}
+                   onCropBoxChange={onCropBoxChange}
                    onConfigChange={onConfigChange}
                    onActiveLayerChange={onActiveLayerChange}
                    onMeshBoundsUpdate={onMeshBoundsUpdate}
@@ -133,6 +142,9 @@ type ShoeModelProps = {
   onMeshBoundsUpdate: (bounds: { center: [number, number, number]; size: [number, number, number] }) => void;
   onSurfaceApplyResult: (message: string) => void;
   gizmoMode: "translate" | "rotate" | "scale";
+  isCropMode?: boolean;
+  cropBox?: CropBox | null;
+  onCropBoxChange?: (cropBox: CropBox) => void;
 };
 
 function ShoeModel({
@@ -143,6 +155,9 @@ function ShoeModel({
   isSaving,
   surfaceApplyRequest,
   gizmoMode,
+  isCropMode = false,
+  cropBox = null,
+  onCropBoxChange,
   onConfigChange,
   onActiveLayerChange,
   onMeshBoundsUpdate,
@@ -225,6 +240,12 @@ function ShoeModel({
           const isCustom = isCustomizableMeshName(node.name, node.geometry?.name);
           const applyConfig = (mat: THREE.Material) => {
             const m = mat.clone();
+            if (isCropMode) {
+              m.transparent = true;
+              m.opacity = 0.55;
+              m.needsUpdate = true;
+              return m;
+            }
             if (m instanceof THREE.MeshStandardMaterial || m instanceof THREE.MeshPhysicalMaterial) {
               m.color = new THREE.Color(config?.baseColor ?? "#ffffff");
               m.roughness = config?.material.roughness ?? 1;
@@ -275,7 +296,7 @@ function ShoeModel({
         node.receiveShadow = false;
       }
     });
-  }, [config?.baseColor, config?.material.metallic, config?.material.roughness, gltf.scene, activeLayerId]);
+  }, [config?.baseColor, config?.material.metallic, config?.material.roughness, gltf.scene, activeLayerId, isCropMode]);
 
   useEffect(() => {
     if (!surfaceApplyRequest || handledSurfaceApplyRequest.current === surfaceApplyRequest) {
@@ -352,32 +373,44 @@ function ShoeModel({
         infiniteGrid
       />
 
-      {config?.stickers
-        .filter((sticker) => !hiddenLayerSet.has(sticker.id))
-        .map((sticker) => (
-          <StickerPlane
-            key={sticker.id}
-            sticker={sticker}
-            modelCenter={modelMetrics.center}
-            isActive={sticker.id === activeLayerId}
-            isSaving={isSaving}
-            gizmoMode={gizmoMode}
-            onTransformEnd={(pos, rot, s) => handleTransformEnd(sticker.id, false, pos, rot, s)}
-          />
-        ))}
-      {config?.texts
-        .filter((textLayer) => !hiddenLayerSet.has(textLayer.id))
-        .map((textLayer) => (
-          <TextPlane
-            key={textLayer.id}
-            layer={textLayer}
-            modelCenter={modelMetrics.center}
-            isActive={textLayer.id === activeLayerId}
-            isSaving={isSaving}
-            gizmoMode={gizmoMode}
-            onTransformEnd={(pos, rot, s) => handleTransformEnd(textLayer.id, true, pos, rot, s)}
-          />
-        ))}
+      {isCropMode && cropBox && (
+        <CropBoxGizmo
+          cropBox={cropBox}
+          modelMetrics={modelMetrics}
+          gizmoMode={gizmoMode}
+          isSaving={isSaving}
+          onCropBoxChange={onCropBoxChange}
+        />
+      )}
+
+      {!isCropMode &&
+        config?.stickers
+          .filter((sticker) => !hiddenLayerSet.has(sticker.id))
+          .map((sticker) => (
+            <StickerPlane
+              key={sticker.id}
+              sticker={sticker}
+              modelCenter={modelMetrics.center}
+              isActive={sticker.id === activeLayerId}
+              isSaving={isSaving}
+              gizmoMode={gizmoMode}
+              onTransformEnd={(pos, rot, s) => handleTransformEnd(sticker.id, false, pos, rot, s)}
+            />
+          ))}
+      {!isCropMode &&
+        config?.texts
+          .filter((textLayer) => !hiddenLayerSet.has(textLayer.id))
+          .map((textLayer) => (
+            <TextPlane
+              key={textLayer.id}
+              layer={textLayer}
+              modelCenter={modelMetrics.center}
+              isActive={textLayer.id === activeLayerId}
+              isSaving={isSaving}
+              gizmoMode={gizmoMode}
+              onTransformEnd={(pos, rot, s) => handleTransformEnd(textLayer.id, true, pos, rot, s)}
+            />
+          ))}
     </group>
   );
 }
@@ -913,4 +946,129 @@ function escapeXml(value: string): string {
 
 function escapeAttribute(value: string): string {
   return escapeXml(value).replace(/"/g, "&quot;");
+}
+
+function CropBoxGizmo({
+  cropBox,
+  modelMetrics,
+  gizmoMode,
+  isSaving,
+  onCropBoxChange,
+}: {
+  cropBox: CropBox;
+  modelMetrics: { bounds: THREE.Box3; center: THREE.Vector3; size: THREE.Vector3; previewScale: number };
+  gizmoMode: "translate" | "rotate" | "scale";
+  isSaving: boolean;
+  onCropBoxChange?: (cropBox: CropBox) => void;
+}) {
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  const sx = modelMetrics.size.x > 0 ? modelMetrics.size.x : 1;
+  const sy = modelMetrics.size.y > 0 ? modelMetrics.size.y : 1;
+  const sz = modelMetrics.size.z > 0 ? modelMetrics.size.z : 1;
+
+  const position = useMemo(() => {
+    return new THREE.Vector3(
+      cropBox.center.x * sx,
+      cropBox.center.y * sy,
+      cropBox.center.z * sz,
+    );
+  }, [cropBox.center.x, cropBox.center.y, cropBox.center.z, sx, sy, sz]);
+
+  const rotation = useMemo(() => {
+    return new THREE.Euler(
+      THREE.MathUtils.degToRad(cropBox.rotation.x),
+      THREE.MathUtils.degToRad(cropBox.rotation.y),
+      THREE.MathUtils.degToRad(cropBox.rotation.z),
+    );
+  }, [cropBox.rotation.x, cropBox.rotation.y, cropBox.rotation.z]);
+
+  const scale = useMemo(() => {
+    return new THREE.Vector3(
+      Math.max(cropBox.size.x * sx, 0.01),
+      Math.max(cropBox.size.y * sy, 0.01),
+      Math.max(cropBox.size.z * sz, 0.01),
+    );
+  }, [cropBox.size.x, cropBox.size.y, cropBox.size.z, sx, sy, sz]);
+
+  useEffect(() => {
+    if (meshRef.current) {
+      meshRef.current.position.copy(position);
+      meshRef.current.rotation.copy(rotation);
+      meshRef.current.scale.copy(scale);
+    }
+  }, [position, rotation, scale]);
+
+  const handleCommit = () => {
+    if (!meshRef.current || !onCropBoxChange) return;
+
+    const p = meshRef.current.position;
+    const r = meshRef.current.rotation;
+    const s = meshRef.current.scale;
+
+    const normDeg = (deg: number) => {
+      let d = deg % 360;
+      if (d > 180) d -= 360;
+      if (d < -180) d += 360;
+      return Math.round(d * 100) / 100;
+    };
+
+    // provenance: bounds mirror app/schemas/scan.py CropBox and KusShoes EditorCropBox (centre ±0.5, size (0.01, 1], rotation ±180)
+    const nextBox: CropBox = {
+      center: {
+        x: clamp(p.x / sx, -0.5, 0.5),
+        y: clamp(p.y / sy, -0.5, 0.5),
+        z: clamp(p.z / sz, -0.5, 0.5),
+      },
+      size: {
+        x: clamp(Math.abs(s.x) / sx, 0.0101, 1.0),
+        y: clamp(Math.abs(s.y) / sy, 0.0101, 1.0),
+        z: clamp(Math.abs(s.z) / sz, 0.0101, 1.0),
+      },
+      rotation: {
+        x: clamp(normDeg(THREE.MathUtils.radToDeg(r.x)), -180, 180),
+        y: clamp(normDeg(THREE.MathUtils.radToDeg(r.y)), -180, 180),
+        z: clamp(normDeg(THREE.MathUtils.radToDeg(r.z)), -180, 180),
+      },
+      coordinateSpace: "normalized",
+    };
+
+    onCropBoxChange(nextBox);
+  };
+
+  return (
+    <Fragment>
+      <mesh
+        ref={meshRef}
+        position={position}
+        rotation={rotation}
+        scale={scale}
+        name="crop_box_wireframe"
+      >
+        <boxGeometry args={[1, 1, 1]} />
+        <meshBasicMaterial
+          color="#ff2a0a"
+          wireframe
+          transparent
+          opacity={0.8}
+        />
+        <Edges color="#ff2a0a" renderOrder={1001} />
+        <meshStandardMaterial
+          color="#ff2a0a"
+          transparent
+          opacity={0.08}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {!isSaving && onCropBoxChange && (
+        <LayerTransformControls
+          objectRef={meshRef as RefObject<THREE.Object3D>}
+          mode={gizmoMode}
+          size={1.0}
+          onCommit={handleCommit}
+        />
+      )}
+    </Fragment>
+  );
 }

@@ -170,8 +170,27 @@ export function noticeFromStatus(message: string, isBusy: boolean): EditorNotice
   };
 }
 
+// provenance: PRD §3 user-facing error message table
+export const PRD_ERROR_MESSAGES: Record<string, string> = {
+  EDITOR_MODEL_NOT_READY: "Model chưa được chuẩn bị. Mở KusStudio Desktop để cắt & làm sạch.",
+  JOB_ALREADY_CLAIMED: "Job đang được xử lý trên một máy khác.",
+  JOB_NOT_CLAIMABLE: "Job này đã kết thúc. Vui lòng chạy lại.",
+  JOB_CLAIM_SUPERSEDED: "Job đã được chạy lại trên máy khác.",
+  JOB_CLAIM_MISMATCH: "Phiên xử lý không hợp lệ.",
+  PROJ_BAKE_IN_PROGRESS: "Đang có một tác vụ chạy cho project này.",
+  EDITOR_NO_RAW_MODEL: "Project không có model scan để chuẩn bị.",
+  EDITOR_MODEL_CHANGED: "Model đã thay đổi. Vui lòng chạy lại.",
+  QUOTA_EXPORT_EXCEEDED: "Bạn đã dùng hết lượt export của gói.",
+  EDITOR_DESIGN_RESET_REQUIRED: "Cắt lại sẽ xoá thiết kế hiện tại. Bạn có chắc?",
+  JOB_OUTPUT_INVALID: "Kết quả tải lên không hợp lệ. Đang thử lại…",
+  DESKTOP_REQUIRED: "Tính năng này cần KusStudio Desktop (Windows).",
+};
+
 export function messageFromError(error: unknown): string {
   if (error instanceof EditorApiError) {
+    if (PRD_ERROR_MESSAGES[error.code]) {
+      return PRD_ERROR_MESSAGES[error.code];
+    }
     return messageFromApiError(error.message, error.status);
   }
   if (error instanceof ApiError) {

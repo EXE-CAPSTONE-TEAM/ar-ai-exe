@@ -1,0 +1,23 @@
+# KIRI relay (KusShoes spec §D, ADR-003/010): scan intake + KIRI API calls only.
+# Deliberately NO Blender, OpenMVS, COLMAP or ffmpeg — all 3D processing runs on KusStudio Desktop.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    APP_ROLE=relay \
+    DATABASE_AUTO_CREATE_TABLES=false
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+RUN useradd --system --uid 10001 --home-dir /app relay \
+    && mkdir -p /app/storage \
+    && chown -R relay:relay /app
+USER relay
+
+EXPOSE 8010
+# Schema is managed by Alembic (Neon database kiri_relay); uvicorn trusts the nginx proxy headers.
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8010 --proxy-headers --forwarded-allow-ips='*'"]

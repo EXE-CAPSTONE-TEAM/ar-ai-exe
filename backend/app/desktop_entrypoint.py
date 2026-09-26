@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 
@@ -28,11 +29,21 @@ def main() -> None:
     os.environ.setdefault("DATABASE_URL", f"sqlite:///{(storage_root / 'app.db').as_posix()}")
     os.environ.setdefault("DATABASE_AUTO_CREATE_TABLES", "true")
     os.environ.setdefault("ENABLE_INLINE_BAKE_FALLBACK", "true")
+    os.environ.setdefault("BAKE_QUEUE_ENABLED", "false")
     os.environ.setdefault("ENABLE_REAL_RECONSTRUCTION", "false")
     os.environ.setdefault("AUTH_COOKIE_SECURE", "false")
     os.environ.setdefault(
         "CORS_ORIGINS",
-        f'["http://127.0.0.1:{args.frontend_port}", "http://localhost:{args.frontend_port}"]',
+        json.dumps(
+            [
+                f"http://127.0.0.1:{args.frontend_port}",
+                f"http://localhost:{args.frontend_port}",
+                # Packaged Tauri webview origins (KusShoes spec §E.4).
+                "http://tauri.localhost",
+                "https://tauri.localhost",
+                "tauri://localhost",
+            ]
+        ),
     )
     os.environ.setdefault("BLENDER_BIN", str(blender_bin))
 

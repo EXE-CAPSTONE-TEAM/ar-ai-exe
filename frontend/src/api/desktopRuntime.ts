@@ -24,6 +24,8 @@ const FALLBACK_RUNTIME: DesktopRuntime = {
   logsPath: "",
   appVersion: "dev",
   lastError: null,
+  // No shell, no handshake: browser/web mode never gets sidecar credentials.
+  sidecarToken: null,
 };
 
 export function hasDesktopRuntimeBridge(): boolean {

@@ -15,7 +15,7 @@ class AppConfig {
 
   static const kusshoesBaseUrl = String.fromEnvironment(
     'KUSSHOES_BASE_URL',
-    defaultValue: 'https://api.kusshoes.vn',
+    defaultValue: 'https://136.85.55.175.sslip.io',
   );
 
   /// Placeholder origin for `/api/system/*` probes made before a scan is
@@ -23,7 +23,7 @@ class AppConfig {
   /// comes from the bootstrap response's `compute_api_url`.
   static const computeBaseUrl = String.fromEnvironment(
     'COMPUTE_BASE_URL',
-    defaultValue: 'https://compute.kusshoes.vn',
+    defaultValue: 'https://relay.136.85.55.175.sslip.io',
   );
 
   /// Public marketing site and Kus Studio web app.

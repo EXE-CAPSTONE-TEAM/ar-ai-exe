@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 from app.core.config import get_settings
@@ -32,6 +33,12 @@ class CropBakeService:
             encoding="utf-8",
         )
         self._write_script(script_path)
+        # The script imports the shared crop maths (axis + Euler-order conversion) from beside itself.
+        crop_math_source = Path(__file__).with_name("crop_math.py")
+        if not crop_math_source.is_file():
+            # Frozen sidecar built without `--add-data` for crop_math.py (build-backend-sidecar.ps1).
+            raise RuntimeError(f"Blender crop bake is missing its helper module: {crop_math_source}")
+        shutil.copyfile(crop_math_source, work_dir / "crop_math.py")
         result = self.runner.run(
             [
                 self.blender.require_available(),
@@ -63,6 +70,9 @@ import sys
 import bpy
 import mathutils
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import crop_math  # noqa: E402  (copied next to this script by CropBakeService)
+
 
 def clear_scene():
     bpy.ops.object.select_all(action="SELECT")
@@ -76,19 +86,11 @@ def mesh_objects():
     ]
 
 
-def scene_bounds(objects):
-    minimum = mathutils.Vector((float("inf"), float("inf"), float("inf")))
-    maximum = mathutils.Vector((float("-inf"), float("-inf"), float("-inf")))
+def world_corners(objects):
     for obj in objects:
         for corner in obj.bound_box:
             world = obj.matrix_world @ mathutils.Vector(corner)
-            minimum.x = min(minimum.x, world.x)
-            minimum.y = min(minimum.y, world.y)
-            minimum.z = min(minimum.z, world.z)
-            maximum.x = max(maximum.x, world.x)
-            maximum.y = max(maximum.y, world.y)
-            maximum.z = max(maximum.z, world.z)
-    return minimum, maximum
+            yield (world.x, world.y, world.z)
 
 
 def main():
@@ -103,29 +105,13 @@ def main():
     if not objects:
         raise RuntimeError("Source GLB does not contain a mesh.")
 
-    minimum, maximum = scene_bounds(objects)
-    bounds_size = maximum - minimum
-    bounds_center = (minimum + maximum) * 0.5
-    center = crop["center"]
-    size = crop["size"]
-    rotation = crop.get("rotation") or {"x": 0, "y": 0, "z": 0}
-
-    crop_center = bounds_center + mathutils.Vector((
-        center["x"] * bounds_size.x,
-        center["y"] * bounds_size.y,
-        center["z"] * bounds_size.z,
-    ))
-    crop_size = mathutils.Vector((
-        max(bounds_size.x * size["x"], 0.000001),
-        max(bounds_size.y * size["y"], 0.000001),
-        max(bounds_size.z * size["z"], 0.000001),
-    ))
-
-    bpy.ops.mesh.primitive_cube_add(size=1, location=crop_center)
+    # The crop box is authored in glTF (Y-up) space with three.js Euler order; crop_math converts
+    # it to Blender's Z-up world as an explicit matrix (see crop_math module docstring).
+    bounds_center, bounds_size = crop_math.gltf_bounds(world_corners(objects))
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(0.0, 0.0, 0.0))
     cutter = bpy.context.active_object
     cutter.name = "kiri_crop_bounds"
-    cutter.dimensions = crop_size
-    cutter.rotation_euler = tuple(math.radians(rotation[axis]) for axis in ("x", "y", "z"))
+    cutter.matrix_world = mathutils.Matrix(crop_math.cutter_matrix(crop, bounds_center, bounds_size))
     bpy.context.view_layer.objects.active = cutter
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
 

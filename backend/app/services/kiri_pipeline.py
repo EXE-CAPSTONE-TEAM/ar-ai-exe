@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import io
+import logging
 import shutil
 import tempfile
 import zipfile
@@ -23,17 +23,18 @@ from app.models import (
     ScanStatus,
 )
 from app.schemas.scan import CropBox, KiriStatusResponse
+from app.services.api_cost_reporter import ApiCostReporter
 from app.services.command_runner import CommandRunner
 from app.services.control_plane_mobile import ControlPlaneMobileClient
 from app.services.crop_baker import CropBakeService
-from app.services.file_helpers import write_json
 from app.services.kiri_client import KiriApiClient, KiriError
-from app.services.mesh_cleanup import MeshCleanupReport, MeshCleanupService
-from app.services.model_assets import ModelAssetFiles, ModelAssetService
-from app.services.placeholders import PLACEHOLDER_PNG
+from app.services.mesh_cleanup import MeshCleanupService
+from app.services.model_assets import ModelAssetService
 from app.services.scan_sessions import ScanSessionService
 from app.services.storage import StorageService, get_storage_service
 
+
+logger = logging.getLogger(__name__)
 
 PROVIDER_ACTIVE_STATUSES = {"uploading", "queuing", "queued", "processing"}
 TERMINAL_TASK_STATUSES = {KiriTaskStatus.READY, KiriTaskStatus.FAILED, KiriTaskStatus.EXPIRED}
@@ -50,6 +51,7 @@ class KiriPipelineService:
         crop_baker: CropBakeService | None = None,
         mesh_cleanup: MeshCleanupService | None = None,
         control_plane: ControlPlaneMobileClient | None = None,
+        cost_reporter: ApiCostReporter | None = None,
     ) -> None:
         self.db = db
         self.settings = get_settings()
@@ -59,6 +61,7 @@ class KiriPipelineService:
         self.crop_baker = crop_baker or CropBakeService()
         self.mesh_cleanup = mesh_cleanup or MeshCleanupService()
         self.control_plane = control_plane or ControlPlaneMobileClient()
+        self.cost_reporter = cost_reporter or ApiCostReporter()
         self.asset_service = ModelAssetService(db, storage=self.storage)
         self.scan_service = ScanSessionService(db)
 
@@ -118,26 +121,37 @@ class KiriPipelineService:
         scan_session = task.scan_session
         if task.provider_serialize or task.status in TERMINAL_TASK_STATUSES:
             return
+        video_key = scan_session.raw_video_path or scan_session.side_video_path
+        if not video_key:
+            self._fail(task, "Scan video is required.")
+            return
         try:
             task.status = KiriTaskStatus.UPLOADING
             self.db.commit()
-            with tempfile.TemporaryDirectory(prefix=f"kiri-{scan_session_id}-") as raw_dir:
-                work_dir = Path(raw_dir)
-                side_path = work_dir / "side-orbit.mp4"
-                top_path = work_dir / "top-orbit.mp4"
-                merged_path = work_dir / "kiri-scan.mp4"
-                side_key = scan_session.side_video_path or scan_session.raw_video_path
-                if not side_key:
-                    raise KiriError("Scan video is required.")
-                if scan_session.top_video_path and scan_session.side_video_path:
-                    side_path.write_bytes(self.storage.get_bytes(side_key))
-                    top_path.write_bytes(self.storage.get_bytes(scan_session.top_video_path))
-                    self._merge_videos(side_path, top_path, merged_path)
-                    upload_target = merged_path
-                else:
-                    side_path.write_bytes(self.storage.get_bytes(side_key))
-                    upload_target = side_path
-                task.provider_serialize = self.api.upload_video(upload_target)
+            temp_dir = tempfile.mkdtemp(prefix=f"kiri-{scan_session_id}-")
+            try:
+                work_dir = Path(temp_dir)
+                video_path = work_dir / "scan.mp4"
+                self.storage.download_to(video_key, video_path)
+                try:
+                    task.provider_serialize = self.api.upload_video(video_path)
+                except Exception:
+                    self._report_kiri_cost(scan_session, "process", "failed", scan_session_id)
+                    raise
+                self._report_kiri_cost(
+                    scan_session, "process", "success", task.provider_serialize
+                )
+                # Delete temp video and the R2 video once KIRI accepts it
+                if video_path.exists():
+                    video_path.unlink()
+                self.storage.delete(video_key)
+                scan_session.raw_video_path = None
+                scan_session.side_video_path = None
+                scan_session.top_video_path = None
+                self.db.commit()
+            finally:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
             task.status = KiriTaskStatus.PROCESSING
             task.provider_status = "uploading"
             task.error_message = None
@@ -189,7 +203,10 @@ class KiriPipelineService:
         return task
 
     def queue_save(
-        self, task: KiriScanTask, project_name: str, crop_box: CropBox | None
+        self,
+        task: KiriScanTask,
+        project_name: str,
+        crop_box: CropBox | None = None,
     ) -> KiriScanTask:
         if task.status == KiriTaskStatus.READY:
             return task
@@ -199,12 +216,10 @@ class KiriPipelineService:
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Canonical project name must contain at most 100 characters.",
             )
-        if crop_box:
-            task.crop_box_json = crop_box.model_dump_json(by_alias=True)
-        if not task.crop_box_json or not task.source_glb_path:
+        if not task.source_glb_path:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Configure a crop box after the Kiri model is ready.",
+                detail="Kiri model is not ready.",
             )
         if task.status not in {
             KiriTaskStatus.READY_FOR_CROP,
@@ -224,96 +239,59 @@ class KiriPipelineService:
         self.db.refresh(task)
         return task
 
-    def _can_bake_local(self) -> bool:
-        crop_avail = getattr(self.crop_baker, "is_available", None)
-        cleanup_avail = getattr(self.mesh_cleanup, "is_available", None)
-        if crop_avail is not None and not crop_avail():
-            return False
-        if cleanup_avail is not None and not cleanup_avail():
-            return False
-        return True
-
-    def bake_saved_project(self, scan_session_id: str) -> None:
+    def publish_saved_project(self, scan_session_id: str) -> None:
         task = self.require_task(scan_session_id)
         if task.status == KiriTaskStatus.READY:
             return
         try:
-            existing = self.db.scalar(
-                select(ModelAsset).where(ModelAsset.scan_session_id == scan_session_id)
-            )
-            if existing:
-                self._publish_control_plane_model(task, existing)
-                self._mark_ready(task)
-                return
-            crop_box = self.crop_box(task)
-            if not crop_box or not task.source_glb_path:
-                raise RuntimeError("Kiri crop configuration is missing.")
-            with tempfile.TemporaryDirectory(prefix=f"kiri-crop-{scan_session_id}-") as raw_dir:
-                work_dir = Path(raw_dir)
-                source_path = work_dir / "source.glb"
-                cropped_path = work_dir / "cropped.glb"
-                model_dir = work_dir / "model"
-                source_path.write_bytes(self.storage.get_bytes(task.source_glb_path))
-                if self._can_bake_local():
-                    self.crop_baker.bake(source_path, cropped_path, crop_box)
-                    cleanup_report = self.mesh_cleanup.cleanup(
-                        cropped_path,
-                        model_dir,
-                        log_path=model_dir / "kiri-crop-cleanup.log",
+            if not task.source_glb_path or not self.storage.exists(task.source_glb_path):
+                self._download_source_glb(task)
+            if not task.source_glb_path or not self.storage.exists(task.source_glb_path):
+                raise RuntimeError("Kiri source GLB is missing.")
+
+            scan_session = task.scan_session
+            head_info = self.storage.head(task.source_glb_path)
+            glb_size = head_info.get("content_length", 0) if head_info else 0
+            if not glb_size:
+                temp_dir = tempfile.mkdtemp(prefix=f"kiri-size-{scan_session_id}-")
+                try:
+                    temp_glb = Path(temp_dir) / "source.glb"
+                    self.storage.download_to(task.source_glb_path, temp_glb)
+                    glb_size = temp_glb.stat().st_size
+                finally:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+
+            if scan_session.control_plane_project_id:
+                self._publish_control_plane_model(
+                    task,
+                    glb_path=task.source_glb_path,
+                    glb_size_bytes=glb_size,
+                )
+            elif scan_session.project_id:
+                existing = self.db.scalar(
+                    select(ModelAsset).where(ModelAsset.scan_session_id == scan_session_id)
+                )
+                if not existing:
+                    existing = ModelAsset(
+                        scan_session_id=scan_session_id,
+                        glb_path=task.source_glb_path,
+                        obj_path="",
+                        mtl_path="",
+                        texture_path="",
+                        quality_report_path="",
+                        glb_size_bytes=glb_size,
+                        glb_content_type="model/gltf-binary",
+                        source_type=ProjectSourceType.SCAN,
+                        status=ScanStatus.COMPLETED,
                     )
-                else:
-                    model_dir.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(source_path, model_dir / "shoe_preview.glb")
-                    (model_dir / "shoe.obj").write_text("# Raw mesh from KIRI Engine\n", encoding="utf-8")
-                    (model_dir / "shoe.mtl").write_text("# Material\n", encoding="utf-8")
-                    (model_dir / "shoe_texture.png").write_bytes(PLACEHOLDER_PNG)
-                    cleanup_report = MeshCleanupReport(
-                        editor_ready=True,
-                        editor_ready_score=100,
-                        mesh_object_count=1,
-                        bounding_box={},
-                        normalized_scale=1.0,
-                        triangle_count_before=0,
-                        triangle_count_after=0,
-                        cleanup_warnings=["Blender headless deferred to Desktop client."],
-                    )
-                metadata_path = model_dir / "metadata.json"
-                metadata_key = task.scan_session.metadata_path
-                metadata_path.write_bytes(
-                    self.storage.get_bytes(metadata_key) if metadata_key else b"{}"
-                )
-                quality_path = model_dir / "quality_report.json"
-                write_json(
-                    quality_path,
-                    {
-                        "overallScore": cleanup_report.editor_ready_score,
-                        "status": "kiri_cropped",
-                        "sourceFormat": "glb",
-                        "sourceProvider": "kiri",
-                        "cropBox": crop_box.model_dump(by_alias=True),
-                        "warnings": cleanup_report.cleanup_warnings,
-                        **cleanup_report.to_quality_fields(),
-                    },
-                )
-                package_path = model_dir / "shoe_obj_package.zip"
-                self._zip_obj_package(model_dir, package_path)
-                existing = self.asset_service.create_from_files(
-                    scan_session_id,
-                    ModelAssetFiles(
-                        glb=model_dir / "shoe_preview.glb",
-                        obj=model_dir / "shoe.obj",
-                        mtl=model_dir / "shoe.mtl",
-                        texture=model_dir / "shoe_texture.png",
-                        metadata=metadata_path,
-                        quality_report=quality_path,
-                        obj_package_zip=package_path,
-                    ),
-                    source_type=ProjectSourceType.SCAN,
-                )
-            self._publish_control_plane_model(task, existing)
+                    self.db.add(existing)
+                    self.db.commit()
+
             self._mark_ready(task)
         except Exception as exc:
-            self._fail(task, str(exc) or "Kiri crop bake failed.")
+            self._fail(task, str(exc) or "Kiri publish failed.")
+
+    bake_saved_project = publish_saved_project
 
     def response(self, task: KiriScanTask) -> KiriStatusResponse:
         crop_box = self.crop_box(task)
@@ -361,59 +339,40 @@ class KiriPipelineService:
             return None
         return CropBox.model_validate_json(task.crop_box_json)
 
-    def _merge_videos(self, side_path: Path, top_path: Path, output_path: Path) -> None:
-        scale_filter = (
-            "scale=1920:1080:force_original_aspect_ratio=decrease,"
-            "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1"
-        )
-        result = self.runner.run(
-            [
-                self.settings.ffmpeg_bin,
-                "-y",
-                "-i",
-                str(side_path),
-                "-i",
-                str(top_path),
-                "-filter_complex",
-                f"[0:v]{scale_filter}[v0];[1:v]{scale_filter}[v1];[v0][v1]concat=n=2:v=1:a=0[outv]",
-                "-map",
-                "[outv]",
-                "-t",
-                "180",
-                "-r",
-                "30",
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                str(output_path),
-            ],
-            log_path=output_path.parent / "ffmpeg-merge.log",
-            timeout=self.settings.kiri_request_timeout_seconds,
-        )
-        if not result.ok or not output_path.is_file():
-            message = result.stderr.strip() or result.stdout.strip() or "FFmpeg merge failed."
-            raise KiriError(f"Could not prepare Kiri video: {message[-1200:]}")
-
     def _download_source_glb(self, task: KiriScanTask) -> None:
         if task.source_glb_path and self.storage.exists(task.source_glb_path):
             return
         if not task.provider_serialize:
             raise KiriError("Kiri serialize id is missing.")
-        zip_url = self.api.get_model_zip_url(task.provider_serialize)
-        zip_bytes = self.api.download_model_zip(zip_url)
-        glb_bytes = self._extract_glb(zip_bytes)
-        stored = self.storage.put_bytes(
-            f"kiri/{task.scan_session_id}/source.glb",
-            glb_bytes,
-            "model/gltf-binary",
-        )
-        task.source_glb_path = stored.key
+        try:
+            zip_url = self.api.get_model_zip_url(task.provider_serialize)
+            temp_dir = tempfile.mkdtemp(prefix=f"kiri-zip-{task.scan_session_id}-")
+            try:
+                work_dir = Path(temp_dir)
+                zip_path = work_dir / "model.zip"
+                glb_path = work_dir / "source.glb"
+                self.api.download_model_zip_to(zip_url, zip_path)
+                self._extract_glb_from_zip(zip_path, glb_path)
+                zip_path.unlink(missing_ok=True)
+                stored = self.storage.put_file(
+                    f"kiri/{task.scan_session_id}/source.glb",
+                    glb_path,
+                    "model/gltf-binary",
+                )
+                task.source_glb_path = stored.key
+            finally:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            self._report_kiri_cost(
+                task.scan_session, "download", "failed", task.provider_serialize
+            )
+            raise
+        self._report_kiri_cost(task.scan_session, "download", "success", task.provider_serialize)
 
-    def _extract_glb(self, zip_bytes: bytes) -> bytes:
+    def _extract_glb_from_zip(self, zip_path: Path, output_glb_path: Path) -> None:
         max_bytes = self.settings.kiri_max_download_size_mb * 1024 * 1024
         try:
-            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
+            with zipfile.ZipFile(zip_path) as archive:
                 candidates = []
                 total = 0
                 for item in archive.infolist():
@@ -432,29 +391,22 @@ class KiriPipelineService:
                 candidate = sorted(
                     candidates, key=lambda item: (len(item.filename), item.filename)
                 )[0]
-                glb_bytes = archive.read(candidate)
+                with archive.open(candidate) as src, output_glb_path.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
         except zipfile.BadZipFile as exc:
             raise KiriError("Kiri returned an invalid model ZIP.") from exc
-        if not glb_bytes.startswith(b"glTF"):
-            raise KiriError("Kiri ZIP contains an invalid GLB model.")
-        return glb_bytes
 
-    @staticmethod
-    def _zip_obj_package(model_dir: Path, zip_path: Path) -> None:
-        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for name in [
-                "shoe.obj",
-                "shoe.mtl",
-                "shoe_texture.png",
-                "metadata.json",
-                "quality_report.json",
-            ]:
-                archive.write(model_dir / name, name)
+        with output_glb_path.open("rb") as f:
+            magic = f.read(4)
+        if magic != b"glTF":
+            raise KiriError("Kiri ZIP contains an invalid GLB model.")
 
     def _publish_control_plane_model(
         self,
         task: KiriScanTask,
-        model_asset: ModelAsset,
+        *,
+        glb_path: str,
+        glb_size_bytes: int,
     ) -> None:
         scan_session = task.scan_session
         project_id = scan_session.control_plane_project_id
@@ -467,7 +419,7 @@ class KiriPipelineService:
             raise RuntimeError("Canonical scan ownership is incomplete.")
         if scan_session.control_plane_model_asset_id and scan_session.control_plane_published_at:
             return
-        if not model_asset.glb_size_bytes:
+        if not glb_size_bytes:
             raise RuntimeError("Generated GLB size metadata is missing.")
 
         result = self.control_plane.publish_glb(
@@ -475,10 +427,10 @@ class KiriPipelineService:
             expected_project_id=project_id,
             project_name=scan_session.control_plane_project_name or "Untitled shoe scan",
             web_project_url=scan_session.web_design_url or "",
-            file_size_bytes=model_asset.glb_size_bytes,
-            chunks=self.storage.iter_bytes(model_asset.glb_path),
+            file_size_bytes=glb_size_bytes,
+            chunks=self.storage.iter_bytes(glb_path),
         )
-        if result.project_id != project_id or result.status != "ready":
+        if result.project_id != project_id or result.status not in {"raw", "ready"}:
             raise RuntimeError("Control-plane publish result is inconsistent.")
 
         scan_session.control_plane_model_asset_id = result.model_asset_id
@@ -504,3 +456,30 @@ class KiriPipelineService:
         if task.scan_session.project:
             task.scan_session.project.status = ProjectStatus.FAILED
         self.db.commit()
+
+    _KIRI_COST_SETTINGS_ATTR = {
+        "process": "kiri_cost_vnd_process",
+        "download": "kiri_cost_vnd_download",
+    }
+
+    def _report_kiri_cost(
+        self,
+        scan_session: ScanSession,
+        operation: str,
+        call_status: str,
+        reference: str | None,
+    ) -> None:
+        cost_vnd = getattr(
+            self.settings, self._KIRI_COST_SETTINGS_ATTR.get(operation, ""), 0
+        )
+        try:
+            self.cost_reporter.report_kiri_call(
+                operation=operation,
+                status=call_status,
+                cost_vnd=cost_vnd,
+                user_id=scan_session.control_plane_user_id,
+                reference=reference or scan_session.id,
+            )
+        except Exception:
+            # Cost reporting is best-effort and must never break the scan pipeline.
+            logger.warning("Failed to report KIRI API cost for operation=%s", operation, exc_info=True)

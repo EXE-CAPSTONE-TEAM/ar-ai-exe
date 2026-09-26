@@ -3,7 +3,7 @@ FROM node:22-alpine AS build
 WORKDIR /app/frontend
 
 ARG VITE_API_BASE_URL=""
-ARG VITE_MARKETING_LOGIN_URL="https://kusshoes.vn/login"
+ARG VITE_MARKETING_LOGIN_URL="https://kusshoes.vercel.app/login"
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 ENV VITE_MARKETING_LOGIN_URL=$VITE_MARKETING_LOGIN_URL
 

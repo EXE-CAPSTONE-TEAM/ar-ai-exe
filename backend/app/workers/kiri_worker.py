@@ -13,6 +13,9 @@ def start_kiri_processing(scan_session_id: str) -> None:
 def bake_kiri_project(scan_session_id: str) -> None:
     db = SessionLocal()
     try:
-        KiriPipelineService(db).bake_saved_project(scan_session_id)
+        KiriPipelineService(db).publish_saved_project(scan_session_id)
     finally:
         db.close()
+
+
+publish_kiri_project = bake_kiri_project

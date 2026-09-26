@@ -277,3 +277,42 @@ def test_force_material_bake_runs_without_decals(tmp_path):
         )
         is True
     )
+
+
+def test_bake_worker_request_accepts_watermark():
+    payload = request_payload()
+    payload["watermark"] = {
+        "required": True,
+        "text": "KusShoes",
+        "opacity_percent": 30,
+    }
+    req = BakeWorkerRequest.model_validate(payload)
+    assert req.watermark is not None
+    assert req.watermark.required is True
+    assert req.watermark.text == "KusShoes"
+    assert req.watermark.opacity_percent == 30
+
+
+def test_bake_worker_request_accepts_optional_watermark_omitted():
+    payload = request_payload()
+    req = BakeWorkerRequest.model_validate(payload)
+    assert req.watermark is None
+
+
+def test_bake_worker_request_rejects_unknown_fields_in_watermark():
+    payload = request_payload()
+    payload["watermark"] = {
+        "required": True,
+        "text": "KusShoes",
+        "opacity_percent": 30,
+        "max_edge_px": 1080,
+    }
+    with pytest.raises(ValidationError):
+        BakeWorkerRequest.model_validate(payload)
+
+
+def test_bake_worker_request_rejects_unknown_root_fields():
+    payload = request_payload()
+    payload["unknown_extra_root_field"] = "unexpected"
+    with pytest.raises(ValidationError):
+        BakeWorkerRequest.model_validate(payload)

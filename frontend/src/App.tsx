@@ -40,13 +40,17 @@ import {
 } from "./api/editorLaunch";
 import { setApiBaseUrl } from "./api/runtimeConfig";
 import { EditorPanels } from "./components/Editor/EditorPanels";
+import { CropPanel, PrepareStep } from "./components/Crop/CropPanel";
+import { DesktopRequiredBanner, RawModelWebBanner } from "./components/Editor/DesktopRequiredBanner";
 import { AppShell } from "./components/Layout/AppShell";
 import { MetadataPanel } from "./components/MetadataPanel/MetadataPanel";
 import { ModelImportPanel } from "./components/ModelImport/ModelImportPanel";
 import { SourceModelImportCard } from "./components/ModelImport/SourceModelImportCard";
 import { ModelViewer } from "./components/ModelViewer/ModelViewer";
 import { useEditorContext } from "./hooks/useEditorContext";
+import { DEFAULT_CROP_BOX } from "./types";
 import type {
+  CropBox,
   Design,
   CloudProject,
   DesignAssetSource,
@@ -70,7 +74,7 @@ import {
   noticeFromStatus,
 } from "./utils/editorMessages";
 
-const MARKETING_LOGIN_URL = import.meta.env.VITE_MARKETING_LOGIN_URL ?? "https://kusshoes.vn/login";
+const MARKETING_LOGIN_URL = import.meta.env.VITE_MARKETING_LOGIN_URL ?? "https://kusshoes.vercel.app/login";
 const DESKTOP_DEMO_PROJECT_ID = import.meta.env.VITE_DESKTOP_DEMO_PROJECT_ID ?? "proj_desktop_demo";
 const DESKTOP_CLOUD_API_BASE_URL = (import.meta.env.VITE_DESKTOP_CLOUD_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
 const DEFAULT_EDITOR_PERMISSIONS: EditorPermissions = { canEdit: true, canBake: true, canExport: true };
@@ -137,6 +141,13 @@ export function App() {
   const [isDesktopImportOpen, setIsDesktopImportOpen] = useState(false);
   const [sourceImportError, setSourceImportError] = useState<string | null>(null);
   const [isDesktopDetailsOpen, setIsDesktopDetailsOpen] = useState(false);
+  const [cropBox, setCropBox] = useState<CropBox>(DEFAULT_CROP_BOX);
+  const [isPreparing, setIsPreparing] = useState(false);
+  const [prepareStep, setPrepareStep] = useState<PrepareStep>("idle");
+  const [prepareError, setPrepareError] = useState<string | null>(null);
+  const [needsResetConfirmation, setNeedsResetConfirmation] = useState(false);
+  const [showDesktopRequired, setShowDesktopRequired] = useState(false);
+  const [isCropModeManual, setIsCropModeManual] = useState(false);
   const assetPreviewUrlsRef = useRef<Set<string>>(new Set());
 
   // Deep links carry only an opaque, one-time ticket. Bearer credentials never enter URLs or storage.
@@ -343,11 +354,19 @@ export function App() {
     !isDesktopShell ||
     editorReadiness?.previewRenderer.available === true ||
     desktopRuntime?.blenderStatus === "installed";
+  const isRawModel = editorContext.context?.modelStatus === "raw" || modelAsset?.status === "raw";
+  const isCropMode = Boolean(isRawModel || isCropModeManual);
+
+  function handleResetCropBox() {
+    setCropBox(DEFAULT_CROP_BOX);
+  }
+
   const isEditorBusy =
     isSaving ||
     isBakingPreview ||
     isExporting ||
     isImporting ||
+    isPreparing ||
     isDesktopRuntimeLoading ||
     editorContext.state === "AUTH_CHECKING" ||
     editorContext.state === "PROJECT_LOADING";
@@ -623,7 +642,7 @@ export function App() {
       setStatusMessage("MODEL_PROCESSING: Project model processing failed.");
       return;
     }
-    if (loadedModel.status !== "ready") {
+    if (loadedModel.status !== "ready" && loadedModel.status !== "raw" && context.modelStatus !== "raw") {
       setConfig(null);
       setStatusMessage("MODEL_PROCESSING: Project model is still processing.");
       return;
@@ -652,9 +671,64 @@ export function App() {
         setConfig(createDefaultConfig(loadedModel.id));
         setSavedConfigFingerprint(null);
       }
-      setStatusMessage(context.latestDesign?.previewGlbUrl ? "PREVIEW_READY" : "EDITOR_READY");
+      const isRaw = loadedModel.status === "raw" || context.modelStatus === "raw";
+      setStatusMessage(
+        isRaw
+          ? "Cắt & làm sạch model trước khi thiết kế"
+          : context.latestDesign?.previewGlbUrl
+            ? "PREVIEW_READY"
+            : "EDITOR_READY",
+      );
     } catch (error) {
       setStatusMessage(messageFromError(error));
+    }
+  }
+
+  async function handlePrepareModel(confirmReset = false) {
+    const projectId = editorProjectId ?? editorContext.context?.project?.id;
+    if (!projectId) {
+      return;
+    }
+
+    if (!isDesktopShell || !desktopRuntime?.sidecarToken) {
+      setShowDesktopRequired(true);
+      return;
+    }
+
+    setIsPreparing(true);
+    setPrepareError(null);
+    setNeedsResetConfirmation(false);
+    setPrepareStep("downloading");
+
+    try {
+      await api.prepareModel(
+        projectId,
+        cropBox,
+        confirmReset,
+        (step) => setPrepareStep(step),
+      );
+      setPrepareStep("done");
+      await editorContext.reload();
+      setIsCropModeManual(false);
+      setNeedsResetConfirmation(false);
+      setStatusMessage("Chuẩn bị model hoàn tất.");
+    } catch (error) {
+      const rawMsg = error instanceof Error ? error.message : String(error);
+      const errCode = (error as { code?: string })?.code;
+      if (errCode === "EDITOR_DESIGN_RESET_REQUIRED" || rawMsg.includes("EDITOR_DESIGN_RESET_REQUIRED")) {
+        setNeedsResetConfirmation(true);
+        setPrepareStep("idle");
+        return;
+      }
+      if (errCode === "DESKTOP_REQUIRED" || rawMsg.includes("DESKTOP_REQUIRED")) {
+        setShowDesktopRequired(true);
+        setPrepareStep("idle");
+        return;
+      }
+      setPrepareError(messageFromError(error));
+      setPrepareStep("idle");
+    } finally {
+      setIsPreparing(false);
     }
   }
 
@@ -881,6 +955,10 @@ export function App() {
   }
 
   async function bakePreview() {
+    if (!isDesktopShell || !desktopRuntime?.sidecarToken) {
+      setShowDesktopRequired(true);
+      return null;
+    }
     if (isSaving || isBakingPreview || !modelAsset || !config) {
       return null;
     }
@@ -921,11 +999,17 @@ export function App() {
         localStorage.setItem(designStorageKey(modelAsset.id), refreshedDesign.id);
       }
       const hasPreview = await loadBakedPreview(refreshedDesign);
-      if (completedJob.status === "failed" || refreshedDesign.previewStatus === "failed") {
+      if (
+        completedJob.status === "failed" ||
+        completedJob.status === "cancelled" ||
+        refreshedDesign.previewStatus === "failed"
+      ) {
         const message =
           completedJob.errorMessage ??
           refreshedDesign.previewErrorMessage ??
-          "Move the sticker/text closer to the shoe and save again.";
+          (completedJob.status === "cancelled"
+            ? "Bake job was cancelled."
+            : "Move the sticker/text closer to the shoe and save again.");
         setPreviewErrorMessage(message);
         setStatusMessage(message);
       } else {
@@ -973,6 +1057,10 @@ export function App() {
   }
 
   async function exportDesign() {
+    if (!isDesktopShell || !desktopRuntime?.sidecarToken) {
+      setShowDesktopRequired(true);
+      return;
+    }
     if (isSaving || isBakingPreview || isExporting) {
       return;
     }
@@ -1255,7 +1343,7 @@ export function App() {
                 </span>
                 <h1>{editorContext.context?.project.name ?? designName ?? "KusShoes project"}</h1>
               </div>
-              <div className={`desktop-save-status ${desktopEditorStatusTone({
+              <div className={`desktop-save-status ${isCropMode ? "saved" : desktopEditorStatusTone({
                 isSaving,
                 isBakingPreview,
                 isExporting,
@@ -1264,7 +1352,7 @@ export function App() {
                 canUsePreviewRenderer,
                 previewErrorMessage,
               })}`}>
-                {desktopEditorStatusLabel({
+                {isCropMode ? "Chế độ chỉnh khung cắt" : desktopEditorStatusLabel({
                   isSaving,
                   isBakingPreview,
                   isExporting,
@@ -1277,7 +1365,7 @@ export function App() {
               <div className="desktop-topbar-actions">
                 <button
                   type="button"
-                  disabled={isSaving || isBakingPreview || isExporting || !editorPermissions.canEdit}
+                  disabled={isCropMode || isSaving || isBakingPreview || isExporting || !editorPermissions.canEdit}
                   onClick={saveDesign}
                 >
                   <Save size={16} aria-hidden="true" />
@@ -1286,6 +1374,7 @@ export function App() {
                 <button
                   type="button"
                   disabled={
+                    isCropMode ||
                     isSaving ||
                     isBakingPreview ||
                     isExporting ||
@@ -1301,7 +1390,7 @@ export function App() {
                 <button
                   type="button"
                   className="primary-button"
-                  disabled={isSaving || isBakingPreview || isExporting || !editorPermissions.canExport || !canUsePreviewRenderer}
+                  disabled={isCropMode || isSaving || isBakingPreview || isExporting || !editorPermissions.canExport || !canUsePreviewRenderer}
                   onClick={exportDesign}
                 >
                   <Download size={16} aria-hidden="true" />
@@ -1321,6 +1410,12 @@ export function App() {
             <div className="desktop-editor-body">
               <section className="desktop-stage" aria-label="3D design preview">
                 <EditorStatusNotice message={statusMessage} isBusy={isEditorBusy} compact />
+                {showDesktopRequired && (
+                  <DesktopRequiredBanner onClose={() => setShowDesktopRequired(false)} />
+                )}
+                {!isDesktopShell && isRawModel && (
+                  <RawModelWebBanner />
+                )}
                 {needsSourceModelImport && (
                   <SourceModelImportCard
                     isBusy={isImporting}
@@ -1345,6 +1440,9 @@ export function App() {
                   savingMessage={isBakingPreview ? "Baking preview..." : "Saving draft..."}
                   previewErrorMessage={friendlyPreviewErrorMessage}
                   surfaceApplyRequest={surfaceApplyRequest}
+                  isCropMode={isCropMode}
+                  cropBox={cropBox}
+                  onCropBoxChange={setCropBox}
                   onConfigChange={handleConfigChange}
                   onActiveLayerChange={setActiveLayerId}
                   onMeshBoundsUpdate={setMeshBounds}
@@ -1352,34 +1450,52 @@ export function App() {
                 />
               </section>
               <section className="desktop-tools-sidebar" aria-label="Design tools">
-                <EditorPanels
-                  config={config}
-                  modelAsset={modelAsset}
-                  designName={designName}
-                  isSaving={isSaving}
-                  isBakingPreview={isBakingPreview}
-                  isExporting={isExporting}
-                  canEdit={editorPermissions.canEdit}
-                  canBake={editorPermissions.canBake && canUsePreviewRenderer}
-                  canExport={editorPermissions.canExport && canUsePreviewRenderer}
-                  exportMessage={friendlyExportMessage}
-                  exportPackage={exportPackage}
-                  activeLayerId={activeLayerId}
-                  meshBounds={meshBounds}
-                  gizmoMode={gizmoMode}
-                  onNameChange={setDesignName}
-                  onConfigChange={handleConfigChange}
-                  onActiveLayerChange={setActiveLayerId}
-                  onApplyActiveLayerToSurface={applyActiveLayerToSurface}
-                  onGizmoModeChange={setGizmoMode}
-                  onSave={saveDesign}
-                  onBakePreview={bakePreview}
-                  onExport={exportDesign}
-                  onDownload={downloadExport}
-                  onDownloadModelFile={downloadModelFile}
-                  onUploadDesignAsset={uploadDesignAssetWithPreview}
-                  simplified
-                />
+                {isCropMode ? (
+                  <CropPanel
+                    projectName={editorContext.context?.project.name ?? designName ?? "KusShoes project"}
+                    gizmoMode={gizmoMode}
+                    onGizmoModeChange={setGizmoMode}
+                    onResetCropBox={handleResetCropBox}
+                    onPrepare={() => handlePrepareModel(false)}
+                    isPreparing={isPreparing}
+                    prepareStep={prepareStep}
+                    errorMessage={prepareError}
+                    onRetry={() => handlePrepareModel(false)}
+                    needsResetConfirmation={needsResetConfirmation}
+                    onConfirmResetDesign={() => handlePrepareModel(true)}
+                    onCancelResetDesign={() => setNeedsResetConfirmation(false)}
+                    onCancelCropMode={isCropModeManual ? () => setIsCropModeManual(false) : undefined}
+                  />
+                ) : (
+                  <EditorPanels
+                    config={config}
+                    modelAsset={modelAsset}
+                    designName={designName}
+                    isSaving={isSaving}
+                    isBakingPreview={isBakingPreview}
+                    isExporting={isExporting}
+                    canEdit={editorPermissions.canEdit}
+                    canBake={editorPermissions.canBake && canUsePreviewRenderer}
+                    canExport={editorPermissions.canExport && canUsePreviewRenderer}
+                    exportMessage={friendlyExportMessage}
+                    exportPackage={exportPackage}
+                    activeLayerId={activeLayerId}
+                    meshBounds={meshBounds}
+                    gizmoMode={gizmoMode}
+                    onNameChange={setDesignName}
+                    onConfigChange={handleConfigChange}
+                    onActiveLayerChange={setActiveLayerId}
+                    onApplyActiveLayerToSurface={applyActiveLayerToSurface}
+                    onGizmoModeChange={setGizmoMode}
+                    onSave={saveDesign}
+                    onBakePreview={bakePreview}
+                    onExport={exportDesign}
+                    onDownload={downloadExport}
+                    onDownloadModelFile={downloadModelFile}
+                    onUploadDesignAsset={uploadDesignAssetWithPreview}
+                    simplified
+                  />
+                )}
               </section>
             </div>
 
@@ -1403,6 +1519,12 @@ export function App() {
               projectId={editorProjectId ?? ""}
               routeState={editorContext.state}
               permissions={editorPermissions}
+              rawModelAssetId={editorContext.context?.rawModelAssetId}
+              onTriggerReCrop={() => {
+                setIsCropModeManual(true);
+                handleResetCropBox();
+                setIsDesktopDetailsOpen(false);
+              }}
               onRefresh={refreshDesktopRuntime}
               onRestartBackend={restartDesktopRuntimeBackend}
               onInstallRenderer={installPreviewRenderer}
@@ -1472,6 +1594,12 @@ export function App() {
             </section>
 
             <EditorStatusNotice message={statusMessage} isBusy={isEditorBusy} />
+            {showDesktopRequired && (
+              <DesktopRequiredBanner onClose={() => setShowDesktopRequired(false)} />
+            )}
+            {!isDesktopShell && isRawModel && (
+              <RawModelWebBanner />
+            )}
             {designConflict && (
               <DesignConflictBanner
                 payload={designConflict.payload}
@@ -1496,17 +1624,19 @@ export function App() {
             )}
 
             <section className="main-grid">
-              <MetadataPanel
-                scanSession={scanSession}
-                modelAsset={modelAsset}
-                config={config}
-                designName={designName}
-                activeLayerId={activeLayerId}
-                meshBounds={meshBounds}
-                isSaved={isSaved}
-                hasBakedPreview={Boolean(previewModelUrl)}
-                hasExportPackage={Boolean(exportPackage)}
-              />
+              {!isCropMode && (
+                <MetadataPanel
+                  scanSession={scanSession}
+                  modelAsset={modelAsset}
+                  config={config}
+                  designName={designName}
+                  activeLayerId={activeLayerId}
+                  meshBounds={meshBounds}
+                  isSaved={isSaved}
+                  hasBakedPreview={Boolean(previewModelUrl)}
+                  hasExportPackage={Boolean(exportPackage)}
+                />
+              )}
               <ModelViewer
                 modelUrl={activeModelUrl}
                 config={config}
@@ -1517,38 +1647,59 @@ export function App() {
                 savingMessage={isBakingPreview ? "Đang bake preview..." : "Đang lưu draft..."}
                 previewErrorMessage={friendlyPreviewErrorMessage}
                 surfaceApplyRequest={surfaceApplyRequest}
+                isCropMode={isCropMode}
+                cropBox={cropBox}
+                onCropBoxChange={setCropBox}
                 onConfigChange={handleConfigChange}
                 onActiveLayerChange={setActiveLayerId}
                 onMeshBoundsUpdate={setMeshBounds}
                 onSurfaceApplyResult={setStatusMessage}
               />
-              <EditorPanels
-                config={config}
-                modelAsset={modelAsset}
-                designName={designName}
-                isSaving={isSaving}
-                isBakingPreview={isBakingPreview}
-                isExporting={isExporting}
-                canEdit={!isProjectEditor || editorPermissions.canEdit}
-                canBake={(!isProjectEditor || editorPermissions.canBake) && canUsePreviewRenderer}
-                canExport={(!isProjectEditor || editorPermissions.canExport) && canUsePreviewRenderer}
-                exportMessage={friendlyExportMessage}
-                exportPackage={exportPackage}
-                activeLayerId={activeLayerId}
-                meshBounds={meshBounds}
-                gizmoMode={gizmoMode}
-                onNameChange={setDesignName}
-                onConfigChange={handleConfigChange}
-                onActiveLayerChange={setActiveLayerId}
-                onApplyActiveLayerToSurface={applyActiveLayerToSurface}
-                onGizmoModeChange={setGizmoMode}
-                onSave={saveDesign}
-                onBakePreview={bakePreview}
-                onExport={exportDesign}
-                onDownload={downloadExport}
-                onDownloadModelFile={downloadModelFile}
-                onUploadDesignAsset={uploadDesignAssetWithPreview}
-              />
+              {isCropMode ? (
+                <CropPanel
+                  projectName={editorContext.context?.project.name ?? designName ?? "KusShoes project"}
+                  gizmoMode={gizmoMode}
+                  onGizmoModeChange={setGizmoMode}
+                  onResetCropBox={handleResetCropBox}
+                  onPrepare={() => handlePrepareModel(false)}
+                  isPreparing={isPreparing}
+                  prepareStep={prepareStep}
+                  errorMessage={prepareError}
+                  onRetry={() => handlePrepareModel(false)}
+                  needsResetConfirmation={needsResetConfirmation}
+                  onConfirmResetDesign={() => handlePrepareModel(true)}
+                  onCancelResetDesign={() => setNeedsResetConfirmation(false)}
+                  onCancelCropMode={isCropModeManual ? () => setIsCropModeManual(false) : undefined}
+                />
+              ) : (
+                <EditorPanels
+                  config={config}
+                  modelAsset={modelAsset}
+                  designName={designName}
+                  isSaving={isSaving}
+                  isBakingPreview={isBakingPreview}
+                  isExporting={isExporting}
+                  canEdit={!isProjectEditor || editorPermissions.canEdit}
+                  canBake={(!isProjectEditor || editorPermissions.canBake) && canUsePreviewRenderer}
+                  canExport={(!isProjectEditor || editorPermissions.canExport) && canUsePreviewRenderer}
+                  exportMessage={friendlyExportMessage}
+                  exportPackage={exportPackage}
+                  activeLayerId={activeLayerId}
+                  meshBounds={meshBounds}
+                  gizmoMode={gizmoMode}
+                  onNameChange={setDesignName}
+                  onConfigChange={handleConfigChange}
+                  onActiveLayerChange={setActiveLayerId}
+                  onApplyActiveLayerToSurface={applyActiveLayerToSurface}
+                  onGizmoModeChange={setGizmoMode}
+                  onSave={saveDesign}
+                  onBakePreview={bakePreview}
+                  onExport={exportDesign}
+                  onDownload={downloadExport}
+                  onDownloadModelFile={downloadModelFile}
+                  onUploadDesignAsset={uploadDesignAssetWithPreview}
+                />
+              )}
             </section>
           </>
         )}
@@ -1818,6 +1969,8 @@ type DesktopDetailsDrawerProps = {
   projectId: string;
   routeState: string;
   permissions: EditorPermissions;
+  rawModelAssetId?: string | null;
+  onTriggerReCrop?: () => void;
   onRefresh: () => void;
   onRestartBackend: () => void;
   onInstallRenderer: () => void;
@@ -1845,6 +1998,8 @@ function DesktopDetailsDrawer({
   projectId,
   routeState,
   permissions,
+  rawModelAssetId,
+  onTriggerReCrop,
   onRefresh,
   onRestartBackend,
   onInstallRenderer,
@@ -1896,6 +2051,23 @@ function DesktopDetailsDrawer({
             hasBakedPreview={hasBakedPreview}
             hasExportPackage={hasExportPackage}
           />
+          {rawModelAssetId && onTriggerReCrop && (
+            <div className="panel" style={{ marginTop: "1rem" }}>
+              <div className="panel-header">
+                <h3>Model gốc từ scan</h3>
+              </div>
+              <p style={{ fontSize: "0.85rem", color: "var(--app-muted)", margin: "0.5rem 0" }}>
+                Dự án này có model thô ban đầu. Bạn có thể mở lại khung crop để cắt lại.
+              </p>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={onTriggerReCrop}
+              >
+                Cắt lại model
+              </button>
+            </div>
+          )}
           <DesktopRuntimePanel
             runtime={runtime}
             editorReadiness={editorReadiness}
@@ -2496,7 +2668,7 @@ function loginRedirectUrl(): string {
 async function waitForBakeJob(jobId: string, getJob: (jobId: string) => Promise<Job>): Promise<Job> {
   for (let attempt = 0; attempt < 180; attempt += 1) {
     const job = await getJob(jobId);
-    if (job.status === "completed" || job.status === "failed") {
+    if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
       return job;
     }
     await delay(2000);

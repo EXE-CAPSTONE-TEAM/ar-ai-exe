@@ -14,9 +14,9 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
-const DEFAULT_BACKEND_PORT: u16 = 8000;
-const DESKTOP_PORT_START: u16 = 8765;
-const DESKTOP_PORT_END: u16 = 8795;
+/// Comma-separated https storage origins the sidecar may download from / upload to (the R2
+/// account endpoint). Baked in at build time, overridable at runtime (KusShoes spec §F.3).
+const STORAGE_ORIGINS_ENV: &str = "KUSSHOES_STORAGE_ORIGINS";
 const DEMO_PROJECT_ID: &str = "proj_desktop_demo";
 const BLENDER_EXE_RELATIVE_PATH: &[&str] = &["blender-4.5.1-windows-x64", "blender.exe"];
 const BLENDER_ARTIFACT_PATH_ENV: &str = "KUSSHOES_BLENDER_ARTIFACT_PATH";
@@ -28,6 +28,8 @@ const AUTO_INSTALL_BLENDER_ENV: &str = "KUSSHOES_DESKTOP_AUTO_INSTALL_BLENDER";
 struct RuntimeState {
     runtime: Option<DesktopRuntime>,
     backend_child: Option<Child>,
+    /// Per-launch secret shared only with the sidecar this shell spawned (spec §F.2).
+    launch_token: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -44,6 +46,9 @@ struct DesktopRuntime {
     logs_path: String,
     app_version: String,
     last_error: Option<String>,
+    /// X-Service-Token for the sidecar's /bake, /prepare and /downloads; only set once the
+    /// sidecar passed the launch handshake. Never written to disk.
+    sidecar_token: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -131,7 +136,11 @@ fn ensure_runtime(
     state: &mut RuntimeState,
 ) -> Result<DesktopRuntime, String> {
     if let Some(runtime) = &state.runtime {
-        if is_backend_ready(runtime.backend_port) {
+        let verified = state
+            .launch_token
+            .as_deref()
+            .is_some_and(|token| sidecar_proves_token(runtime.backend_port, token));
+        if sidecar_auth::may_reuse_sidecar(state.backend_child.is_some(), verified) {
             return Ok(runtime.clone());
         }
     }
@@ -155,26 +164,39 @@ fn ensure_runtime(
         }
     }
 
-    let (backend_port, backend_status, last_error) = if is_backend_ready(DEFAULT_BACKEND_PORT) {
-        (DEFAULT_BACKEND_PORT, "ready".to_string(), None)
-    } else {
-        let port = find_free_port().ok_or_else(|| "No local backend port is available.".to_string())?;
-        match start_backend_sidecar(app, &paths, port) {
+    // Never adopt whatever already answers /health (spec §F.1): always run our own sidecar on an
+    // OS-assigned port and trust it only after it proves this launch's token.
+    stop_backend(state);
+    let launch_token = sidecar_auth::new_launch_token()
+        .map_err(|error| format!("Cannot generate the launch token: {error}"))?;
+    let backend_port =
+        find_free_port().ok_or_else(|| "No local backend port is available.".to_string())?;
+    let (backend_status, last_error) =
+        match start_backend_sidecar(app, &paths, backend_port, &launch_token) {
             Ok(child) => {
                 state.backend_child = Some(child);
-                if wait_for_backend(port) {
-                    (port, "ready".to_string(), None)
-                } else {
+                if !wait_for_backend(backend_port) {
                     (
-                        port,
                         "failed".to_string(),
                         Some("Backend sidecar did not become ready in time.".to_string()),
                     )
+                } else if !sidecar_proves_token(backend_port, &launch_token) {
+                    stop_backend(state);
+                    (
+                        "failed".to_string(),
+                        Some(
+                            "Local backend failed the launch handshake; another program may be using its port."
+                                .to_string(),
+                        ),
+                    )
+                } else {
+                    ("ready".to_string(), None)
                 }
             }
-            Err(error) => (port, "failed".to_string(), Some(error)),
-        }
-    };
+            Err(error) => ("failed".to_string(), Some(error)),
+        };
+    let sidecar_token = (backend_status == "ready").then(|| launch_token.clone());
+    state.launch_token = Some(launch_token);
     let last_error = last_error.or(dependency_error);
 
     let blender_status = if paths.blender_bin.is_file() {
@@ -198,6 +220,7 @@ fn ensure_runtime(
         logs_path: paths.logs_dir.to_string_lossy().to_string(),
         app_version: app.package_info().version.to_string(),
         last_error,
+        sidecar_token,
     };
     state.runtime = Some(runtime.clone());
     Ok(runtime)
@@ -207,6 +230,7 @@ fn start_backend_sidecar(
     app: &AppHandle,
     paths: &DesktopPaths,
     port: u16,
+    launch_token: &str,
 ) -> Result<Child, String> {
     let repo_root = find_repo_root();
     let demo_model = desktop_demo_model_path(app, repo_root.as_deref());
@@ -251,7 +275,11 @@ fn start_backend_sidecar(
         return Err("Backend sidecar is not available in this build.".to_string());
     };
 
+    if let Some(origins) = configured_storage_origins()? {
+        command.env("WORKER_ALLOWED_STORAGE_ORIGINS", origins);
+    }
     command
+        .env("CONTROL_PLANE_SERVICE_TOKEN", launch_token)
         .env("KUSSHOES_DESKTOP_APP_DATA", &paths.app_data_dir)
         .env("KUSSHOES_DESKTOP_DEMO_MODEL", demo_model.unwrap_or_default())
         .env("BLENDER_BIN", &paths.blender_bin)
@@ -487,12 +515,30 @@ fn http_get(port: u16, path: &str) -> Option<String> {
 }
 
 fn find_free_port() -> Option<u16> {
-    for port in DESKTOP_PORT_START..=DESKTOP_PORT_END {
-        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
-            return Some(port);
-        }
+    // OS-assigned ephemeral port: nothing predictable for another process to squat.
+    let listener = TcpListener::bind(("127.0.0.1", 0)).ok()?;
+    listener.local_addr().ok().map(|address| address.port())
+}
+
+/// True only when the process on `port` returns HMAC(launch_token, fresh nonce).
+fn sidecar_proves_token(port: u16, launch_token: &str) -> bool {
+    let Ok(nonce) = sidecar_auth::new_nonce() else {
+        return false;
+    };
+    http_get(port, &format!("/handshake?nonce={nonce}"))
+        .and_then(|raw| sidecar_auth::parse_handshake_response(&raw))
+        .is_some_and(|proof| sidecar_auth::verify_proof(launch_token, &nonce, &proof))
+}
+
+/// Storage origin allowlist for the sidecar: runtime env var first, then the build-time value.
+fn configured_storage_origins() -> Result<Option<String>, String> {
+    let raw = env::var(STORAGE_ORIGINS_ENV)
+        .ok()
+        .or_else(|| option_env!("KUSSHOES_STORAGE_ORIGINS").map(str::to_owned));
+    match raw {
+        Some(value) if !value.trim().is_empty() => sidecar_auth::storage_origins_env(&value).map(Some),
+        _ => Ok(None),
     }
-    None
 }
 
 fn find_repo_root() -> Option<PathBuf> {

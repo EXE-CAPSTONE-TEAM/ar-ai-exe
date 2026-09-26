@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.core.config import get_settings
 from app.db.database import Base
 from app.models import (
     AssetStatus,
@@ -194,3 +195,49 @@ def test_enqueue_bake_uses_inline_fallback_when_queue_is_unavailable(monkeypatch
     assert job.progress == 100
     assert updated_design is not None
     assert updated_design.preview_status == DesignPreviewStatus.READY
+
+
+def test_enqueue_bake_runs_in_process_when_queue_is_disabled(monkeypatch) -> None:
+    # The desktop sidecar has no RQ worker: a reachable Redis on localhost (for example
+    # another stack's container) must not swallow its bake jobs.
+    db = make_session()
+    user = User(id="user_001", name="Demo", email="demo@example.com")
+    design = Design(
+        id="design_001",
+        user_id=user.id,
+        project_id="proj_001",
+        model_asset_id="model_001",
+        name="Draft",
+        design_config_path="designs/design_001/design_config.json",
+        status="draft",
+        preview_status=DesignPreviewStatus.PENDING,
+    )
+    db.add_all([user, design])
+    db.commit()
+
+    enqueued: list[str] = []
+
+    def unexpected_enqueue(job_id: str) -> str:
+        enqueued.append(job_id)
+        return "rq_should_not_exist"
+
+    def complete_inline(job_id: str) -> None:
+        inline_job = db.get(Job, job_id)
+        assert inline_job is not None
+        inline_job.status = JobStatus.COMPLETED
+        inline_job.progress = 100
+        db.commit()
+
+    monkeypatch.setenv("BAKE_QUEUE_ENABLED", "false")
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.services.jobs.enqueue_job", unexpected_enqueue)
+    monkeypatch.setattr("app.services.jobs.run_job", complete_inline)
+
+    try:
+        job = JobService(db).enqueue_bake(design, user)
+    finally:
+        get_settings.cache_clear()
+
+    assert enqueued == []
+    assert job.status == JobStatus.COMPLETED
+    assert job.rq_job_id is None

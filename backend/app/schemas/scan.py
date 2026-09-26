@@ -107,7 +107,23 @@ class CropBox(CamelModel):
 
 class SaveKiriProjectRequest(CamelModel):
     project_name: str = Field(min_length=1, max_length=160, alias="projectName")
-    crop_box: CropBox | None = Field(default=None, alias="cropBox")
+
+
+class VideoUploadUrlResponse(CamelModel):
+    upload_url: str = Field(alias="uploadUrl")
+    key: str
+    expires_in: int = Field(alias="expiresIn")
+
+
+class VideoUploadUrlRequest(CamelModel):
+    content_type: str = Field(default="video/mp4", alias="contentType")
+    file_size_bytes: int | None = Field(default=None, gt=0, alias="fileSizeBytes")
+
+
+class VideoUploadedRequest(CamelModel):
+    # Echo of the key returned by video-upload-url. The server never trusts it to address storage;
+    # it only rejects a mismatch (KusShoes spec §D.5).
+    key: str | None = None
 
 
 class KiriStatusResponse(CamelModel):

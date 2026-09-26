@@ -188,7 +188,19 @@ class ScanSessionService:
         if scan_session.source_type == ScanSource.IMPORT:
             return []
         uploaded: list[str] = []
-        if scan_session.side_video_path or scan_session.raw_video_path:
+        if (
+            scan_session.side_video_path
+            or scan_session.raw_video_path
+            or scan_session.status
+            in {
+                ScanStatus.UPLOADED,
+                ScanStatus.KIRI_PROCESSING,
+                ScanStatus.KIRI_READY,
+                ScanStatus.CROP_BAKING,
+                ScanStatus.CROP_READY,
+                ScanStatus.COMPLETED,
+            }
+        ):
             uploaded.append("side_orbit")
         if scan_session.top_video_path:
             uploaded.append("top_orbit")
@@ -198,7 +210,19 @@ class ScanSessionService:
     def is_ready_for_processing(cls, scan_session: ScanSession) -> bool:
         if scan_session.source_type == ScanSource.IMPORT:
             return scan_session.status == ScanStatus.COMPLETED
-        return bool(scan_session.side_video_path or scan_session.raw_video_path)
+        return bool(
+            scan_session.side_video_path
+            or scan_session.raw_video_path
+            or scan_session.status
+            in {
+                ScanStatus.UPLOADED,
+                ScanStatus.KIRI_PROCESSING,
+                ScanStatus.KIRI_READY,
+                ScanStatus.CROP_BAKING,
+                ScanStatus.CROP_READY,
+                ScanStatus.COMPLETED,
+            }
+        )
 
     @classmethod
     def required_passes_for(cls, scan_session: ScanSession) -> list[str]:

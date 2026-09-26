@@ -38,6 +38,9 @@ class JobService:
         self.db.commit()
         self.db.refresh(job)
 
+        if not get_settings().bake_queue_enabled:
+            return self._run_inline_bake_fallback(job, design)
+
         try:
             rq_job_id = enqueue_job(job.id)
         except Exception as exc:
