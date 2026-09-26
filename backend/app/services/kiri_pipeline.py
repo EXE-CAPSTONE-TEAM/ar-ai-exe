@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import shutil
 import tempfile
 import zipfile
@@ -22,6 +23,7 @@ from app.models import (
     ScanStatus,
 )
 from app.schemas.scan import CropBox, KiriStatusResponse
+from app.services.api_cost_reporter import ApiCostReporter
 from app.services.command_runner import CommandRunner
 from app.services.control_plane_mobile import ControlPlaneMobileClient
 from app.services.crop_baker import CropBakeService
@@ -31,6 +33,8 @@ from app.services.model_assets import ModelAssetService
 from app.services.scan_sessions import ScanSessionService
 from app.services.storage import StorageService, get_storage_service
 
+
+logger = logging.getLogger(__name__)
 
 PROVIDER_ACTIVE_STATUSES = {"uploading", "queuing", "queued", "processing"}
 TERMINAL_TASK_STATUSES = {KiriTaskStatus.READY, KiriTaskStatus.FAILED, KiriTaskStatus.EXPIRED}
@@ -47,6 +51,7 @@ class KiriPipelineService:
         crop_baker: CropBakeService | None = None,
         mesh_cleanup: MeshCleanupService | None = None,
         control_plane: ControlPlaneMobileClient | None = None,
+        cost_reporter: ApiCostReporter | None = None,
     ) -> None:
         self.db = db
         self.settings = get_settings()
@@ -56,6 +61,7 @@ class KiriPipelineService:
         self.crop_baker = crop_baker or CropBakeService()
         self.mesh_cleanup = mesh_cleanup or MeshCleanupService()
         self.control_plane = control_plane or ControlPlaneMobileClient()
+        self.cost_reporter = cost_reporter or ApiCostReporter()
         self.asset_service = ModelAssetService(db, storage=self.storage)
         self.scan_service = ScanSessionService(db)
 
@@ -127,7 +133,14 @@ class KiriPipelineService:
                 work_dir = Path(temp_dir)
                 video_path = work_dir / "scan.mp4"
                 self.storage.download_to(video_key, video_path)
-                task.provider_serialize = self.api.upload_video(video_path)
+                try:
+                    task.provider_serialize = self.api.upload_video(video_path)
+                except Exception:
+                    self._report_kiri_cost(scan_session, "process", "failed", scan_session_id)
+                    raise
+                self._report_kiri_cost(
+                    scan_session, "process", "success", task.provider_serialize
+                )
                 # Delete temp video and the R2 video once KIRI accepts it
                 if video_path.exists():
                     video_path.unlink()
@@ -331,23 +344,30 @@ class KiriPipelineService:
             return
         if not task.provider_serialize:
             raise KiriError("Kiri serialize id is missing.")
-        zip_url = self.api.get_model_zip_url(task.provider_serialize)
-        temp_dir = tempfile.mkdtemp(prefix=f"kiri-zip-{task.scan_session_id}-")
         try:
-            work_dir = Path(temp_dir)
-            zip_path = work_dir / "model.zip"
-            glb_path = work_dir / "source.glb"
-            self.api.download_model_zip_to(zip_url, zip_path)
-            self._extract_glb_from_zip(zip_path, glb_path)
-            zip_path.unlink(missing_ok=True)
-            stored = self.storage.put_file(
-                f"kiri/{task.scan_session_id}/source.glb",
-                glb_path,
-                "model/gltf-binary",
+            zip_url = self.api.get_model_zip_url(task.provider_serialize)
+            temp_dir = tempfile.mkdtemp(prefix=f"kiri-zip-{task.scan_session_id}-")
+            try:
+                work_dir = Path(temp_dir)
+                zip_path = work_dir / "model.zip"
+                glb_path = work_dir / "source.glb"
+                self.api.download_model_zip_to(zip_url, zip_path)
+                self._extract_glb_from_zip(zip_path, glb_path)
+                zip_path.unlink(missing_ok=True)
+                stored = self.storage.put_file(
+                    f"kiri/{task.scan_session_id}/source.glb",
+                    glb_path,
+                    "model/gltf-binary",
+                )
+                task.source_glb_path = stored.key
+            finally:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            self._report_kiri_cost(
+                task.scan_session, "download", "failed", task.provider_serialize
             )
-            task.source_glb_path = stored.key
-        finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
+        self._report_kiri_cost(task.scan_session, "download", "success", task.provider_serialize)
 
     def _extract_glb_from_zip(self, zip_path: Path, output_glb_path: Path) -> None:
         max_bytes = self.settings.kiri_max_download_size_mb * 1024 * 1024
@@ -436,3 +456,30 @@ class KiriPipelineService:
         if task.scan_session.project:
             task.scan_session.project.status = ProjectStatus.FAILED
         self.db.commit()
+
+    _KIRI_COST_SETTINGS_ATTR = {
+        "process": "kiri_cost_vnd_process",
+        "download": "kiri_cost_vnd_download",
+    }
+
+    def _report_kiri_cost(
+        self,
+        scan_session: ScanSession,
+        operation: str,
+        call_status: str,
+        reference: str | None,
+    ) -> None:
+        cost_vnd = getattr(
+            self.settings, self._KIRI_COST_SETTINGS_ATTR.get(operation, ""), 0
+        )
+        try:
+            self.cost_reporter.report_kiri_call(
+                operation=operation,
+                status=call_status,
+                cost_vnd=cost_vnd,
+                user_id=scan_session.control_plane_user_id,
+                reference=reference or scan_session.id,
+            )
+        except Exception:
+            # Cost reporting is best-effort and must never break the scan pipeline.
+            logger.warning("Failed to report KIRI API cost for operation=%s", operation, exc_info=True)

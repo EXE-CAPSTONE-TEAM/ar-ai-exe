@@ -95,6 +95,12 @@ class Settings(BaseSettings):
     kiri_request_timeout_seconds: int = 180
     kiri_preview_ticket_minutes: int = 5
     kiri_max_download_size_mb: int = 500
+    # VND cost per billable KIRI call, reported to the control-plane API cost
+    # ledger (SRS SF-14 / BR-108). Must come from the current KIRI price list;
+    # 0 disables cost tracking for that operation without disabling reporting.
+    kiri_cost_vnd_process: int = 0
+    kiri_cost_vnd_download: int = 0
+    api_cost_report_timeout_seconds: int = 5
     reconstruction_frame_fps: float = 2.0
     reconstruction_max_frames_per_pass: int = 90
     reconstruction_min_brightness: float = 28.0
