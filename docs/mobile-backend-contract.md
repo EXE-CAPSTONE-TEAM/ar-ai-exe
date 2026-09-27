@@ -1,3 +1,7 @@
+> **LỖI THỜI (2026-09-27).** Mobile giờ đăng nhập và quản lý project qua **KusShoes BE**, chỉ gọi backend
+> ar-ai-exe (role relay) cho luồng quét. Contract hiện hành: `docs/api-contract.md` (backend ar-ai-exe)
+> và `KusShoes/docs/api-contract.md` (backend KusShoes). Giữ file này chỉ để tham khảo lịch sử.
+
 # Mobile ↔ Backend Configuration Specification
 
 **Document Version:** 1.0
