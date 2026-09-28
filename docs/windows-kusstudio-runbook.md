@@ -5,8 +5,8 @@ clone `ar-ai-exe`; KusShoes chạy sẵn trên server, không cần clone. Serve
 
 | Thành phần | URL |
 |---|---|
-| KusShoes API | `https://136.85.55.175.sslip.io` |
-| KIRI relay (mobile scan) | `https://relay.136.85.55.175.sslip.io` |
+| KusShoes API | `https://api.kusshoes.kietta.me` |
+| KIRI relay (mobile scan) | `https://relay.kusshoes.kietta.me` |
 | Web | `https://kusshoes.vercel.app` |
 | R2 endpoint (sidecar tải/upload) | `https://1d92645e04fc345cde21bc7c7260e073.r2.cloudflarestorage.com` |
 
@@ -75,7 +75,7 @@ Tạo `frontend\.env.desktop` (Vite đọc file này khi chạy `--mode desktop`
 
 ```powershell
 @"
-VITE_KUSSHOES_API_BASE_URL=https://136.85.55.175.sslip.io
+VITE_KUSSHOES_API_BASE_URL=https://api.kusshoes.kietta.me
 VITE_API_BASE_URL=http://127.0.0.1:8010
 VITE_MARKETING_LOGIN_URL=https://kusshoes.vercel.app/login
 VITE_DESKTOP_SHELL=true
@@ -167,8 +167,8 @@ flutter pub get
 flutter analyze
 flutter test
 flutter build apk --release `
-  --dart-define=KUSSHOES_BASE_URL=https://136.85.55.175.sslip.io `
-  --dart-define=COMPUTE_BASE_URL=https://relay.136.85.55.175.sslip.io `
+  --dart-define=KUSSHOES_BASE_URL=https://api.kusshoes.kietta.me `
+  --dart-define=COMPUTE_BASE_URL=https://relay.kusshoes.kietta.me `
   --dart-define=KUSSHOES_WEB_URL=https://kusshoes.vercel.app
 ```
 
@@ -187,7 +187,7 @@ APK: `mobile\build\app\outputs\flutter-apk\app-release.apk` → cài lên điệ
 
 ### Tiền đề
 
-- [ ] **14.0a** Vercel Production đã redeploy với `VITE_API_BASE_URL=https://136.85.55.175.sslip.io`
+- [ ] **14.0a** Vercel Production đã redeploy với `VITE_API_BASE_URL=https://api.kusshoes.kietta.me`
   (bỏ tick build cache); email test nằm trong "Test users" của Google OAuth.
 - [ ] **14.0b** Dùng bản **đã cài** ở Bước 3 (bản dev không nhận deep link).
 - [ ] **14.0c** Tài khoản test đang ở gói **Pro**. Lý do (theo bảng `plans` và BR-99):
