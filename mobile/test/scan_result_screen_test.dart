@@ -5,9 +5,12 @@ import 'package:shoe_visual_customizer_mobile/screens/scan_result_screen.dart';
 import 'package:shoe_visual_customizer_mobile/services/backend_api.dart';
 
 class _MockResultApi extends BackendApi {
-  _MockResultApi({this.statusToReturn});
+  _MockResultApi({this.statusToReturn, this.statusAfterSave});
 
   final KiriStatus? statusToReturn;
+
+  /// What the relay reports once save-project has queued the publish.
+  final KiriStatus? statusAfterSave;
 
   String? savedProjectName;
   int saveCallCount = 0;
@@ -16,6 +19,14 @@ class _MockResultApi extends BackendApi {
   @override
   Future<KiriStatus> getKiriStatus({required String scanSessionId}) async {
     getStatusCallCount++;
+    if (saveCallCount > 0) {
+      return statusAfterSave ??
+          KiriStatus(
+            scanSessionId: scanSessionId,
+            status: 'ready',
+            progress: 100,
+          );
+    }
     return statusToReturn ??
         KiriStatus(
           scanSessionId: scanSessionId,
@@ -42,10 +53,16 @@ class _MockResultApi extends BackendApi {
     savedProjectName = projectName;
     return KiriStatus(
       scanSessionId: scanSessionId,
-      status: 'saving',
-      progress: 100,
+      status: 'crop_baking',
+      progress: 90,
     );
   }
+}
+
+/// Lets the save loop's poll delay elapse and the follow-up status resolve.
+Future<void> _pollOnce(WidgetTester tester) async {
+  await tester.pump(const Duration(seconds: 3));
+  await _flush(tester);
 }
 
 Future<void> _flush(WidgetTester tester) async {
@@ -116,6 +133,98 @@ void main() {
 
       expect(api.saveCallCount, 1);
       expect(api.savedProjectName, 'Giày Sneaker Phố');
+      // Publish is still running on the relay: keep spinning, no success yet.
+      expect(find.text('Đang lưu project...'), findsOneWidget);
+      expect(find.text('Đã lưu project'), findsNothing);
+
+      await _pollOnce(tester);
+
+      expect(find.text('Đã lưu project'), findsOneWidget);
+      expect(
+        find.text('Dự án của bạn đã được lưu thành công!'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a failed publish stops the spinner and allows another try',
+        (tester) async {
+      final api = _MockResultApi(
+        statusAfterSave: const KiriStatus(
+          scanSessionId: 'sess-100',
+          status: 'failed',
+          progress: 0,
+          errorMessage: 'Kiri publish failed.',
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ScanResultScreen(
+            scanSessionId: 'sess-100',
+            api: api,
+            status: 'raw',
+          ),
+        ),
+      );
+      await _flush(tester);
+
+      final saveButton = find.text('Lưu project');
+      await tester.ensureVisible(saveButton);
+      await tester.pump();
+      await tester.tap(saveButton);
+      await _flush(tester);
+      await _pollOnce(tester);
+
+      expect(find.text('Lưu project'), findsOneWidget);
+      expect(find.text('Đã lưu project'), findsNothing);
+      expect(
+        find.text('Lưu dự án thất bại: Kiri publish failed.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('ready_for_crop shows 100% and stops polling so the user can save',
+        (tester) async {
+      const readyForCrop = KiriStatus(
+        scanSessionId: 'sess-300',
+        status: 'ready_for_crop',
+        progress: 75,
+      );
+      final api = _MockResultApi(statusToReturn: readyForCrop);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ScanResultScreen(
+            scanSessionId: 'sess-300',
+            api: api,
+            status: 'kiri_processing',
+            initialStatus: const KiriStatus(
+              scanSessionId: 'sess-300',
+              status: 'kiri_processing',
+              progress: 55,
+            ),
+          ),
+        ),
+      );
+      await _flush(tester);
+
+      expect(find.text('SẴN SÀNG'), findsOneWidget);
+      expect(find.text('RAW MODEL PREVIEW'), findsOneWidget);
+      expect(find.textContaining('100%'), findsOneWidget);
+      expect(find.textContaining('75%'), findsNothing);
+
+      final callsAfterReady = api.getStatusCallCount;
+      await tester.pump(const Duration(seconds: 10));
+      expect(api.getStatusCallCount, callsAfterReady);
+
+      final saveButton = find.text('Lưu project');
+      await tester.ensureVisible(saveButton);
+      await tester.pump();
+      await tester.tap(saveButton);
+      await _flush(tester);
+      await _pollOnce(tester);
+
+      expect(api.saveCallCount, 1);
       expect(find.text('Đã lưu project'), findsOneWidget);
     });
 
