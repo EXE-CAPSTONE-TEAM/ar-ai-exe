@@ -73,6 +73,14 @@ Future<String> _browserTabAuthenticator({
 }) =>
     FlutterWebAuth2.authenticate(url: url, callbackUrlScheme: callbackUrlScheme);
 
+/// An image of the scanned model, ready to upload as a project thumbnail.
+class ProjectThumbnail {
+  const ProjectThumbnail({required this.bytes, required this.contentType});
+
+  final Uint8List bytes;
+  final String contentType;
+}
+
 class BackendApi {
   BackendApi({
     Dio? dio,
@@ -436,6 +444,68 @@ class BackendApi {
     } catch (error) {
       throw ApiException.from(error);
     }
+  }
+
+  /// Decodes the `data:` URL a `<model-viewer>` snapshot is posted as.
+  /// Returns null for anything but a non-empty webp/png/jpeg image.
+  static ProjectThumbnail? thumbnailFromDataUrl(String dataUrl) {
+    final match = RegExp(r'^data:(image/(?:webp|png|jpeg));base64,(.+)$', dotAll: true)
+        .firstMatch(dataUrl);
+    if (match == null) {
+      return null;
+    }
+    try {
+      return ProjectThumbnail(
+        bytes: base64Decode(match.group(2)!),
+        contentType: match.group(1)!,
+      );
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// Sets the project-list card image: `assets/upload-url` (asset_type
+  /// `thumbnail`) → presigned PUT → `assets/confirm`, which makes it the
+  /// project's thumbnail on the backend.
+  Future<void> uploadProjectThumbnail({
+    required String projectId,
+    required Uint8List bytes,
+    required String contentType,
+  }) async {
+    await _ensureAccessToken();
+    final extension = switch (contentType) {
+      'image/webp' => 'webp',
+      'image/jpeg' => 'jpg',
+      _ => 'png',
+    };
+    final upload = await _post(
+      '$_kusshoesBaseUrl/api/v1/projects/$projectId/assets/upload-url',
+      body: {
+        'asset_type': 'thumbnail',
+        'filename': 'thumbnail.$extension',
+        'content_type': contentType,
+      },
+      authenticated: true,
+    );
+    try {
+      await _storageDio.put<void>(
+        upload['upload_url'] as String,
+        data: Stream.fromIterable([bytes]),
+        options: Options(
+          headers: {
+            Headers.contentTypeHeader: contentType,
+            Headers.contentLengthHeader: bytes.length,
+          },
+        ),
+      );
+    } catch (error) {
+      throw ApiException.from(error);
+    }
+    await _post(
+      '$_kusshoesBaseUrl/api/v1/projects/$projectId/assets/confirm',
+      body: {'asset_id': upload['asset_id'], 'file_size_bytes': bytes.length},
+      authenticated: true,
+    );
   }
 
   /// `DELETE /api/v1/users/me/avatar` — removes custom avatar.
