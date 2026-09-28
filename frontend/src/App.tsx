@@ -42,6 +42,7 @@ import { setApiBaseUrl } from "./api/runtimeConfig";
 import { EditorPanels } from "./components/Editor/EditorPanels";
 import { CropPanel, PrepareStep } from "./components/Crop/CropPanel";
 import { DesktopRequiredBanner, RawModelWebBanner } from "./components/Editor/DesktopRequiredBanner";
+import { DesktopSetupBanner } from "./components/Desktop/DesktopSetupBanner";
 import { AppShell } from "./components/Layout/AppShell";
 import { MetadataPanel } from "./components/MetadataPanel/MetadataPanel";
 import { ModelImportPanel } from "./components/ModelImport/ModelImportPanel";
@@ -496,13 +497,16 @@ export function App() {
       percent: 5,
     });
     try {
+      // Returns at once; the install runs in the shell and DesktopSetupBanner shows its progress.
       const progress = await installDesktopDependency("blender");
       setInstallProgress(progress);
-      await refreshDesktopRuntime();
       if (progress.status === "installed") {
+        await refreshDesktopRuntime();
         setStatusMessage("Preview renderer đã sẵn sàng.");
+      } else if (progress.status === "downloading") {
+        setStatusMessage("Đang tải bộ dựng hình 3D; xem tiến trình ở đầu trang.");
       } else {
-        setStatusMessage("Preview renderer cần được cấu hình trước khi cài đặt.");
+        setStatusMessage(progress.message);
       }
     } catch (error) {
       const message = messageFromError(error);
@@ -1202,6 +1206,15 @@ export function App() {
       className={isDesktopEditorLayout ? "desktop-editor-shell" : ""}
     >
       <main className="workspace" id="main-workspace">
+        {isDesktopShell ? (
+          <DesktopSetupBanner
+            onRendererInstalled={() => {
+              if (desktopApiMode === "local") {
+                void refreshDesktopRuntime();
+              }
+            }}
+          />
+        ) : null}
         {isDesktopShell && !isProjectEditor ? (
           <div className="desktop-launcher-layout">
             {desktopApiMode === "local" ? (

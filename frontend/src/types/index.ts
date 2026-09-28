@@ -146,9 +146,25 @@ export type DesktopRuntime = {
 export type InstallProgress = {
   name: string;
   status: "missing" | "downloading" | "installed" | "failed" | string;
+  /** downloading | verifying | extracting while status is "downloading" (desktop shell). */
+  stage?: string;
   message: string;
+  /** Overall 0-100 across download and unpack. */
   percent: number;
+  downloadedBytes?: number;
+  totalBytes?: number;
   path?: string | null;
+};
+
+export type AppUpdateInfo = {
+  version: string;
+  currentVersion: string;
+  notes?: string | null;
+};
+
+export type AppUpdateProgress = {
+  downloadedBytes: number;
+  totalBytes: number;
 };
 
 export type ModelAsset = {

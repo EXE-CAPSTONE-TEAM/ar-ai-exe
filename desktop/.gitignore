@@ -1,5 +1,7 @@
 node_modules/
 src-tauri/target/
+runtime-installer/target/
+sidecar-auth/target/
 src-tauri/gen/
 dist/
 *.log

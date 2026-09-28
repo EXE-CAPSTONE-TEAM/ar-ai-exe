@@ -18,3 +18,5 @@ time = "=0.3.44"
 tauri-plugin-deep-link = "2.0.0"
 tauri-plugin-single-instance = { version = "2.0.0", features = ["deep-link"] }
 sidecar-auth = { path = "../sidecar-auth" }
+runtime-installer = { path = "../runtime-installer" }
+tauri-plugin-updater = "2"

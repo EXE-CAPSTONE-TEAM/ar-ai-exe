@@ -6,7 +6,18 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["kusshoes-editor"]
+        "schemes": [
+          "kusshoes-editor"
+        ]
+      }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU1MEE3Q0QxQjNGMjVBRUQKUldUdFd2S3owWHdLNVh0M1F2bFd4bnpzMDV2ZHZ4dXVzaHdSQmp1S0VFUXpWQUs1S1p3dFg1WVkK",
+      "endpoints": [
+        "https://github.com/EXE-CAPSTONE-TEAM/ar-ai-exe/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   },
@@ -37,7 +48,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/icon.ico"
     ],
@@ -47,6 +60,18 @@
       "../dependencies/tools",
       "../sidecars/*",
       "../../data/3DModel.glb"
-    ]
+    ],
+    "createUpdaterArtifacts": true,
+    "publisher": "KusShoes",
+    "shortDescription": "KusShoes Editor",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
   }
 }
