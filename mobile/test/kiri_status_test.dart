@@ -19,6 +19,19 @@ void main() {
     expect(status.modelAssetId, 'asset_123');
   });
 
+  test('treats ready_for_crop as ready: the relay waits for save-project', () {
+    for (final value in ['ready_for_crop', 'crop_configured']) {
+      final status = KiriStatus.fromJson({
+        'scanSessionId': 'scan_4',
+        'status': value,
+        'progress': 75,
+      });
+
+      expect(status.isReady, isTrue, reason: value);
+      expect(status.isFailed, isFalse, reason: value);
+    }
+  });
+
   test('parses an in-progress Kiri response', () {
     final status = KiriStatus.fromJson({
       'scanSessionId': 'scan_2',

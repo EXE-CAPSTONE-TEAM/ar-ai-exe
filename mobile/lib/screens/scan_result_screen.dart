@@ -37,6 +37,12 @@ class ScanResultScreen extends StatefulWidget {
 }
 
 class _ScanResultScreenState extends State<ScanResultScreen> {
+  static const _pollInterval = Duration(seconds: 3);
+
+  /// UX guard so the save spinner cannot turn forever if the relay's background
+  /// publish dies (it has no timeout of its own). Not a measured publish time.
+  static const _saveTimeout = Duration(minutes: 10);
+
   BackendApi get _api => widget.api ?? BackendApi.shared;
 
   late final TextEditingController _projectNameController;
@@ -51,13 +57,13 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
   bool _saved = false;
   String? _errorMessage;
 
-  bool get _isDone =>
-      _currentStatus == 'completed' ||
-      _currentStatus == 'ready' ||
-      _currentStatus == 'raw';
+  bool get _isDone => KiriStatus.readyStatuses.contains(_currentStatus);
 
-  bool get _isFailed =>
-      _currentStatus == 'failed' || _currentStatus == 'expired';
+  bool get _isFailed => KiriStatus.failedStatuses.contains(_currentStatus);
+
+  /// Reconstruction is finished once the model is ready; the relay's 75 for
+  /// `ready_for_crop` only means it is waiting for the user to save.
+  int get _displayProgress => _isDone ? 100 : _progress;
 
   @override
   void initState() {
@@ -83,7 +89,7 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
 
   void _startPolling() {
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _poll());
+    _pollTimer = Timer.periodic(_pollInterval, (_) => _poll());
     unawaited(_poll());
   }
 
@@ -149,14 +155,19 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
       _errorMessage = null;
     });
     try {
-      await _api.saveKiriProject(
-        scanSessionId: widget.scanSessionId,
-        projectName: name,
+      final status = await _waitUntilSaved(
+        await _api.saveKiriProject(
+          scanSessionId: widget.scanSessionId,
+          projectName: name,
+        ),
       );
-      if (!mounted) return;
-      setState(() => _saved = true);
+      if (!mounted || status == null) return;
+      setState(() {
+        _currentStatus = status.status;
+        _saved = true;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Đã lưu dự án thành công!')),
+        const SnackBar(content: Text('Dự án của bạn đã được lưu thành công!')),
       );
     } catch (error) {
       if (!mounted) return;
@@ -170,6 +181,28 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
         setState(() => _saving = false);
       }
     }
+  }
+
+  /// save-project only queues the publish (`crop_baking`); the project exists
+  /// once the relay reports `ready`. Returns null if the screen was closed.
+  Future<KiriStatus?> _waitUntilSaved(KiriStatus status) async {
+    final deadline = DateTime.now().add(_saveTimeout);
+    while (status.status != 'ready') {
+      if (status.isFailed) {
+        throw ApiException(
+          message: status.errorMessage ?? 'Không thể lưu project.',
+        );
+      }
+      if (DateTime.now().isAfter(deadline)) {
+        throw const ApiException(
+          message: 'Lưu project quá lâu, vui lòng thử lại sau.',
+        );
+      }
+      await Future<void>.delayed(_pollInterval);
+      if (!mounted) return null;
+      status = await _api.getKiriStatus(scanSessionId: widget.scanSessionId);
+    }
+    return status;
   }
 
   Future<void> _openDesktop() async {
@@ -355,8 +388,8 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   CircularProgressIndicator(
-                                    value: _progress > 0
-                                        ? _progress / 100.0
+                                    value: _displayProgress > 0
+                                        ? _displayProgress / 100.0
                                         : null,
                                     color: AppTheme.orange,
                                   ),
@@ -364,7 +397,9 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                                   Text(
                                     _loadingPreview
                                         ? 'ĐANG TẢI MÔ HÌNH 3D...'
-                                        : 'ĐANG DỰNG LƯỚI 3D RAW ($_progress%)',
+                                        : _isDone
+                                            ? 'ĐÃ DỰNG XONG LƯỚI 3D ($_displayProgress%)'
+                                            : 'ĐANG DỰNG LƯỚI 3D RAW ($_displayProgress%)',
                                     style: AppTheme.monoFont(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w700,
@@ -373,7 +408,9 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    'Vui lòng chờ trong giây lát',
+                                    _isDone && !_loadingPreview
+                                        ? 'Nhập tên và bấm "Lưu project" để lưu mô hình'
+                                        : 'Vui lòng chờ trong giây lát',
                                     style: AppTheme.bodyFont(
                                       fontSize: 11,
                                       color: Colors.grey,
@@ -430,7 +467,9 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
-                        onPressed: _saving ? null : _saveProject,
+                        // The relay only saves once the model is ready; tapping
+                        // earlier would leave the spinner waiting for nothing.
+                        onPressed: _saving || !_isDone ? null : _saveProject,
                         icon: _saving
                             ? const SizedBox.square(
                                 dimension: 18,
