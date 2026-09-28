@@ -39,6 +39,32 @@ class ScanResultScreen extends StatefulWidget {
 class _ScanResultScreenState extends State<ScanResultScreen> {
   static const _pollInterval = Duration(seconds: 3);
 
+  static const _previewElementId = 'scan-preview';
+  static const _snapshotChannel = 'KusThumbnail';
+
+  /// Once the model has loaded, grab one frame of the viewer (before
+  /// auto-rotate starts) as the project's card image. WebP where the WebView
+  /// can encode it, PNG otherwise; both keep the transparent background.
+  static const _snapshotJs = """
+(function () {
+  const viewer = document.getElementById('$_previewElementId');
+  if (!viewer) return;
+  viewer.addEventListener('load', function () {
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        try {
+          let url = viewer.toDataURL('image/webp', 0.9);
+          if (url.indexOf('data:image/webp') !== 0) url = viewer.toDataURL('image/png');
+          $_snapshotChannel.postMessage(url);
+        } catch (e) {
+          $_snapshotChannel.postMessage('error:' + e);
+        }
+      });
+    });
+  }, { once: true });
+})();
+""";
+
   /// UX guard so the save spinner cannot turn forever if the relay's background
   /// publish dies (it has no timeout of its own). Not a measured publish time.
   static const _saveTimeout = Duration(minutes: 10);
@@ -56,6 +82,12 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
   bool _saving = false;
   bool _saved = false;
   String? _errorMessage;
+
+  /// Snapshot of the preview, uploaded as the project's list thumbnail once
+  /// the project is saved (whichever of the two happens last triggers it).
+  ProjectThumbnail? _thumbnail;
+  String? _savedProjectId;
+  bool _thumbnailUploaded = false;
 
   bool get _isDone => KiriStatus.readyStatuses.contains(_currentStatus);
 
@@ -162,6 +194,8 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
         ),
       );
       if (!mounted || status == null) return;
+      _savedProjectId = status.projectId;
+      unawaited(_maybeUploadThumbnail());
       setState(() {
         _currentStatus = status.status;
         _saved = true;
@@ -180,6 +214,40 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
       if (mounted) {
         setState(() => _saving = false);
       }
+    }
+  }
+
+  void _onThumbnailCaptured(String dataUrl) {
+    final thumbnail = BackendApi.thumbnailFromDataUrl(dataUrl);
+    if (thumbnail == null) {
+      debugPrint('Scan thumbnail capture failed: '
+          '${dataUrl.length > 80 ? dataUrl.substring(0, 80) : dataUrl}');
+      return;
+    }
+    _thumbnail ??= thumbnail;
+    unawaited(_maybeUploadThumbnail());
+  }
+
+  /// Best effort: a missing card image must never fail or delay the save.
+  Future<void> _maybeUploadThumbnail() async {
+    final thumbnail = _thumbnail;
+    final projectId = _savedProjectId;
+    if (widget.isGuest ||
+        _thumbnailUploaded ||
+        thumbnail == null ||
+        projectId == null) {
+      return;
+    }
+    _thumbnailUploaded = true;
+    try {
+      await _api.uploadProjectThumbnail(
+        projectId: projectId,
+        bytes: thumbnail.bytes,
+        contentType: thumbnail.contentType,
+      );
+    } catch (error) {
+      _thumbnailUploaded = false;
+      debugPrint('Scan thumbnail upload failed: $error');
     }
   }
 
@@ -335,12 +403,21 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(22),
                                 child: ModelViewer(
+                                  id: _previewElementId,
                                   src: _previewUrl!,
                                   alt: 'Mô hình quét raw',
                                   ar: false,
                                   autoRotate: true,
                                   cameraControls: true,
                                   backgroundColor: Colors.transparent,
+                                  relatedJs: _snapshotJs,
+                                  javascriptChannels: {
+                                    JavascriptChannel(
+                                      _snapshotChannel,
+                                      onMessageReceived: (message) =>
+                                          _onThumbnailCaptured(message.message),
+                                    ),
+                                  },
                                 ),
                               )
                             else if (_isFailed)
