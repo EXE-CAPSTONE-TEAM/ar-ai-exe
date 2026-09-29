@@ -430,7 +430,11 @@ class DecalBakeService:
 
     def _safe_color(self, value: str) -> str:
         color = value.strip()
-        return color if re.fullmatch(r"#[0-9A-Fa-f]{3,8}", color) else "#ffffff"
+        return (
+            color
+            if re.fullmatch(r"^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$", color)
+            else "#ffffff"
+        )
 
     def _safe_font(self, value: str) -> str:
         cleaned = re.sub(r"[^A-Za-z0-9 ._-]+", "", value).strip()

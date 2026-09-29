@@ -29,6 +29,8 @@ class Settings(BaseSettings):
         "tauri://localhost",
     ]
 
+    trusted_proxy_ips: list[str] = ["127.0.0.1", "::1", "localhost"]
+
     storage_root: Path = Path("storage")
     storage_backend: str = "local"
     storage_public_base_url: str = ""
@@ -127,6 +129,8 @@ class Settings(BaseSettings):
         if is_prod:
             if self.jwt_secret_key == "local-dev-jwt-secret-change-me-32bytes-min":
                 raise ValueError("Insecure default jwt_secret_key cannot be used in production/staging environment")
+            if len(self.jwt_secret_key.strip()) < 32:
+                raise ValueError("jwt_secret_key must be at least 32 characters in production/staging environment")
             if self.enable_demo_auth:
                 raise ValueError("enable_demo_auth must be False in production/staging environment")
             self.auth_cookie_secure = True
