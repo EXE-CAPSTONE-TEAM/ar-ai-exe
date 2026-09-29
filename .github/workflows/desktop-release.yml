@@ -42,14 +42,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Trigger-controlled values reach scripts only through env, never ${{ }} in the script body.
       - name: Resolve version
         id: version
         shell: pwsh
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if ("${{ github.ref_type }}" -eq "tag") {
-            $version = "${{ github.ref_name }}" -replace '^desktop-v', ''
-          } elseif ("${{ inputs.version }}") {
-            $version = "${{ inputs.version }}"
+          if ($env:REF_TYPE -eq "tag") {
+            $version = $env:REF_NAME -replace '^desktop-v', ''
+          } elseif ($env:INPUT_VERSION) {
+            $version = $env:INPUT_VERSION
           } else {
             $version = (Get-Content desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           }
@@ -58,10 +63,12 @@ jobs:
 
       - name: Stamp version
         shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           $path = "desktop/src-tauri/tauri.conf.json"
           $config = Get-Content $path -Raw | ConvertFrom-Json
-          $config.version = "${{ steps.version.outputs.version }}"
+          $config.version = $env:VERSION
           $config | ConvertTo-Json -Depth 32 | Set-Content -Encoding utf8 $path
 
       - uses: actions/setup-node@v4
@@ -72,11 +79,14 @@ jobs:
             frontend/package-lock.json
             desktop/package-lock.json
 
-      - uses: astral-sh/setup-uv@v6
+      # Third-party actions are pinned to commit SHAs (tags can be moved).
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+        with:
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: |
             desktop/src-tauri
@@ -113,7 +123,7 @@ jobs:
 
       - name: Build installer (and publish on tag)
         id: tauri
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -135,11 +145,12 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           $installer = Get-ChildItem desktop/src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
           if (-not $installer) { throw "NSIS installer not found" }
           Copy-Item $installer.FullName $env:STABLE_INSTALLER_NAME
-          gh release upload "${{ github.ref_name }}" $env:STABLE_INSTALLER_NAME --clobber
+          gh release upload $env:REF_NAME $env:STABLE_INSTALLER_NAME --clobber
 
       - name: Keep dry-run installer as an artifact
         if: github.ref_type != 'tag'
