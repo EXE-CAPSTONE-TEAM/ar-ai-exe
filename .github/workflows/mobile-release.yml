@@ -117,8 +117,10 @@ jobs:
             echo "APK is signed with $actual, not the release key $RELEASE_CERT_SHA256" >&2
             exit 1
           fi
-          "$tools/aapt2" dump badging "$apk" | grep -E "^(package|sdkVersion|targetSdkVersion|application-label):" | tee badging.txt
-          min_sdk=$(sed -n "s/^sdkVersion:'\([0-9]*\)'.*/\1/p" badging.txt)
+          "$tools/aapt2" dump badging "$apk" | grep -E "^(package|minSdkVersion|sdkVersion|targetSdkVersion|application-label):" | tee badging.txt
+          # Newer aapt2 prints minSdkVersion, older ones sdkVersion.
+          min_sdk=$(sed -n "s/^\(minSdkVersion\|sdkVersion\):'\([0-9]*\)'.*/\2/p" badging.txt | head -1)
+          if [ -z "$min_sdk" ]; then echo "Could not read minSdk from the APK" >&2; exit 1; fi
           echo "min_sdk=$min_sdk" >> "$GITHUB_OUTPUT"
           mkdir -p ../dist
           cp "$apk" "../dist/KusShoes-$VERSION.apk"
