@@ -410,6 +410,7 @@ class DecalBakeService:
         width = int(512 * aspect)
         escaped_text = html.escape(value, quote=False)
         escaped_font = html.escape(font, quote=True)
+        escaped_color = html.escape(self._safe_color(color), quote=True)
         image_path.write_text(
             (
                 '<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="512" '
@@ -419,7 +420,7 @@ class DecalBakeService:
                 'font-size="300" font-weight="700" text-anchor="middle" '
                 'dominant-baseline="central">{text}</text>'
                 "</svg>"
-            ).format(width=width, color=color, font=escaped_font, text=escaped_text),
+            ).format(width=width, color=escaped_color, font=escaped_font, text=escaped_text),
             encoding="utf-8",
         )
         return image_path
@@ -429,7 +430,7 @@ class DecalBakeService:
 
     def _safe_color(self, value: str) -> str:
         color = value.strip()
-        return color if re.fullmatch(r"#[0-9A-Fa-f]{6}", color) else "#ffffff"
+        return color if re.fullmatch(r"#[0-9A-Fa-f]{3,8}", color) else "#ffffff"
 
     def _safe_font(self, value: str) -> str:
         cleaned = re.sub(r"[^A-Za-z0-9 ._-]+", "", value).strip()

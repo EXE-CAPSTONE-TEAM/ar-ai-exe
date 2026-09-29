@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     marketing_login_url: str = "https://kusshoes.vercel.app/login"
     jwt_secret_key: str = "local-dev-jwt-secret-change-me-32bytes-min"
     jwt_algorithm: str = "HS256"
-    jwt_access_token_minutes: int = 1440
+    jwt_access_token_minutes: int = 60
     auth_cookie_name: str = "kusshoes_access_token"
     auth_cookie_domain: str = ""
     auth_cookie_secure: bool = False
@@ -123,6 +123,13 @@ class Settings(BaseSettings):
     def model_post_init(self, __context: object) -> None:
         if self.app_role.lower() == "relay":
             self.control_plane_service_token = ""
+        is_prod = self.environment.lower() in ("production", "prod", "staging")
+        if is_prod:
+            if self.jwt_secret_key == "local-dev-jwt-secret-change-me-32bytes-min":
+                raise ValueError("Insecure default jwt_secret_key cannot be used in production/staging environment")
+            if self.enable_demo_auth:
+                raise ValueError("enable_demo_auth must be False in production/staging environment")
+            self.auth_cookie_secure = True
 
     @property
     def resolved_storage_root(self) -> Path:
