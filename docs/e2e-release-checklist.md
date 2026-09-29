@@ -8,7 +8,7 @@ Phiên bản đang phát hành (kiểm tra lại trước khi test):
 
 | Thành phần | Bản | Nguồn tải |
 |---|---|---|
-| App Android | `mobile-v0.1.0` (versionCode 100, Android 7.0+) | https://kusshoes.vercel.app/products → **Tải file APK** |
+| App Android | `mobile-v0.1.1` (versionCode 101, Android 7.0+) | https://kusshoes.vercel.app/products → **Tải file APK** |
 | KusShoes Editor (Windows) | `desktop-v0.1.0` | Dashboard → **Get Desktop App**, hoặc Products → **Tải trình cài đặt Desktop** |
 | Web | `main` trên Vercel | https://kusshoes.vercel.app |
 | API | `api.kusshoes.kietta.me`, relay `relay.kusshoes.kietta.me` | — |
@@ -45,7 +45,7 @@ Phiên bản đang phát hành (kiểm tra lại trước khi test):
 ### 1.1 Tải và cài APK (trên điện thoại)
 
 - [ ] Mở https://kusshoes.vercel.app/products trên điện thoại. Tab **Android** đang được chọn, dòng mô
-      tả ghi "Android 7.0 trở lên", nút ghi **Tải file APK v0.1.0**.
+      tả ghi "Android 7.0 trở lên", nút ghi **Tải file APK v0.1.1**.
 - [ ] Bấm tải. File tên `KusShoes-Android.apk`, khoảng 55 MB.
 - [ ] Mở file. Android hỏi cho phép cài từ trình duyệt → cho phép. Ghi lại **nguyên văn** mọi cảnh
       báo (Play Protect "ứng dụng không xác định"…) để viết hướng dẫn cho người dùng.
@@ -61,9 +61,8 @@ Phiên bản đang phát hành (kiểm tra lại trước khi test):
 
 ### 1.3 Quét giày
 
-- [ ] Vào màn hình quét. Android hỏi quyền **Camera** → cho phép. Ghi lại nếu app còn hỏi quyền
-      **Micro** hoặc **Bộ nhớ** (app quay video không tiếng; hai quyền này do plugin camera khai báo, xem
-      mục 6).
+- [ ] Vào màn hình quét. Android chỉ hỏi quyền **Camera** → cho phép. App **không** được hỏi quyền
+      Micro hay Bộ nhớ (đã gỡ ở 0.1.1). Trong Cài đặt → Ứng dụng → KusShoes → Quyền, chỉ có Camera.
 - [ ] 📸 Màn hình quay có hướng dẫn.
 - [ ] Quay theo hướng dẫn trên màn hình ("Xoay 2 tầng quanh đôi giày trong 45 giây") rồi dừng.
 - [ ] Màn hình tải lên: phần trăm tăng dần tới xong, không kẹt.
@@ -142,7 +141,7 @@ này nếu khác.
 | Mục | Yêu cầu | Trạng thái |
 |---|---|---|
 | Tài khoản developer | Miễn phí. Username, email, mật khẩu, tên developer, giới thiệu, website, icon 512×512, banner hồ sơ 4096×2304 | ☐ Chưa tạo |
-| File app | APK đã ký bằng khoá release | ✅ `KusShoes-Android.apk` trong release `mobile-v0.1.0`, ký bằng chứng chỉ `6cd7bf77…3dfd` |
+| File app | APK đã ký bằng khoá release | ✅ `KusShoes-Android.apk` trong release `mobile-v0.1.1`, ký bằng chứng chỉ `6cd7bf77…3dfd` |
 | Tên gói | Cố định mãi mãi | ✅ `vn.kusshoes.mobile` |
 | Tên app | — | ✅ `KusShoes` |
 | Icon | 512×512 | ✅ `docs/store/apkpure/icon-512.png` (logo KusShoes; `mobile/web/icons/Icon-512.png` vẫn là logo Flutter, **đừng dùng**) |
@@ -152,7 +151,7 @@ này nếu khác.
 | Thể loại, content rating | Chọn trong console | ☐ Gợi ý: *Nghệ thuật & Thiết kế* (Art & Design); nội dung cho mọi lứa tuổi |
 | **Chính sách bảo mật (URL)** | Bắt buộc | ❌ **Chưa có.** Footer web đang hiện "sắp có"; app ẩn link vì `KUSSHOES_PRIVACY_URL` trống. Cần trang nêu: dữ liệu thu thập (email, tên, video quét, mô hình 3D), gửi cho bên xử lý (KIRI Engine để dựng 3D, Cloudflare R2 để lưu trữ, Google nếu đăng nhập bằng Google), thời gian lưu, cách xoá tài khoản, email liên hệ |
 | **Google OAuth** | Người dùng thật phải đăng nhập Google được | ❌ Consent screen đang ở chế độ **Testing**: chỉ Test users vào được. Trước khi mở cho công chúng phải bấm **Publish app** (có thể cần Google xác minh vì app xin email/profile) |
-| Quyền Micro và Bộ nhớ | Người dùng thấy trong trang cài | ⚠️ APK khai báo `RECORD_AUDIO` và `WRITE_EXTERNAL_STORAGE`, dù app quay video không tiếng (`enableAudio: false`). Nên gỡ bằng `tools:node="remove"` trong `AndroidManifest.xml`, rồi phát hành `mobile-v0.1.1` trước khi nộp, để bớt quyền đáng ngờ |
+| Quyền Micro và Bộ nhớ | Người dùng thấy trong trang cài | ✅ Đã gỡ ở `mobile-v0.1.1` (`tools:node="remove"`); workflow phát hành từ chối APK còn khai báo `RECORD_AUDIO` / `WRITE_EXTERNAL_STORAGE` / `READ_EXTERNAL_STORAGE`. Quyền còn lại: Internet, Camera |
 | Liên hệ hỗ trợ | Email hỗ trợ | ☐ Chọn email chính thức (ví dụ `kusshoes@gmail.com`) |
 
 Sau khi nộp: APKPure duyệt (theo nguồn bên thứ ba khoảng 24–48 giờ) và báo qua email.
@@ -189,8 +188,8 @@ Sau khi nộp: APKPure duyệt (theo nguồn bên thứ ba khoảng 24–48 gi�
 >
 > Requires a KusShoes account (email or Google sign-in) and an Internet connection.
 
-**What's new (0.1.0):** Bản phát hành đầu tiên: quét giày bằng video 360°, dựng 3D bằng KIRI Engine, lưu
-dự án kèm ảnh đại diện, đăng nhập bằng email hoặc Google.
+**What's new (0.1.1):** Bản phát hành đầu tiên trên APKPure: quét giày bằng video 360°, dựng 3D bằng
+KIRI Engine, lưu dự án kèm ảnh đại diện, đăng nhập bằng email hoặc Google. Chỉ xin quyền Camera.
 
 ## 8. Khoá ký: bắt buộc trước khi phát hành công khai
 
@@ -207,5 +206,5 @@ dự án kèm ảnh đại diện, đăng nhập bằng email hoặc Google.
   rating): [thepssaini.com — How to publish app on APKPure](https://thepssaini.com/how-to-publish-app-on-apkpure-app-store/)
 - Tạo tài khoản developer APKPure (miễn phí, các trường hồ sơ): [thepssaini.com — APKPure developer console account](https://thepssaini.com/apkpure-developer-console-account/)
 - Kết quả tìm kiếm tổng hợp (icon 512×512, privacy policy, duyệt 24–48 giờ): [APKPure — How to create developer console account](https://apkpure.com/howto/how-to-create-apkpure-developer-console-account-for-free)
-- Phiên bản, chữ ký và minSdk của APK: kiểm tra trực tiếp trên release `mobile-v0.1.0` (apksigner / androguard).
+- Phiên bản, chữ ký, minSdk và quyền của APK: kiểm tra trực tiếp trên release (apksigner / aapt2 / androguard).
 - Thư mục dữ liệu desktop: Tauri `app_data_dir()` = `dirs::data_dir()` + identifier `com.kusshoes.editor`.
