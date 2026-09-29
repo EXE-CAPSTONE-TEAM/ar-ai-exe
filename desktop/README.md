@@ -84,44 +84,52 @@ The first screen opens with `?desktop=1`, starts the local backend, seeds
 
 ## Preview Renderer Artifact
 
-The dependency manifest lives at:
+The dependency manifest lives at `desktop/dependencies/blender.windows.json`. It points at the
+official Blender 4.5.1 Windows zip, mirrored unmodified as a **prerelease** asset of this repo
+(release `blender-runtime-4.5.1`), with its SHA-256. Installers do **not** bundle Blender.
 
-```text
-desktop/dependencies/blender.windows.json
-```
-
-Desktop production builds must use the internal artifact store, not direct
-runtime downloads from `download.blender.org`. Configure one of these inputs
-before preparing or building the desktop app:
-
-```powershell
-$env:KUSSHOES_BLENDER_ARTIFACT_PATH = "X:\artifacts\blender-4.5.1-windows-x64.zip"
-# or
-$env:KUSSHOES_BLENDER_ARTIFACT_URL = "https://internal-artifacts.example/kusshoes/blender-4.5.1-windows-x64.zip"
-$env:KUSSHOES_BLENDER_SHA256 = "<64-character sha256>"
-```
-
-Prepare the bundled resource:
-
-```powershell
-cd desktop
-npm run prepare:blender
-```
-
-The script copies/downloads the artifact, verifies SHA-256, extracts it under
-`desktop/dependencies/tools/blender/`, and keeps the Blender notice in
-`desktop/dependencies/BLENDER-NOTICE.txt`. Generated archives and extracted
-runtime files are ignored by git but included by Tauri when present.
+On first launch the shell downloads it in the background (`runtime-installer` crate): stream to
+`%LOCALAPPDATA%\KusShoes Editor\runtime\downloads`, verify SHA-256, unpack (~900 MB) into a
+staging folder, then swap it into `runtime\tools\blender`. Progress is emitted as
+`dependency-install-progress` events and shown by `DesktopSetupBanner`; the editor stays usable
+meanwhile. A failed install offers "Thử lại"; a partially downloaded or unpacked renderer is never
+used.
 
 At runtime, the launcher resolves Blender in this order:
 
 1. `BLENDER_BIN`
 2. installed app-data runtime under `%LOCALAPPDATA%\KusShoes Editor`
 3. bundled Tauri resource under `desktop/dependencies/tools/blender`
-4. development auto-install from the configured internal artifact
+4. repo-prepared runtime (development)
+
+Overrides (development): `KUSSHOES_BLENDER_ARTIFACT_PATH` (local zip) or
+`KUSSHOES_BLENDER_ARTIFACT_URL`, plus `KUSSHOES_BLENDER_SHA256`;
+`KUSSHOES_DESKTOP_AUTO_INSTALL_BLENDER=0` disables the first-launch download. The manifest must
+never point at `download.blender.org`.
 
 Save Draft does not require Blender. Import GLB/OBJ, Bake Preview, and Export
 still require the Preview renderer.
+
+## Release (installer, download link, auto-update)
+
+`.github/workflows/desktop-release.yml` builds on `windows-latest`:
+
+- push a tag `desktop-vX.Y.Z` → NSIS installer (per-user, no admin, WebView2 bootstrapper
+  embedded), signed for the updater, published as a GitHub release with `latest.json` and a
+  stable-name copy `KusShoesEditor-Setup-x64.exe`;
+- pull requests touching `desktop/`, `frontend/` or `backend/` → the same build as a dry run
+  (installer kept as a workflow artifact).
+
+The web app links to
+`https://github.com/EXE-CAPSTONE-TEAM/ar-ai-exe/releases/latest/download/KusShoesEditor-Setup-x64.exe`.
+Installed apps check `releases/latest/download/latest.json` at startup and offer "Cập nhật ngay".
+
+Updater signing: repo secrets `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`;
+the public key is in `tauri.conf.json`. Losing the private key means installed apps can no
+longer be updated, so keep an offline backup.
+
+The installer is not Authenticode-signed yet, so Windows SmartScreen warns on first run
+("More info" → "Run anyway") until a code-signing step is added to the workflow.
 
 ## Build Backend Sidecar
 

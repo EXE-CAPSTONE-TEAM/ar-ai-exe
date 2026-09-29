@@ -1,0 +1,12 @@
+[package]
+name = "runtime-installer"
+version = "0.1.0"
+edition = "2021"
+description = "Downloads, verifies (SHA-256) and unpacks the desktop's runtime dependencies (Blender) with progress callbacks. No Tauri dependency, so it builds and tests on any host."
+publish = false
+
+[dependencies]
+hex = "0.4"
+sha2 = "0.10"
+ureq = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }

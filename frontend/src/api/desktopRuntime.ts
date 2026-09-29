@@ -1,4 +1,4 @@
-import type { DesktopRuntime, InstallProgress } from "../types";
+import type { AppUpdateInfo, DesktopRuntime, InstallProgress } from "../types";
 
 type TauriGlobal = {
   core?: {
@@ -57,6 +57,30 @@ export async function installDesktopDependency(name: "blender"): Promise<Install
     };
   }
   return window.__TAURI__!.core!.invoke!<InstallProgress>("install_dependency", { name });
+}
+
+/** Latest state of the background preview-renderer install (null outside the desktop shell). */
+export async function getInstallProgress(): Promise<InstallProgress | null> {
+  if (!hasDesktopRuntimeBridge()) {
+    return null;
+  }
+  return window.__TAURI__!.core!.invoke!<InstallProgress>("get_install_progress");
+}
+
+/** A newer desktop version found by the startup update check, if any. */
+export async function getAppUpdate(): Promise<AppUpdateInfo | null> {
+  if (!hasDesktopRuntimeBridge()) {
+    return null;
+  }
+  return window.__TAURI__!.core!.invoke!<AppUpdateInfo | null>("get_app_update");
+}
+
+/** Downloads and installs the pending update; the app restarts itself when it succeeds. */
+export async function installAppUpdate(): Promise<void> {
+  if (!hasDesktopRuntimeBridge()) {
+    return;
+  }
+  await window.__TAURI__!.core!.invoke!("install_app_update");
 }
 
 export async function openDiagnosticsFolder(): Promise<void> {
