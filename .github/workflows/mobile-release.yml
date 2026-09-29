@@ -110,7 +110,7 @@ jobs:
           BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
         run: |
           flutter pub get
-          flutter build apk --release --build-name "$VERSION" --build-number "$BUILD_NUMBER"
+          flutter build apk --release -v --build-name "$VERSION" --build-number "$BUILD_NUMBER"
 
       - name: Verify release signature
         id: apk
