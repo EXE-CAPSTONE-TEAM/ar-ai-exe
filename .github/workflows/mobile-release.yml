@@ -76,6 +76,15 @@ jobs:
           channel: stable
           cache: true
 
+      # The Kotlin compile daemon fails on the runner while building Flutter's Gradle plugin
+      # (":gradle:compileKotlin": NoSuchFileException .gradle/kotlin/sessions/*.salive).
+      # Compiling in-process avoids the daemon's session files; set in GRADLE_USER_HOME so it
+      # also applies to the included Flutter plugin build.
+      - name: Gradle settings
+        run: |
+          mkdir -p ~/.gradle
+          echo "kotlin.compiler.execution.strategy=in-process" >> ~/.gradle/gradle.properties
+
       - name: Release signing
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
