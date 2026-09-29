@@ -26,10 +26,11 @@ flowchart TD
 
 ## Runtime Data
 
-Desktop runtime data is outside the repo:
+Desktop runtime data is outside the repo, in Tauri's app data dir (`%APPDATA%` + the bundle
+identifier `com.kusshoes.editor`; the in-app **Logs** button opens `runtime\logs`):
 
 ```text
-%LOCALAPPDATA%\KusShoes Editor\
+%APPDATA%\com.kusshoes.editor\
   runtime\logs\
   runtime\tools\blender\
   storage\app.db
@@ -89,7 +90,7 @@ official Blender 4.5.1 Windows zip, mirrored unmodified as a **prerelease** asse
 (release `blender-runtime-4.5.1`), with its SHA-256. Installers do **not** bundle Blender.
 
 On first launch the shell downloads it in the background (`runtime-installer` crate): stream to
-`%LOCALAPPDATA%\KusShoes Editor\runtime\downloads`, verify SHA-256, unpack (~900 MB) into a
+`%APPDATA%\com.kusshoes.editor\runtime\downloads`, verify SHA-256, unpack (~900 MB) into a
 staging folder, then swap it into `runtime\tools\blender`. Progress is emitted as
 `dependency-install-progress` events and shown by `DesktopSetupBanner`; the editor stays usable
 meanwhile. A failed install offers "Thử lại"; a partially downloaded or unpacked renderer is never
@@ -98,7 +99,7 @@ used.
 At runtime, the launcher resolves Blender in this order:
 
 1. `BLENDER_BIN`
-2. installed app-data runtime under `%LOCALAPPDATA%\KusShoes Editor`
+2. installed app-data runtime under `%APPDATA%\com.kusshoes.editor`
 3. bundled Tauri resource under `desktop/dependencies/tools/blender`
 4. repo-prepared runtime (development)
 
