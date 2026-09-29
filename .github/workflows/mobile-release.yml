@@ -120,6 +120,14 @@ jobs:
           fi
           "$tools/aapt2" dump badging "$apk" | grep -E "^(package|minSdkVersion|sdkVersion|targetSdkVersion|application-label):" | tee badging.txt
           # Newer aapt2 prints minSdkVersion, older ones sdkVersion.
+          # Permissions the app must not ask for (see AndroidManifest.xml).
+          "$tools/aapt2" dump permissions "$apk" | tee permissions.txt
+          for unwanted in RECORD_AUDIO WRITE_EXTERNAL_STORAGE READ_EXTERNAL_STORAGE; do
+            if grep -q "android.permission.$unwanted" permissions.txt; then
+              echo "APK declares android.permission.$unwanted" >&2
+              exit 1
+            fi
+          done
           min_sdk=$(sed -n "s/^\(minSdkVersion\|sdkVersion\):'\([0-9]*\)'.*/\2/p" badging.txt | head -1)
           if [ -z "$min_sdk" ]; then echo "Could not read minSdk from the APK" >&2; exit 1; fi
           echo "min_sdk=$min_sdk" >> "$GITHUB_OUTPUT"
