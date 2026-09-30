@@ -21,6 +21,12 @@ describe("setupBannerView", () => {
     expect(setupBannerView({ ...base, status: "failed", stage: "failed" })).toMatchObject({ tone: "error", canRetry: true });
     expect(setupBannerView({ ...base, status: "installed", stage: "installed", percent: 100 })).toMatchObject({ tone: "done", percent: 100 });
   });
+
+  it("keeps the raw shell error behind technical details instead of the headline copy", () => {
+    const view = setupBannerView({ ...base, status: "failed", stage: "failed", message: "Preview renderer manifest was not found." });
+    expect(view?.technicalDetail).toBe("Preview renderer manifest was not found.");
+    expect(view?.detail).not.toContain("manifest");
+  });
 });
 
 describe("updatePercent", () => {

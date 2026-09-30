@@ -1,12 +1,9 @@
 import {
   AlertTriangle,
   CheckCircle2,
-  Cloud,
   Cpu,
   Download,
   HardDrive,
-  FolderOpen,
-  ImagePlus,
   Info,
   Loader2,
   LogIn,
@@ -42,6 +39,8 @@ import { setApiBaseUrl } from "./api/runtimeConfig";
 import { EditorPanels } from "./components/Editor/EditorPanels";
 import { CropPanel, PrepareStep } from "./components/Crop/CropPanel";
 import { DesktopRequiredBanner, RawModelWebBanner } from "./components/Editor/DesktopRequiredBanner";
+import { DesktopLauncher } from "./components/Desktop/DesktopLauncher";
+import type { DesktopApiMode, DesktopEngineState } from "./components/Desktop/DesktopLauncher";
 import { DesktopSetupBanner } from "./components/Desktop/DesktopSetupBanner";
 import { AppShell } from "./components/Layout/AppShell";
 import { MetadataPanel } from "./components/MetadataPanel/MetadataPanel";
@@ -76,10 +75,8 @@ import {
 } from "./utils/editorMessages";
 
 const MARKETING_LOGIN_URL = import.meta.env.VITE_MARKETING_LOGIN_URL ?? "https://kusshoes.vercel.app/login";
-const DESKTOP_DEMO_PROJECT_ID = import.meta.env.VITE_DESKTOP_DEMO_PROJECT_ID ?? "proj_desktop_demo";
 const DESKTOP_CLOUD_API_BASE_URL = (import.meta.env.VITE_DESKTOP_CLOUD_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
 const DEFAULT_EDITOR_PERMISSIONS: EditorPermissions = { canEdit: true, canBake: true, canExport: true };
-type DesktopApiMode = "local" | "cloud";
 
 export function App() {
   const isDesktopShell = useMemo(() => isDesktopShellLocation(), []);
@@ -93,9 +90,10 @@ export function App() {
     return stored === "cloud" ? "cloud" : "local";
   });
   const [desktopCloudReady, setDesktopCloudReady] = useState(false);
-  const [cloudProjects, setCloudProjects] = useState<CloudProject[]>([]);
-  const [isCloudProjectsLoading, setIsCloudProjectsLoading] = useState(false);
-  const cloudProjectsLoadingRef = useRef(false);
+  const [desktopProjects, setDesktopProjects] = useState<CloudProject[]>([]);
+  const [isDesktopProjectsLoading, setIsDesktopProjectsLoading] = useState(false);
+  const [desktopProjectsError, setDesktopProjectsError] = useState<string | null>(null);
+  const desktopProjectsLoadingRef = useRef(false);
   const [editorReadiness, setEditorReadiness] = useState<EditorReadiness | null>(null);
   const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
   const desktopRuntimeReady =
@@ -131,6 +129,7 @@ export function App() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [isAuthBusy, setIsAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
   const [meshBounds, setMeshBounds] = useState<{ center: [number, number, number]; size: [number, number, number] } | null>(null);
   const [gizmoMode, setGizmoMode] = useState<"translate" | "rotate" | "scale">("translate");
@@ -138,7 +137,6 @@ export function App() {
   const [editorPermissions, setEditorPermissions] = useState<EditorPermissions>(DEFAULT_EDITOR_PERMISSIONS);
   const [desktopProjectInput, setDesktopProjectInput] = useState("");
   const [desktopLaunchError, setDesktopLaunchError] = useState<string | null>(null);
-  const [isDesktopDemoOpening, setIsDesktopDemoOpening] = useState(false);
   const [isDesktopImportOpen, setIsDesktopImportOpen] = useState(false);
   const [sourceImportError, setSourceImportError] = useState<string | null>(null);
   const [isDesktopDetailsOpen, setIsDesktopDetailsOpen] = useState(false);
@@ -260,14 +258,19 @@ export function App() {
     api.me().then(setUser).catch(() => api.logout());
   }, [desktopApiMode, desktopCloudReady, isDesktopShell, isProjectEditor, user]);
 
+  // Cloud lists the signed-in account's projects; local lists the sidecar's offline workspace.
+  const canListDesktopProjects =
+    isDesktopShell &&
+    !isProjectEditor &&
+    (desktopApiMode === "cloud" ? desktopCloudReady && Boolean(user) : desktopRuntime?.backendStatus === "ready");
   useEffect(() => {
-    if (!isDesktopShell || desktopApiMode !== "cloud" || !desktopCloudReady || !user || isProjectEditor) {
+    if (!canListDesktopProjects) {
       return;
     }
-    void loadCloudProjects();
-    const timer = window.setInterval(() => void loadCloudProjects(), 5000);
+    void loadDesktopProjects();
+    const timer = window.setInterval(() => void loadDesktopProjects(), 5000);
     return () => window.clearInterval(timer);
-  }, [desktopApiMode, desktopCloudReady, isDesktopShell, isProjectEditor, user]);
+  }, [canListDesktopProjects, desktopApiMode]);
 
   useEffect(() => {
     if (isProjectEditor || isDesktopShell) {
@@ -378,6 +381,7 @@ export function App() {
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsAuthBusy(true);
+    setAuthError(null);
     setStatusMessage(authMode === "login" ? "Signing in" : "Creating account");
     try {
       const signedInUser =
@@ -387,7 +391,9 @@ export function App() {
       setUser(signedInUser);
       setStatusMessage("Signed in");
     } catch (error) {
-      setStatusMessage(messageFromError(error));
+      const message = messageFromError(error);
+      setAuthError(friendlyInlineMessage(message));
+      setStatusMessage(message);
     } finally {
       setIsAuthBusy(false);
     }
@@ -422,26 +428,31 @@ export function App() {
     }
     api.logout();
     setUser(null);
-    setCloudProjects([]);
+    setDesktopProjects([]);
+    setDesktopProjectsError(null);
     setDesktopLaunchError(null);
     localStorage.setItem("kusshoes-desktop-api-mode", mode);
     setDesktopApiMode(mode);
   }
 
-  async function loadCloudProjects() {
-    if (cloudProjectsLoadingRef.current) {
+  async function loadDesktopProjects() {
+    if (desktopProjectsLoadingRef.current) {
       return;
     }
-    cloudProjectsLoadingRef.current = true;
-    setIsCloudProjectsLoading(true);
+    desktopProjectsLoadingRef.current = true;
+    setIsDesktopProjectsLoading(true);
     try {
-      setCloudProjects(await api.listProjects());
-      setDesktopLaunchError(null);
+      // The offline workspace belongs to the sidecar's built-in local account.
+      if (desktopApiMode === "local" && !api.hasToken()) {
+        await api.demoLogin();
+      }
+      setDesktopProjects(await api.listProjects());
+      setDesktopProjectsError(null);
     } catch (error) {
-      setDesktopLaunchError(messageFromError(error));
+      setDesktopProjectsError(friendlyInlineMessage(messageFromError(error)));
     } finally {
-      cloudProjectsLoadingRef.current = false;
-      setIsCloudProjectsLoading(false);
+      desktopProjectsLoadingRef.current = false;
+      setIsDesktopProjectsLoading(false);
     }
   }
 
@@ -528,13 +539,15 @@ export function App() {
     }
   }
 
-  async function copyDesktopDiagnostics() {
+  async function copyDesktopDiagnostics(): Promise<boolean> {
     const summary = desktopRuntime?.diagnosticSummary ?? desktopRuntimeError ?? "Desktop diagnostics are not available.";
     try {
       await navigator.clipboard.writeText(summary);
       setStatusMessage("Đã copy thông tin diagnostics.");
+      return true;
     } catch {
       setStatusMessage("Ứng dụng chưa copy được diagnostics. Vui lòng mở Logs để xem chi tiết.");
+      return false;
     }
   }
 
@@ -1152,23 +1165,6 @@ export function App() {
     openDesktopProjectId(projectId);
   }
 
-  async function openDesktopDemoProject() {
-    const projectId = sanitizeProjectId(DESKTOP_DEMO_PROJECT_ID);
-    if (!projectId) {
-      setDesktopLaunchError("Desktop demo project is not configured.");
-      return;
-    }
-    setIsDesktopDemoOpening(true);
-    setDesktopLaunchError(null);
-    try {
-      await api.demoLogin();
-      openDesktopProjectId(projectId);
-    } catch (error) {
-      setDesktopLaunchError(messageFromError(error));
-      setIsDesktopDemoOpening(false);
-    }
-  }
-
   async function importDesktopModel(payload: ModelImportPayload) {
     setIsImporting(true);
     setDesktopLaunchError(null);
@@ -1198,6 +1194,92 @@ export function App() {
     !editorContext.context?.modelAsset &&
     editorPermissions.canEdit;
 
+  const desktopEngineState: DesktopEngineState =
+    desktopApiMode === "cloud"
+      ? desktopCloudReady
+        ? "ready"
+        : isDesktopRuntimeLoading
+          ? "starting"
+          : "failed"
+      : desktopRuntime?.backendStatus === "ready"
+        ? "ready"
+        : isDesktopRuntimeLoading || desktopRuntime?.backendStatus === "starting"
+          ? "starting"
+          : "failed";
+
+  if (isDesktopShell && !isProjectEditor) {
+    return (
+      <AppShell user={user} hideHeader className="desktop-launcher-shell">
+        <DesktopLauncher
+          mode={desktopApiMode}
+          onModeChange={changeDesktopApiMode}
+          user={desktopApiMode === "cloud" ? user : null}
+          onLogout={logout}
+          engineState={desktopEngineState}
+          engineError={desktopRuntimeError}
+          onRetryEngine={restartDesktopRuntimeBackend}
+          onCopyDiagnostics={copyDesktopDiagnostics}
+          setupBanner={
+            <DesktopSetupBanner
+              onRendererInstalled={() => {
+                if (desktopApiMode === "local") {
+                  void refreshDesktopRuntime();
+                }
+              }}
+            />
+          }
+          projects={desktopProjects}
+          isProjectsLoading={isDesktopProjectsLoading}
+          projectsError={desktopProjectsError}
+          onRefreshProjects={loadDesktopProjects}
+          onOpenProject={(projectId) => openDesktopProjectId(projectId)}
+          linkValue={desktopProjectInput}
+          linkError={desktopLaunchError}
+          onLinkChange={(value) => {
+            setDesktopProjectInput(value);
+            setDesktopLaunchError(null);
+          }}
+          onLinkSubmit={openDesktopProject}
+          isImportOpen={isDesktopImportOpen}
+          onToggleImport={() => setIsDesktopImportOpen((current) => !current)}
+          importPanel={
+            canUsePreviewRenderer ? (
+              <ModelImportPanel isBusy={isImporting || !desktopRuntimeReady} onImport={importDesktopModel} />
+            ) : (
+              <div className="desktop-import-blocked">
+                <Wrench size={20} aria-hidden="true" />
+                <div>
+                  <h2>Bộ dựng hình 3D chưa sẵn sàng</h2>
+                  <p>Import GLB/OBJ cần bộ dựng hình 3D trên máy để chuẩn hóa model trước khi mở editor.</p>
+                </div>
+                <button type="button" className="primary-button" onClick={installPreviewRenderer}>
+                  <Wrench size={16} aria-hidden="true" />
+                  Cài bộ dựng hình 3D
+                </button>
+              </div>
+            )
+          }
+          auth={{
+            mode: authMode,
+            name: authName,
+            email: authEmail,
+            password: authPassword,
+            isBusy: isAuthBusy,
+            statusMessage: authError,
+            onModeChange: (mode) => {
+              setAuthMode(mode);
+              setAuthError(null);
+            },
+            onNameChange: setAuthName,
+            onEmailChange: setAuthEmail,
+            onPasswordChange: setAuthPassword,
+            onSubmit: submitAuth,
+          }}
+        />
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell
       user={user}
@@ -1215,110 +1297,7 @@ export function App() {
             }}
           />
         ) : null}
-        {isDesktopShell && !isProjectEditor ? (
-          <div className="desktop-launcher-layout">
-            {desktopApiMode === "local" ? (
-              <DesktopRuntimePanel
-                runtime={desktopRuntime}
-                editorReadiness={editorReadiness}
-                installProgress={installProgress}
-                isLoading={isDesktopRuntimeLoading}
-                errorMessage={desktopRuntimeError}
-                onRefresh={refreshDesktopRuntime}
-                onRestartBackend={restartDesktopRuntimeBackend}
-                onInstallRenderer={installPreviewRenderer}
-                onOpenDiagnostics={openDesktopDiagnostics}
-                onCopyDiagnostics={copyDesktopDiagnostics}
-              />
-            ) : (
-              <CloudConnectionPanel
-                apiBaseUrl={DESKTOP_CLOUD_API_BASE_URL}
-                isReady={desktopCloudReady}
-                user={user}
-                errorMessage={desktopRuntimeError}
-                onLogout={logout}
-              />
-            )}
-            <div className="desktop-launcher-stack">
-              <DesktopApiModeSelector
-                value={desktopApiMode}
-                onChange={changeDesktopApiMode}
-              />
-              {desktopApiMode === "cloud" ? (
-                !desktopCloudReady ? (
-                  <EditorRouteState state="ERROR" message={desktopRuntimeError ?? "Cloud API is not configured."} />
-                ) : !user ? (
-                  <AuthPanel
-                    mode={authMode}
-                    name={authName}
-                    email={authEmail}
-                    password={authPassword}
-                    isBusy={isAuthBusy}
-                    statusMessage={friendlyInlineMessage(statusMessage)}
-                    onModeChange={setAuthMode}
-                    onNameChange={setAuthName}
-                    onEmailChange={setAuthEmail}
-                    onPasswordChange={setAuthPassword}
-                    onSubmit={submitAuth}
-                    onDemoAuth={useDemoAuth}
-                    showDemo={false}
-                  />
-                ) : (
-                  <CloudProjectLauncher
-                    projects={cloudProjects}
-                    isLoading={isCloudProjectsLoading}
-                    errorMessage={desktopLaunchError}
-                    onRefresh={loadCloudProjects}
-                    onOpen={(projectId) => openDesktopProjectId(projectId)}
-                  />
-                )
-              ) : (
-                <>
-                  <DesktopProjectLauncher
-                    value={desktopProjectInput}
-                    errorMessage={desktopLaunchError}
-                    demoProjectId={DESKTOP_DEMO_PROJECT_ID}
-                    isDemoOpening={isDesktopDemoOpening}
-                    isImportOpen={isDesktopImportOpen}
-                    backendReady={desktopRuntimeReady}
-                    onValueChange={(value) => {
-                      setDesktopProjectInput(value);
-                      setDesktopLaunchError(null);
-                    }}
-                    onSubmit={openDesktopProject}
-                    onOpenDemo={openDesktopDemoProject}
-                    onToggleImport={() => setIsDesktopImportOpen((current) => !current)}
-                  />
-                  {isDesktopImportOpen ? (
-                    <section className="desktop-import-card">
-                      {canUsePreviewRenderer ? (
-                        <ModelImportPanel
-                          isBusy={isImporting || !desktopRuntimeReady}
-                          onImport={importDesktopModel}
-                        />
-                      ) : (
-                        <div className="desktop-import-blocked">
-                          <Wrench size={20} aria-hidden="true" />
-                          <div>
-                            <h2>Preview renderer cần cài đặt</h2>
-                            <p>
-                              Import GLB/OBJ cần renderer local để chuẩn hóa model trước khi mở trong editor.
-                              Bạn vẫn có thể mở demo project để review giao diện trước.
-                            </p>
-                          </div>
-                          <button type="button" className="primary-button" onClick={installPreviewRenderer}>
-                            <Wrench size={16} aria-hidden="true" />
-                            Cài Preview renderer
-                          </button>
-                        </div>
-                      )}
-                    </section>
-                  ) : null}
-                </>
-              )}
-            </div>
-          </div>
-        ) : isProjectEditor && !user ? (
+        {isProjectEditor && !user ? (
           <EditorRouteState
             state={editorContext.state}
             message={friendlyInlineMessage(editorContext.errorMessage ?? "Redirecting to login.")}
@@ -2098,194 +2077,6 @@ function DesktopDetailsDrawer({
     </div>
   );
 }
-
-function DesktopApiModeSelector({
-  value,
-  onChange,
-}: {
-  value: DesktopApiMode;
-  onChange: (mode: DesktopApiMode) => void;
-}) {
-  return (
-    <div className="desktop-api-mode" role="tablist" aria-label="Desktop data source">
-      <button
-        type="button"
-        role="tab"
-        aria-selected={value === "local"}
-        className={value === "local" ? "active" : ""}
-        onClick={() => onChange("local")}
-      >
-        <HardDrive size={16} aria-hidden="true" />
-        Local
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={value === "cloud"}
-        className={value === "cloud" ? "active" : ""}
-        onClick={() => onChange("cloud")}
-      >
-        <Cloud size={16} aria-hidden="true" />
-        Cloud
-      </button>
-    </div>
-  );
-}
-
-function CloudConnectionPanel({
-  apiBaseUrl,
-  isReady,
-  user,
-  errorMessage,
-  onLogout,
-}: {
-  apiBaseUrl: string;
-  isReady: boolean;
-  user: User | null;
-  errorMessage: string | null;
-  onLogout: () => void;
-}) {
-  return (
-    <section className="desktop-runtime-panel">
-      <div className="desktop-launcher-title">
-        <span className="desktop-launcher-icon"><Cloud size={22} aria-hidden="true" /></span>
-        <div>
-          <h2>Cloud workspace</h2>
-          <p className="desktop-cloud-endpoint">{apiBaseUrl || "Not configured"}</p>
-        </div>
-      </div>
-      <span className={`status-line ${isReady ? "success-text" : "danger-text"}`}>
-        {isReady ? "Cloud API ready" : errorMessage ?? "Cloud API unavailable"}
-      </span>
-      {user ? (
-        <div className="desktop-cloud-account">
-          <span>{user.name}</span>
-          <small>{user.email}</small>
-          <button type="button" onClick={onLogout}>Sign out</button>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function CloudProjectLauncher({
-  projects,
-  isLoading,
-  errorMessage,
-  onRefresh,
-  onOpen,
-}: {
-  projects: CloudProject[];
-  isLoading: boolean;
-  errorMessage: string | null;
-  onRefresh: () => void;
-  onOpen: (projectId: string) => void;
-}) {
-  return (
-    <section className="auth-form desktop-launcher desktop-cloud-projects">
-      <header className="desktop-cloud-projects-header">
-        <div>
-          <h2>Cloud projects</h2>
-          <span>{projects.length} projects</span>
-        </div>
-        <button type="button" className="desktop-icon-button" aria-label="Refresh projects" onClick={onRefresh}>
-          <RefreshCw size={17} className={isLoading ? "spin" : ""} aria-hidden="true" />
-        </button>
-      </header>
-      <div className="desktop-cloud-project-list">
-        {projects.map((project) => (
-          <div className="desktop-cloud-project-row" key={project.id}>
-            <FolderOpen size={18} aria-hidden="true" />
-            <div>
-              <strong>{project.name}</strong>
-              <span>{project.status.replaceAll("_", " ")}</span>
-            </div>
-            <button
-              type="button"
-              className="desktop-icon-button"
-              aria-label={`Open ${project.name}`}
-              disabled={project.status !== "ready"}
-              onClick={() => onOpen(project.id)}
-            >
-              <Monitor size={17} aria-hidden="true" />
-            </button>
-          </div>
-        ))}
-        {!isLoading && projects.length === 0 ? <span className="status-line">No cloud projects yet.</span> : null}
-      </div>
-      {errorMessage ? <span className="status-line danger-text">{errorMessage}</span> : null}
-    </section>
-  );
-}
-
-type DesktopProjectLauncherProps = {
-  value: string;
-  errorMessage: string | null;
-  demoProjectId: string;
-  isDemoOpening: boolean;
-  isImportOpen: boolean;
-  backendReady: boolean;
-  onValueChange: (value: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onOpenDemo: () => void;
-  onToggleImport: () => void;
-};
-
-function DesktopProjectLauncher({
-  value,
-  errorMessage,
-  demoProjectId,
-  isDemoOpening,
-  isImportOpen,
-  backendReady,
-  onValueChange,
-  onSubmit,
-  onOpenDemo,
-  onToggleImport,
-}: DesktopProjectLauncherProps) {
-  const hasDemoProject = Boolean(sanitizeProjectId(demoProjectId));
-
-  return (
-    <section className="auth-panel">
-      <form className="auth-form desktop-launcher" onSubmit={onSubmit}>
-        <div className="desktop-launcher-title">
-          <span className="desktop-launcher-icon">
-            <Monitor size={22} aria-hidden="true" />
-          </span>
-          <div>
-            <h2>KusShoes Desktop Editor</h2>
-            <p>Mở demo project hoặc dán project URL. Ứng dụng tự quản lý backend local cho tester beta.</p>
-          </div>
-        </div>
-        <label>
-          Project ID hoặc editor URL
-          <input
-            value={value}
-            onChange={(event) => onValueChange(event.target.value)}
-            placeholder="proj_... or https://.../editor/proj_..."
-            autoFocus
-          />
-        </label>
-        <button type="submit" className="primary-button" disabled={!backendReady}>
-          <Monitor size={16} aria-hidden="true" />
-          Mở editor
-        </button>
-        {hasDemoProject ? (
-          <button type="button" disabled={isDemoOpening || !backendReady} onClick={onOpenDemo}>
-            <LogIn size={16} aria-hidden="true" />
-            {isDemoOpening ? "Đang mở demo" : "Mở demo project"}
-          </button>
-        ) : null}
-        <button type="button" disabled={!backendReady} onClick={onToggleImport}>
-          <ImagePlus size={16} aria-hidden="true" />
-          {isImportOpen ? "Ẩn import" : "Import GLB/OBJ"}
-        </button>
-        {errorMessage ? <span className="status-line danger-text">{errorMessage}</span> : null}
-      </form>
-    </section>
-  );
-}
-
 
 type AuthPanelProps = {
   mode: "login" | "register";

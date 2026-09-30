@@ -125,6 +125,12 @@ export function DesktopSetupBanner({ onRendererInstalled }: DesktopSetupBannerPr
           <div className="desktop-setup-body">
             <strong>{visibleSetup.title}</strong>
             <p>{visibleSetup.detail}</p>
+            {visibleSetup.technicalDetail ? (
+              <details className="desktop-setup-technical">
+                <summary>Chi tiết kỹ thuật</summary>
+                <code>{visibleSetup.technicalDetail}</code>
+              </details>
+            ) : null}
             {visibleSetup.tone === "progress" ? (
               <>
                 <ProgressBar percent={visibleSetup.percent} label="Tiến trình cài đặt" />

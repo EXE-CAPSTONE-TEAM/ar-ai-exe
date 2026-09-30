@@ -2908,6 +2908,21 @@ dd {
   color: inherit;
 }
 
+.desktop-setup-technical {
+  font-size: 0.8rem;
+}
+
+.desktop-setup-technical summary {
+  cursor: pointer;
+}
+
+.desktop-setup-technical code {
+  display: block;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .desktop-setup-hint {
   font-size: 0.85rem;
 }

@@ -1,4 +1,4 @@
-import { BadgeCheck, Box, CircleHelp, LogIn, LogOut } from "lucide-react";
+import { BadgeCheck, Box, CircleHelp, LogOut } from "lucide-react";
 import type { ReactNode } from "react";
 
 import type { User } from "../../types";
@@ -42,10 +42,12 @@ export function AppShell({ user, children, onLogout, hideHeader = false, classNa
                 <span>Open Kus Studio</span>
               </a>
             ) : null}
-            <div className="auth-pill">
-              {user ? <BadgeCheck size={16} aria-hidden="true" /> : <LogIn size={16} aria-hidden="true" />}
-              <span>{user ? user.email : "Demo login pending"}</span>
-            </div>
+            {user ? (
+              <div className="auth-pill">
+                <BadgeCheck size={16} aria-hidden="true" />
+                <span>{user.email}</span>
+              </div>
+            ) : null}
             {user && onLogout ? (
               <button type="button" className="topbar-logout" onClick={onLogout}>
                 <LogOut size={16} aria-hidden="true" />
