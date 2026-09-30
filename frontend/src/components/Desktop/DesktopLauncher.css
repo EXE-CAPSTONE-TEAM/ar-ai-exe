@@ -1,0 +1,1034 @@
+/* Customer-facing desktop launcher. Light brand surface with the KusShoes spray-paint art kept to the
+   page edges; everything interactive sits on white cards. Scoped under .kd-launcher so the editor shell
+   keeps its own look. Colours follow the KusShoes web light theme (FE/src/styles/variables.css). */
+
+.kd-launcher {
+  --kd-bg: #f8fafc;
+  --kd-surface: #ffffff;
+  --kd-subtle: #f1f5f9;
+  --kd-border: #e2e8f0;
+  --kd-border-strong: #cbd5e1;
+  --kd-text: #0f172a;
+  --kd-text-secondary: #334155;
+  --kd-text-muted: #64748b;
+  --kd-accent: #ff6b35;
+  --kd-accent-hover: #f05f2b;
+  --kd-accent-text: #c2410c;
+  --kd-on-accent: #1a1a1a;
+  --kd-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+  --kd-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+  --kd-font-display: "Anton", "Arial Narrow", sans-serif;
+  --kd-font-sans: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --kd-font-mono: "Space Mono", ui-monospace, "Courier New", monospace;
+
+  position: relative;
+  min-height: 100vh;
+  overflow-x: hidden;
+  background: var(--kd-bg);
+  color: var(--kd-text);
+  font-family: var(--kd-font-sans);
+  font-variant-numeric: normal;
+}
+
+.kd-launcher button {
+  font-family: inherit;
+  line-height: 1.2;
+  box-shadow: none;
+  transform: none;
+}
+
+/* Neutralise the editor's hard-shadow button motion (styles.css) inside the launcher. */
+.kd-launcher button:hover:not(:disabled),
+.kd-launcher button:active:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+}
+
+.kd-launcher :focus-visible {
+  outline: 3px solid rgba(255, 107, 53, 0.55);
+  outline-offset: 2px;
+}
+
+/* The art PNGs are painted on #F8FAFC, the same as the page, so their edges disappear. */
+/* Sized to the side gutter (content is 1120px wide) so the paint only peeks in behind the cards. */
+.kd-launcher .kd-paint {
+  position: absolute;
+  width: clamp(170px, calc((100vw - 1120px) / 2 + 40px), 400px);
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+}
+
+.kd-launcher .kd-paint-left {
+  left: 0;
+  top: 260px;
+}
+
+.kd-launcher .kd-paint-right {
+  right: 0;
+  top: 88px;
+}
+
+@media (max-width: 1280px) {
+  .kd-launcher .kd-paint {
+    opacity: 0.6;
+  }
+}
+
+@media (max-width: 900px) {
+  .kd-launcher .kd-paint {
+    display: none;
+  }
+}
+
+/* Top bar */
+.kd-launcher .kd-topbar {
+  position: relative;
+  z-index: 2;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 32px;
+  background: var(--kd-surface);
+  border-bottom: 1px solid var(--kd-border);
+}
+
+.kd-launcher .kd-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.kd-launcher .kd-brand img {
+  height: 34px;
+  width: auto;
+}
+
+.kd-launcher .kd-brand span {
+  border-left: 1px solid var(--kd-border);
+  padding-left: 12px;
+  font-family: var(--kd-font-mono);
+  font-size: 11px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--kd-text-muted);
+}
+
+.kd-launcher .kd-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.kd-launcher .kd-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid;
+  white-space: nowrap;
+}
+
+.kd-launcher .kd-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.kd-launcher .kd-pill-ready {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.kd-launcher .kd-pill-starting {
+  color: #92400e;
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.kd-launcher .kd-pill-failed {
+  color: #991b1b;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.kd-launcher .kd-account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 14.5px;
+}
+
+.kd-launcher .kd-account-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kd-launcher .kd-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--kd-text);
+  color: var(--kd-accent);
+  font-family: var(--kd-font-display);
+  font-size: 17px;
+}
+
+/* Buttons */
+.kd-launcher .kd-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 20px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.kd-launcher .kd-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+.kd-launcher .kd-button-sm {
+  min-height: 40px;
+  padding: 0 16px;
+  font-size: 14px;
+  border-radius: 8px;
+}
+
+.kd-launcher .kd-button-block {
+  width: 100%;
+}
+
+.kd-launcher .kd-button-primary {
+  background: var(--kd-accent);
+  color: var(--kd-on-accent);
+  box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
+}
+
+.kd-launcher .kd-button-primary:hover:not(:disabled) {
+  background: var(--kd-accent-hover);
+  transform: translateY(-1px);
+}
+
+.kd-launcher .kd-button-secondary {
+  background: var(--kd-surface);
+  color: var(--kd-text);
+  border-color: var(--kd-border-strong);
+  font-weight: 600;
+}
+
+.kd-launcher .kd-button-secondary:hover:not(:disabled) {
+  background: var(--kd-subtle);
+}
+
+.kd-launcher .kd-button-dark {
+  background: var(--kd-text);
+  color: #ffffff;
+}
+
+.kd-launcher .kd-button-dark:hover:not(:disabled) {
+  background: #1e293b;
+}
+
+.kd-launcher .kd-button-dark:disabled {
+  background: var(--kd-subtle);
+  color: var(--kd-text-muted);
+  opacity: 1;
+}
+
+.kd-launcher .kd-chip-dark {
+  font-family: var(--kd-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(26, 26, 26, 0.12);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.kd-launcher .kd-icon-button {
+  width: 40px;
+  height: 40px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--kd-text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.kd-launcher .kd-icon-button:hover:not(:disabled) {
+  background: var(--kd-subtle);
+}
+
+.kd-launcher .kd-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.kd-launcher .kd-icon-button-bordered {
+  border: 1px solid var(--kd-border);
+  background: var(--kd-surface);
+}
+
+.kd-launcher .kd-text-button {
+  min-height: 0;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--kd-accent-text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Layout */
+.kd-launcher .kd-main {
+  position: relative;
+  z-index: 1;
+  width: min(1120px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 32px 0 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.kd-launcher .kd-card {
+  background: var(--kd-surface);
+  border: 1px solid var(--kd-border);
+  border-radius: 14px;
+  box-shadow: var(--kd-shadow-md);
+}
+
+.kd-launcher .kd-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.kd-launcher .kd-card-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.kd-launcher .kd-eyebrow {
+  font-family: var(--kd-font-mono);
+  font-size: 12px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--kd-text-muted);
+}
+
+/* Hero */
+.kd-launcher .kd-hero {
+  display: flex;
+  min-height: 300px;
+  overflow: hidden;
+  background: var(--kd-surface);
+  border: 1px solid var(--kd-border);
+  border-radius: 16px;
+  box-shadow: var(--kd-shadow-lg);
+}
+
+.kd-launcher .kd-hero-copy {
+  flex: 1;
+  min-width: 0;
+  padding: 40px 44px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.kd-launcher .kd-hero-copy h1 {
+  margin: 0;
+  font-family: var(--kd-font-display);
+  font-weight: 400;
+  font-size: clamp(38px, 4.2vw, 54px);
+  line-height: 1.04;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.kd-launcher .kd-hero-copy h1 em {
+  font-style: normal;
+  color: var(--kd-accent);
+}
+
+.kd-launcher .kd-hero-copy p {
+  margin: 0;
+  max-width: 470px;
+  font-size: 15.5px;
+  line-height: 1.6;
+  color: var(--kd-text-secondary);
+}
+
+.kd-launcher .kd-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 6px;
+}
+
+.kd-launcher .kd-hero-shoe {
+  width: 40%;
+  max-width: 440px;
+  min-height: 300px;
+  object-fit: cover;
+  object-position: 50% 45%;
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .kd-launcher .kd-hero {
+    flex-direction: column-reverse;
+  }
+
+  .kd-launcher .kd-hero-shoe {
+    width: 100%;
+    max-width: none;
+    min-height: 0;
+    height: 220px;
+  }
+
+  .kd-launcher .kd-hero-copy {
+    padding: 28px 24px;
+  }
+}
+
+/* Paste-link and import cards */
+.kd-launcher .kd-link-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 18px 20px;
+}
+
+.kd-launcher label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--kd-text-secondary);
+}
+
+.kd-launcher .kd-link-form label {
+  flex: 1;
+  min-width: 260px;
+}
+
+.kd-launcher input:not([type="checkbox"]):not([type="file"]) {
+  height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--kd-border);
+  border-radius: 10px;
+  background: var(--kd-bg);
+  color: var(--kd-text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 400;
+}
+
+.kd-launcher input:not([type="checkbox"]):not([type="file"]):focus {
+  border-color: var(--kd-accent);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.18);
+}
+
+.kd-launcher .kd-form-error {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 14px;
+  color: #991b1b;
+}
+
+.kd-launcher .kd-import-card {
+  padding: 20px;
+  display: grid;
+  gap: 12px;
+}
+
+/* The import form is shared with the editor; only re-skin its surface and actions here. */
+.kd-launcher .kd-import-card .model-import-panel {
+  max-width: none;
+  border-top: 0;
+  padding-top: 0;
+}
+
+.kd-launcher .kd-import-card button {
+  border-radius: 8px;
+}
+
+.kd-launcher .kd-import-card .primary-button,
+.kd-launcher .kd-import-card .format-tabs button.active {
+  border-color: transparent;
+  background: var(--kd-accent);
+  color: var(--kd-on-accent);
+}
+
+.kd-launcher .kd-import-card .primary-button {
+  min-height: 48px;
+  border-radius: 10px;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
+}
+
+.kd-launcher .kd-import-card .primary-button:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--kd-accent-hover);
+  color: var(--kd-on-accent);
+}
+
+/* Engine problem */
+.kd-launcher .kd-problem {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 18px 20px;
+  border-color: #fecaca;
+}
+
+.kd-launcher .kd-problem-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: #fef2f2;
+  color: #b91c1c;
+  flex-shrink: 0;
+}
+
+.kd-launcher .kd-problem-body {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.kd-launcher .kd-problem-body strong {
+  font-size: 16px;
+}
+
+.kd-launcher .kd-problem-body p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--kd-text-secondary);
+}
+
+.kd-launcher details {
+  font-size: 13px;
+  color: var(--kd-text-muted);
+}
+
+.kd-launcher details summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.kd-launcher details code {
+  display: block;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--kd-subtle);
+  font-family: var(--kd-font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.kd-launcher .kd-problem-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Projects */
+.kd-launcher .kd-projects {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.kd-launcher .kd-projects-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.kd-launcher .kd-projects-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.kd-launcher .kd-projects-title h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.kd-launcher .kd-count {
+  font-family: var(--kd-font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--kd-text-secondary);
+  background: var(--kd-subtle);
+  border: 1px solid var(--kd-border);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+
+.kd-launcher .kd-projects-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.kd-launcher .kd-mode-switch {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--kd-surface);
+  border: 1px solid var(--kd-border);
+  border-radius: 12px;
+}
+
+.kd-launcher .kd-mode-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 4px 14px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--kd-text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.kd-launcher .kd-mode-switch button span {
+  display: grid;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.kd-launcher .kd-mode-switch button small {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--kd-text-muted);
+}
+
+.kd-launcher .kd-mode-switch button[aria-selected="true"] {
+  background: var(--kd-subtle);
+  color: var(--kd-accent-text);
+}
+
+.kd-launcher .kd-project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 20px;
+}
+
+.kd-launcher .kd-scan-card {
+  min-height: 290px;
+  box-sizing: border-box;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 2px dashed var(--kd-border-strong);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.kd-launcher .kd-scan-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 107, 53, 0.1);
+  color: var(--kd-accent-text);
+}
+
+.kd-launcher .kd-scan-card h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.kd-launcher .kd-scan-card ol {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--kd-text-secondary);
+}
+
+.kd-launcher .kd-scan-card p {
+  margin: auto 0 0;
+  font-size: 13px;
+  color: var(--kd-text-muted);
+}
+
+.kd-launcher .kd-project-empty {
+  min-height: 290px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  font-size: 14.5px;
+  color: var(--kd-text-muted);
+  border: 1px solid var(--kd-border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.kd-launcher .kd-project-card {
+  min-height: 290px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--kd-surface);
+  border: 1px solid var(--kd-border);
+  border-radius: 14px;
+  box-shadow: var(--kd-shadow-md);
+}
+
+.kd-launcher .kd-project-thumb {
+  position: relative;
+  height: 160px;
+  display: grid;
+  place-items: center;
+  background: #1e293b;
+  color: var(--kd-text-muted);
+  overflow: hidden;
+}
+
+.kd-launcher .kd-project-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.kd-launcher .kd-project-thumb.placeholder.neutral {
+  background: var(--kd-subtle);
+}
+
+.kd-launcher .kd-project-thumb.working img,
+.kd-launcher .kd-project-thumb.failed img {
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+
+.kd-launcher .kd-thumb-progress {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.kd-launcher .kd-progress {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
+  overflow: hidden;
+}
+
+.kd-launcher .kd-progress > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  border-radius: 999px;
+  background: var(--kd-accent);
+}
+
+.kd-launcher .kd-progress.indeterminate > span {
+  animation: kd-progress-slide 1.3s ease-in-out infinite;
+}
+
+@keyframes kd-progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+.kd-launcher .kd-project-body {
+  flex: 1;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kd-launcher .kd-project-body h3 {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kd-launcher .kd-project-date {
+  font-size: 12.5px;
+  color: var(--kd-text-muted);
+}
+
+.kd-launcher .kd-project-footer {
+  margin-top: auto;
+  padding-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.kd-launcher .kd-status {
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 3px 10px;
+  border: 1px solid;
+}
+
+.kd-launcher .kd-status-ready {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.kd-launcher .kd-status-working {
+  color: #92400e;
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.kd-launcher .kd-status-failed {
+  color: #991b1b;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.kd-launcher .kd-status-neutral {
+  color: var(--kd-text-secondary);
+  background: var(--kd-subtle);
+  border-color: var(--kd-border);
+}
+
+/* Sign in (cloud mode) */
+.kd-launcher .kd-signin {
+  display: flex;
+  justify-content: center;
+}
+
+.kd-launcher .kd-signin-card {
+  width: min(480px, 100%);
+  padding: 36px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-radius: 16px;
+  box-shadow: var(--kd-shadow-lg);
+}
+
+.kd-launcher .kd-signin-brand {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.kd-launcher .kd-signin-brand img {
+  height: 48px;
+  width: auto;
+}
+
+.kd-launcher .kd-signin-brand span {
+  font-family: var(--kd-font-mono);
+  font-size: 12px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--kd-text-secondary);
+}
+
+.kd-launcher .kd-auth-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  background: var(--kd-bg);
+  border: 1px solid var(--kd-border);
+  border-radius: 10px;
+}
+
+.kd-launcher .kd-auth-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--kd-text-secondary);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.kd-launcher .kd-auth-tabs button[aria-selected="true"] {
+  background: var(--kd-subtle);
+  color: var(--kd-accent-text);
+  font-weight: 700;
+}
+
+.kd-launcher .kd-signin-hint {
+  margin: 0;
+  text-align: center;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--kd-text-muted);
+}
+
+/* First-run renderer install and update notices, restyled for the launcher. */
+.kd-launcher .desktop-setup-stack {
+  margin: 0;
+}
+
+.kd-launcher .desktop-setup-banner {
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  border: 1px solid var(--kd-border);
+  border-radius: 14px;
+  background: var(--kd-surface);
+  box-shadow: var(--kd-shadow-md);
+  color: var(--kd-text);
+}
+
+.kd-launcher .desktop-setup-banner.error {
+  border-color: #fecaca;
+}
+
+.kd-launcher .desktop-setup-banner.done {
+  border-color: #bbf7d0;
+}
+
+.kd-launcher .desktop-setup-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: rgba(255, 107, 53, 0.1);
+  color: var(--kd-accent-text);
+  flex-shrink: 0;
+}
+
+.kd-launcher .desktop-setup-banner.error .desktop-setup-icon {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.kd-launcher .desktop-setup-banner.done .desktop-setup-icon {
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.kd-launcher .desktop-setup-body strong {
+  font-size: 16px;
+}
+
+.kd-launcher .desktop-setup-body p,
+.kd-launcher .desktop-setup-banner.error .desktop-setup-body p,
+.kd-launcher .desktop-setup-banner.done .desktop-setup-body p {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--kd-text-secondary);
+}
+
+.kd-launcher .desktop-setup-progress {
+  height: 10px;
+  border: 1px solid var(--kd-border);
+  border-radius: 999px;
+  background: var(--kd-subtle);
+}
+
+.kd-launcher .desktop-setup-progress > span {
+  border-radius: 999px;
+  background: var(--kd-accent);
+}
+
+.kd-launcher .desktop-setup-progress > em {
+  display: none;
+}
+
+.kd-launcher .desktop-setup-action {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--kd-accent);
+  color: var(--kd-on-accent);
+  font-size: 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kd-launcher .kd-progress.indeterminate > span {
+    animation: none;
+  }
+
+  .kd-launcher .kd-button-primary:hover:not(:disabled) {
+    transform: none;
+  }
+}
