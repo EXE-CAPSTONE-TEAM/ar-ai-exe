@@ -36,6 +36,11 @@ import {
   completeEditorLaunch,
   getKusShoesApiBaseUrl,
 } from "./api/editorLaunch";
+import {
+  completeDesktopGoogleAuth,
+  isDesktopAuthDeepLink,
+  startDesktopGoogleLogin,
+} from "./api/desktopGoogleAuth";
 import { setApiBaseUrl } from "./api/runtimeConfig";
 import { EditorPanels } from "./components/Editor/EditorPanels";
 import { CropPanel, PrepareStep } from "./components/Crop/CropPanel";
@@ -172,6 +177,33 @@ export function App() {
       if (launchInProgress || launchCompleted) return;
       launchInProgress = true;
       setDesktopLaunchError(null);
+
+      if (isDesktopAuthDeepLink(urlValue)) {
+        setStatusMessage("Đang xác thực tài khoản Google...");
+        try {
+          await completeDesktopGoogleAuth(urlValue);
+          if (disposed) return;
+          localStorage.setItem("kusshoes-desktop-api-mode", "cloud");
+          const cloudApiBaseUrl = DESKTOP_CLOUD_API_BASE_URL || getKusShoesApiBaseUrl();
+          setApiBaseUrl(cloudApiBaseUrl);
+          setDesktopApiMode("cloud");
+          const signedInUser = await api.me();
+          if (disposed) return;
+          setUser(signedInUser);
+          setStatusMessage("Đã đăng nhập qua Google");
+          await loadDesktopProjects();
+        } catch (error) {
+          if (!disposed) {
+            const message = friendlyInlineMessage(messageFromError(error));
+            setDesktopLaunchError(message);
+            setStatusMessage(message);
+          }
+        } finally {
+          launchInProgress = false;
+        }
+        return;
+      }
+
       setStatusMessage("AUTH_CHECKING");
       try {
         const session = await completeEditorLaunch(urlValue);
@@ -605,7 +637,11 @@ export function App() {
   }
 
   const handleGoogleSignIn = useCallback(() => {
-    void openInBrowser(MARKETING_LOGIN_URL);
+    startDesktopGoogleLogin().catch((error) => {
+      const message = friendlyInlineMessage(messageFromError(error));
+      setDesktopLaunchError(message);
+      setStatusMessage(message);
+    });
   }, []);
 
   async function loadScan() {

@@ -1,6 +1,6 @@
 [package]
 name = "kusshoes-editor-desktop"
-version = "0.1.1"
+version = "0.1.2"
 description = "KusShoes desktop editor shell"
 authors = ["KusShoes"]
 edition = "2021"
