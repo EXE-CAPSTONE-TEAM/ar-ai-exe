@@ -1974,7 +1974,7 @@ dependencies = [
 
 [[package]]
 name = "kusshoes-editor-desktop"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "runtime-installer",
  "serde",
