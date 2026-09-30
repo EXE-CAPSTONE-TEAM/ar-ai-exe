@@ -330,10 +330,7 @@ class _NavItem extends StatelessWidget {
 }
 
 /// Opens the KusShoes web app in the device browser.
-///
-/// Only the site root is linked for now - the deployment has no SPA rewrite,
-/// so sub-paths answer 404 (see [AppConfig.webAppUrl]).
-Future<void> _openWebApp(BuildContext context, {String path = ''}) async {
+Future<void> _openWebApp(BuildContext context, {String path = '/projects'}) async {
   final messenger = ScaffoldMessenger.of(context);
   final uri = Uri.parse(AppConfig.webUrl(path));
   final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -488,8 +485,11 @@ class _ExploreTabState extends State<_ExploreTab> {
                           await _api.applyTemplate(projectId: project.id, templateId: template.id);
                           if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
 
+                          final targetUrl = (project.editorUrl.isNotEmpty && !project.editorUrl.contains('app.kusshoes.vn'))
+                              ? project.editorUrl
+                              : AppConfig.projectWebUrl(project.id);
                           await launchUrl(
-                            Uri.parse(project.editorUrl),
+                            Uri.parse(targetUrl),
                             mode: LaunchMode.externalApplication,
                           );
                           if (mounted) {

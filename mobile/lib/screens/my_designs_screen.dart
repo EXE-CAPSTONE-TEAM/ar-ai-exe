@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app/app_theme.dart';
+import '../config/app_config.dart';
 import '../models/account.dart';
 import '../services/api_exception.dart';
 import '../services/backend_api.dart';
@@ -102,19 +103,16 @@ class _MyDesignsScreenState extends State<MyDesignsScreen> {
 
   Future<void> _openInEditor(ProjectSummary project) async {
     final messenger = ScaffoldMessenger.of(context);
-    if (project.editorUrl.isEmpty) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Dự án này chưa có liên kết editor.')),
-      );
-      return;
-    }
+    final targetUrl = (project.editorUrl.isNotEmpty && !project.editorUrl.contains('app.kusshoes.vn'))
+        ? project.editorUrl
+        : AppConfig.projectWebUrl(project.id);
     final opened = await launchUrl(
-      Uri.parse(project.editorUrl),
+      Uri.parse(targetUrl),
       mode: LaunchMode.externalApplication,
     );
     if (!opened) {
       messenger.showSnackBar(
-        SnackBar(content: Text('Không mở được ${project.editorUrl}')),
+        SnackBar(content: Text('Không mở được trình duyệt: $targetUrl')),
       );
     }
   }

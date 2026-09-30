@@ -104,7 +104,7 @@ class _UploadProgressScreenState extends State<UploadProgressScreen> {
             status: kiriStatus.status,
             initialStatus: kiriStatus,
             processingStarted: true,
-            webDesignUrl: AppConfig.webUrl('/design/$scanSessionId'),
+            webDesignUrl: AppConfig.projectsListWebUrl(),
           ),
         ),
       );

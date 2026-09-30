@@ -6,6 +6,7 @@ import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app/app_theme.dart';
+import '../config/app_config.dart';
 import '../models/kiri_status.dart';
 import '../services/api_exception.dart';
 import '../services/backend_api.dart';
@@ -274,22 +275,16 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
   }
 
   Future<void> _openDesktop() async {
-    // The web project page hosts "Open in KusStudio Desktop"; it only exists once the scan is
-    // saved to a project (a scan session id is not a project id).
-    if (widget.webDesignUrl.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Hãy lưu project trước khi mở trên Desktop.')),
-      );
-      return;
-    }
-    final targetUrl = widget.webDesignUrl;
+    final targetUrl = widget.webDesignUrl.isNotEmpty
+        ? widget.webDesignUrl
+        : AppConfig.projectsListWebUrl();
     final uri = Uri.parse(targetUrl);
     final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!opened && mounted) {
       await Clipboard.setData(ClipboardData(text: targetUrl));
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Đã sao chép liên kết mở trên Desktop.')),
+        const SnackBar(content: Text('Đã sao chép liên kết KusShoes Web.')),
       );
     }
   }

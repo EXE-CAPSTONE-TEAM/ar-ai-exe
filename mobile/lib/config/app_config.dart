@@ -34,7 +34,7 @@ class AppConfig {
   /// [webUrl] can be used to deep-link.
   static const webAppUrl = String.fromEnvironment(
     'KUSSHOES_WEB_URL',
-    defaultValue: 'https://kusshoes.vercel.app',
+    defaultValue: 'https://kusshoes.kietta.me',
   );
 
   /// Empty until SC-33 (legal pages) ships. NFR-LEG-06 requires a reachable
@@ -53,6 +53,14 @@ class AppConfig {
     }
     return path.startsWith('/') ? '$base$path' : '$base/$path';
   }
+
+  /// URL to view projects on the web app.
+  static String projectsListWebUrl() => webUrl('/projects');
+
+  /// URL to view a specific project on the web app, allowing user to view details
+  /// and trigger opening the desktop editor app from the web.
+  static String projectWebUrl(String projectId) =>
+      webUrl('/project-details?id=$projectId');
 
   /// Must be opted into explicitly; guards against a cleartext host slipping
   /// into a store build.
