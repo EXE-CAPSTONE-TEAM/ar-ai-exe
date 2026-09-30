@@ -17,7 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
+import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { listen } from "@tauri-apps/api/event";
 
 import { api, designStorageKey } from "./api/client";
@@ -253,6 +253,14 @@ export function App() {
       })
       .catch(reportListenerError);
 
+    void getCurrent()
+      .then((urls) => {
+        if (disposed || !urls) return;
+        const initialUrl = urls.find((value) => value.startsWith("kusshoes-editor://"));
+        if (initialUrl) void handleDeepLinkUrl(initialUrl);
+      })
+      .catch(reportListenerError);
+
     return () => {
       disposed = true;
       unsubscribeSingleInstance?.();
@@ -336,11 +344,11 @@ export function App() {
   }, [editorContext.user, isProjectEditor]);
 
   useEffect(() => {
-    if (!isProjectEditor || editorContext.state !== "UNAUTHENTICATED") {
+    if (isDesktopShell || !isProjectEditor || editorContext.state !== "UNAUTHENTICATED") {
       return;
     }
     window.location.assign(loginRedirectUrl());
-  }, [editorContext.state, isProjectEditor]);
+  }, [editorContext.state, isDesktopShell, isProjectEditor]);
 
   useEffect(() => {
     if (!isProjectEditor || !editorContext.context) {
@@ -1200,6 +1208,16 @@ export function App() {
     }
   }
 
+  const handleOpenDesktopProject = useCallback((projectId: string) => {
+    const safeProjectId = sanitizeProjectId(projectId);
+    if (!safeProjectId) {
+      return;
+    }
+    setEditorProjectId(safeProjectId);
+    const params = new URLSearchParams({ desktop: "1", projectId: safeProjectId });
+    window.history.pushState({}, "", `/?${params.toString()}`);
+  }, []);
+
   function openDesktopProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const projectId = projectIdFromEditorInput(desktopProjectInput);
@@ -1207,7 +1225,7 @@ export function App() {
       setDesktopLaunchError("Enter a Project ID or a valid /editor/{projectId} URL.");
       return;
     }
-    openDesktopProjectId(projectId);
+    handleOpenDesktopProject(projectId);
   }
 
   async function importDesktopModel(payload: ModelImportPayload) {
@@ -1221,7 +1239,7 @@ export function App() {
       if (!projectId) {
         throw new Error("Ứng dụng chưa tạo được project từ model vừa import. Vui lòng thử lại.");
       }
-      openDesktopProjectId(projectId);
+      handleOpenDesktopProject(projectId);
     } catch (error) {
       const message = friendlyInlineMessage(messageFromError(error));
       setDesktopLaunchError(message);
@@ -1278,7 +1296,7 @@ export function App() {
           isProjectsLoading={isDesktopProjectsLoading}
           projectsError={desktopProjectsError}
           onRefreshProjects={loadDesktopProjects}
-          onOpenProject={(projectId) => openDesktopProjectId(projectId)}
+          onOpenProject={(projectId) => handleOpenDesktopProject(projectId)}
           linkValue={desktopProjectInput}
           linkError={desktopLaunchError}
           onLinkChange={(value) => {
@@ -1346,7 +1364,31 @@ export function App() {
         {isProjectEditor && !user ? (
           <EditorRouteState
             state={editorContext.state}
-            message={friendlyInlineMessage(editorContext.errorMessage ?? "Redirecting to login.")}
+            message={
+              isDesktopShell
+                ? (editorContext.errorMessage
+                  ? friendlyInlineMessage(editorContext.errorMessage)
+                  : "Cần đăng nhập tài khoản KusShoes để tải dự án này.")
+                : friendlyInlineMessage(editorContext.errorMessage ?? "Redirecting to login.")
+            }
+            action={
+              isDesktopShell ? (
+                <>
+                  <button type="button" className="primary-button" onClick={handleGoogleSignIn}>
+                    Đăng nhập Google
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditorProjectId(null);
+                      window.history.pushState({}, "", "/?desktop=1");
+                    }}
+                  >
+                    Quay lại Launcher
+                  </button>
+                </>
+              ) : undefined
+            }
           />
         ) : !user ? (
           <AuthPanel
@@ -1746,7 +1788,15 @@ export function App() {
   );
 }
 
-function EditorRouteState({ state, message }: { state: string; message: string }) {
+function EditorRouteState({
+  state,
+  message,
+  action,
+}: {
+  state: string;
+  message: string;
+  action?: import("react").ReactNode;
+}) {
   return (
     <section className="auth-panel">
       <div className="empty-panel-callout">
@@ -1754,6 +1804,7 @@ function EditorRouteState({ state, message }: { state: string; message: string }
         <div>
           <h2>{editorRouteStateLabel(state)}</h2>
           <p>{message}</p>
+          {action ? <div style={{ marginTop: "16px", display: "flex", gap: "10px", justifyContent: "center" }}>{action}</div> : null}
         </div>
       </div>
     </section>

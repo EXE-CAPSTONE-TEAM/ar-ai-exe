@@ -18,7 +18,7 @@ import type {
 import { clearAccessToken, storeAccessToken, storedAccessToken } from "./authStorage";
 import { editorClient } from "./editorClient";
 import { getActiveEditorSession } from "./editorLaunch";
-import { apiUrl, getApiBaseUrl } from "./runtimeConfig";
+import { apiUrl, getApiBaseUrl, isCentralApi } from "./runtimeConfig";
 
 const CSRF_COOKIE_NAME = "kusshoes_csrf_token";
 
@@ -305,10 +305,37 @@ export const api = {
   },
 
   async me(): Promise<User> {
+    if (getActiveEditorSession()) {
+      return request<User>("/api/v1/editor/me");
+    }
+    if (isCentralApi()) {
+      const res = await request<Record<string, unknown>>("/api/v1/users/me");
+      const name =
+        (typeof res.name === "string" && res.name) ||
+        [res.first_name, res.last_name].filter(Boolean).join(" ") ||
+        String(res.email || "KusShoes User");
+      return {
+        id: String(res.id),
+        role: String(res.role || "user"),
+        name,
+        email: String(res.email || ""),
+        createdAt: String(res.created_at || res.createdAt || new Date().toISOString()),
+      };
+    }
     return request<User>("/api/auth/me");
   },
 
   async listProjects(): Promise<CloudProject[]> {
+    if (isCentralApi()) {
+      const payload = await request<{ items: Array<Record<string, unknown>> }>("/api/v1/projects");
+      return payload.items.map((item) => ({
+        id: String(item.id),
+        name: String(item.name || "Untitled project"),
+        status: (item.status as CloudProject["status"]) || "draft",
+        thumbnailUrl: (item.thumbnail_path || item.thumbnailUrl || null) as string | null,
+        updatedAt: String(item.updated_at || item.updatedAt || new Date().toISOString()),
+      }));
+    }
     const payload = await request<{ items: CloudProject[] }>("/api/projects");
     return payload.items;
   },

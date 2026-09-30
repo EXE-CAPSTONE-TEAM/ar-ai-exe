@@ -11,6 +11,15 @@ export function setApiBaseUrl(nextBaseUrl: string): void {
   apiBaseUrl = normalizeApiBaseUrl(nextBaseUrl);
 }
 
+export function isCentralApi(): boolean {
+  try {
+    const url = new URL(apiBaseUrl);
+    return url.hostname !== "127.0.0.1" && url.hostname !== "localhost";
+  } catch {
+    return false;
+  }
+}
+
 export function apiUrl(pathOrUrl: string): string {
   const baseUrl = new URL(apiBaseUrl);
   const value = rejectControlCharacters(pathOrUrl, "API URL");

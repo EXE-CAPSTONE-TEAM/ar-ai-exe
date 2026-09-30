@@ -50,10 +50,11 @@ def main() -> None:
     if not args.skip_seed:
         seed_demo_if_possible()
 
+    from app.main import app
     import uvicorn
 
     uvicorn.run(
-        "app.main:app",
+        app,
         host=args.host,
         port=args.port,
         log_level="info",

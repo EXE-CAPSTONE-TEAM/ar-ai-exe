@@ -2,7 +2,7 @@ import type { CropBox, Design, DesignConfig, EditorContext, ExportPackage, Job, 
 import { storedAccessToken } from "./authStorage";
 import { getDesktopRuntime } from "./desktopRuntime";
 import { getActiveEditorSession } from "./editorLaunch";
-import { apiUrl } from "./runtimeConfig";
+import { apiUrl, isCentralApi } from "./runtimeConfig";
 
 const CSRF_COOKIE_NAME = "kusshoes_csrf_token";
 
@@ -36,7 +36,7 @@ export function isTerminalJobStatus(status: string): boolean {
 }
 
 function editorRoute(localPath: string, centralPath: string): string {
-  return getActiveEditorSession() ? centralPath : localPath;
+  return getActiveEditorSession() || isCentralApi() ? centralPath : localPath;
 }
 
 

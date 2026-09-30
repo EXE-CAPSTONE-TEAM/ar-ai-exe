@@ -38,6 +38,7 @@ try {
         --workpath (Join-Path $backendDir "build\desktop-sidecar") `
         --specpath (Join-Path $backendDir "build\desktop-sidecar") `
         --add-data "$cropMath;app/services" `
+        --hidden-import app.main `
         $entrypoint
 }
 finally {
