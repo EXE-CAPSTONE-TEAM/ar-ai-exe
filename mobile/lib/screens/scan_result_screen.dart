@@ -275,9 +275,11 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
   }
 
   Future<void> _openDesktop() async {
-    final targetUrl = widget.webDesignUrl.isNotEmpty
-        ? widget.webDesignUrl
-        : AppConfig.projectsListWebUrl();
+    final targetUrl = _savedProjectId != null
+        ? AppConfig.projectWebUrl(_savedProjectId!)
+        : (widget.webDesignUrl.isNotEmpty
+            ? widget.webDesignUrl
+            : AppConfig.projectsListWebUrl());
     final uri = Uri.parse(targetUrl);
     final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!opened && mounted) {
