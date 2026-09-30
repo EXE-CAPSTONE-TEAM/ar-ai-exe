@@ -89,3 +89,15 @@ export async function openDiagnosticsFolder(): Promise<void> {
   }
   await window.__TAURI__!.core!.invoke!("open_diagnostics_folder");
 }
+
+export async function openInBrowser(url: string): Promise<void> {
+  if (hasDesktopRuntimeBridge()) {
+    try {
+      await window.__TAURI__!.core!.invoke!("open_in_browser", { url });
+      return;
+    } catch {
+      // Fallback to window.open if invoke fails
+    }
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}

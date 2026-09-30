@@ -464,6 +464,16 @@
   box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.18);
 }
 
+.kd-launcher input[type="password"] {
+  font-family: caption, -apple-system, system-ui, sans-serif;
+  letter-spacing: 2px;
+}
+
+.kd-launcher input[type="password"]::placeholder {
+  letter-spacing: normal;
+  font-family: var(--kd-font-sans);
+}
+
 .kd-launcher .kd-form-error {
   flex-basis: 100%;
   margin: 0;
@@ -938,6 +948,78 @@
   line-height: 1.6;
   color: var(--kd-text-muted);
 }
+
+.kd-launcher .kd-password-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.kd-launcher .kd-password-field input {
+  width: 100%;
+  padding-right: 44px;
+}
+
+.kd-launcher .kd-password-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--kd-text-muted);
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 0;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.kd-launcher .kd-password-toggle:hover {
+  color: var(--kd-text);
+  background: var(--kd-subtle);
+}
+
+.kd-launcher .kd-auth-divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  margin: 2px 0;
+  color: var(--kd-text-muted);
+  font-size: 13px;
+}
+
+.kd-launcher .kd-auth-divider::before,
+.kd-launcher .kd-auth-divider::after {
+  content: "";
+  flex: 1;
+  border-bottom: 1px solid var(--kd-border);
+}
+
+.kd-launcher .kd-auth-divider span {
+  padding: 0 12px;
+  text-transform: lowercase;
+}
+
+.kd-launcher .kd-button-google {
+  background: #ffffff;
+  color: #374151;
+  border: 1px solid var(--kd-border-strong);
+  font-weight: 600;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.kd-launcher .kd-button-google:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+  color: #0f172a;
+  transform: translateY(-1px);
+}
+
 
 /* First-run renderer install and update notices, restyled for the launcher. */
 .kd-launcher .desktop-setup-stack {

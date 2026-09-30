@@ -106,6 +106,7 @@ jobs:
         run: |
           @"
           VITE_KUSSHOES_API_BASE_URL=https://api.kusshoes.kietta.me
+          VITE_DESKTOP_CLOUD_API_BASE_URL=https://api.kusshoes.kietta.me
           VITE_API_BASE_URL=http://127.0.0.1:8010
           VITE_MARKETING_LOGIN_URL=https://kusshoes.vercel.app/login
           VITE_DESKTOP_SHELL=true

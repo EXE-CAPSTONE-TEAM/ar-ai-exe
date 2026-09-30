@@ -372,6 +372,28 @@ fn open_diagnostics_folder(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn open_in_browser(url: String) -> Result<(), String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("Only http and https URLs can be opened in the browser.".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", &url])
+            .spawn()
+            .map_err(|error| error.to_string())?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 fn ensure_runtime(
     app: &AppHandle,
     state: &mut RuntimeState,
@@ -519,9 +541,13 @@ fn start_backend_sidecar(
 
 fn packaged_backend_exe(app: &AppHandle) -> Option<PathBuf> {
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let candidate = resource_dir.join("sidecars").join("kusshoes-backend.exe");
-        if candidate.is_file() {
-            return Some(candidate);
+        for candidate in [
+            resource_dir.join("_up_").join("sidecars").join("kusshoes-backend.exe"),
+            resource_dir.join("sidecars").join("kusshoes-backend.exe"),
+        ] {
+            if candidate.is_file() {
+                return Some(candidate);
+            }
         }
     }
     let candidate = env::current_exe().ok()?.parent()?.join("kusshoes-backend.exe");
@@ -538,6 +564,8 @@ fn desktop_demo_model_path(app: &AppHandle, repo_root: Option<&Path>) -> Option<
 
     let resource_dir = app.path().resource_dir().ok()?;
     for candidate in [
+        resource_dir.join("_up_").join("_up_").join("data").join("3DModel.glb"),
+        resource_dir.join("_up_").join("data").join("3DModel.glb"),
         resource_dir.join("data").join("3DModel.glb"),
         resource_dir.join("resources").join("data").join("3DModel.glb"),
         resource_dir.join("3DModel.glb"),
@@ -749,12 +777,16 @@ fn find_repo_root() -> Option<PathBuf> {
 fn read_dependency_manifest(app: &AppHandle) -> Result<DependencyManifest, String> {
     let repo_manifest = find_repo_root()
         .map(|root| root.join("desktop").join("dependencies").join("blender.windows.json"));
-    let packaged_manifest = app
-        .path()
-        .resource_dir()
-        .ok()
-        .map(|path| path.join("dependencies").join("blender.windows.json"));
-    for candidate in [repo_manifest, packaged_manifest].into_iter().flatten() {
+    let mut candidates = Vec::new();
+    if let Some(path) = repo_manifest {
+        candidates.push(path);
+    }
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join("_up_").join("dependencies").join("blender.windows.json"));
+        candidates.push(resource_dir.join("dependencies").join("blender.windows.json"));
+        candidates.push(resource_dir.join("blender.windows.json"));
+    }
+    for candidate in candidates {
         if candidate.is_file() {
             let text = fs::read_to_string(candidate).map_err(|error| error.to_string())?;
             return serde_json::from_str(&text).map_err(|error| error.to_string());
@@ -835,6 +867,7 @@ fn resolve_blender_bin(app: &AppHandle, installed_blender_bin: &Path) -> Option<
 fn bundled_blender_bin(app: &AppHandle) -> Option<PathBuf> {
     let resource_dir = app.path().resource_dir().ok()?;
     for base in [
+        resource_dir.join("_up_").join("dependencies").join("tools").join("blender"),
         resource_dir.join("dependencies").join("tools").join("blender"),
         resource_dir.join("tools").join("blender"),
     ] {
@@ -868,7 +901,7 @@ fn blender_bin_under(base: &Path) -> PathBuf {
 
 fn main() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             let _ = app.emit("single-instance-deep-link", args);
         }))
         .plugin(tauri_plugin_deep_link::init())
@@ -895,6 +928,7 @@ fn main() {
             install_app_update,
             restart_backend,
             open_diagnostics_folder,
+            open_in_browser,
         ])
         .on_window_event(|window, event| {
             if matches!(event, WindowEvent::CloseRequested { .. }) {

@@ -16,7 +16,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { listen } from "@tauri-apps/api/event";
 
@@ -25,6 +25,7 @@ import {
   getDesktopRuntime,
   installDesktopDependency,
   openDiagnosticsFolder,
+  openInBrowser,
   restartDesktopBackend,
 } from "./api/desktopRuntime";
 import type { ModelImportPayload } from "./api/client";
@@ -75,7 +76,11 @@ import {
 } from "./utils/editorMessages";
 
 const MARKETING_LOGIN_URL = import.meta.env.VITE_MARKETING_LOGIN_URL ?? "https://kusshoes.vercel.app/login";
-const DESKTOP_CLOUD_API_BASE_URL = (import.meta.env.VITE_DESKTOP_CLOUD_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
+const DESKTOP_CLOUD_API_BASE_URL = (
+  import.meta.env.VITE_DESKTOP_CLOUD_API_BASE_URL ||
+  import.meta.env.VITE_KUSSHOES_API_BASE_URL ||
+  "https://api.kusshoes.kietta.me"
+).replace(/\/+$/, "");
 const DEFAULT_EDITOR_PERMISSIONS: EditorPermissions = { canEdit: true, canBake: true, canExport: true };
 
 export function App() {
@@ -598,6 +603,10 @@ export function App() {
     setMeshBounds(null);
     setStatusMessage("Signed out");
   }
+
+  const handleGoogleSignIn = useCallback(() => {
+    void openInBrowser(MARKETING_LOGIN_URL);
+  }, []);
 
   async function loadScan() {
     if (!scanId.trim() || !user) {
@@ -1219,6 +1228,7 @@ export function App() {
           engineError={desktopRuntimeError}
           onRetryEngine={restartDesktopRuntimeBackend}
           onCopyDiagnostics={copyDesktopDiagnostics}
+          onGoogleSignIn={handleGoogleSignIn}
           setupBanner={
             <DesktopSetupBanner
               onRendererInstalled={() => {
