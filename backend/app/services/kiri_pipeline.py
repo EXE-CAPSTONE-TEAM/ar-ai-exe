@@ -449,6 +449,8 @@ class KiriPipelineService:
 
     def _fail(self, task: KiriScanTask, message: str) -> None:
         safe_message = message[:2000]
+        if safe_message.strip().lower() == "success":
+            safe_message = "Kiri processing encountered an unexpected response."
         task.status = KiriTaskStatus.FAILED
         task.error_message = safe_message
         task.scan_session.status = ScanStatus.FAILED

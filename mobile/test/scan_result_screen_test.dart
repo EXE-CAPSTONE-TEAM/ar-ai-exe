@@ -15,10 +15,30 @@ class _MockResultApi extends BackendApi {
   String? savedProjectName;
   int saveCallCount = 0;
   int getStatusCallCount = 0;
+  int startProcessingCallCount = 0;
+
+  /// What the relay reports once a retry has re-queued the reconstruction.
+  KiriStatus? statusAfterRetry;
+
+  @override
+  Future<KiriStatus> startKiriProcessing({
+    required String scanSessionId,
+  }) async {
+    startProcessingCallCount++;
+    return statusAfterRetry ??
+        KiriStatus(
+          scanSessionId: scanSessionId,
+          status: 'queued',
+          progress: 5,
+        );
+  }
 
   @override
   Future<KiriStatus> getKiriStatus({required String scanSessionId}) async {
     getStatusCallCount++;
+    if (startProcessingCallCount > 0 && statusAfterRetry != null) {
+      return statusAfterRetry!;
+    }
     if (saveCallCount > 0) {
       return statusAfterSave ??
           KiriStatus(
@@ -256,6 +276,47 @@ void main() {
 
       expect(find.text('ĐANG XỬ LÝ'), findsOneWidget);
       expect(find.textContaining('60%'), findsOneWidget);
+    });
+
+    testWidgets('"Thử lại" after a failed reconstruction re-queues it on the relay',
+        (tester) async {
+      final api = _MockResultApi(
+        statusToReturn: const KiriStatus(
+          scanSessionId: 'sess-500',
+          status: 'failed',
+          progress: 0,
+          errorMessage: 'success',
+        ),
+      )..statusAfterRetry = const KiriStatus(
+          scanSessionId: 'sess-500',
+          status: 'kiri_processing',
+          progress: 40,
+        );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ScanResultScreen(
+            scanSessionId: 'sess-500',
+            api: api,
+            status: 'failed',
+          ),
+        ),
+      );
+      await _flush(tester);
+      expect(find.text('Dựng mô hình thất bại'), findsOneWidget);
+
+      final retry = find.text('Thử lại');
+      await tester.ensureVisible(retry);
+      await tester.pump();
+      await tester.tap(retry);
+      await _flush(tester);
+
+      expect(api.startProcessingCallCount, 1);
+      expect(find.text('Dựng mô hình thất bại'), findsNothing);
+      expect(find.textContaining('40%'), findsOneWidget);
+
+      // Leave the screen so the periodic poll timer is cancelled.
+      await tester.pumpWidget(const SizedBox());
     });
   });
 }

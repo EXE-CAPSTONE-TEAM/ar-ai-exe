@@ -80,6 +80,7 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
   String? _previewUrl;
   bool _loadingPreview = false;
   bool _polling = false;
+  bool _retrying = false;
   bool _saving = false;
   bool _saved = false;
   String? _errorMessage;
@@ -124,6 +125,35 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(_pollInterval, (_) => _poll());
     unawaited(_poll());
+  }
+
+  /// A failed reconstruction stays failed on the relay until it is re-queued,
+  /// so retrying must call kiri/process again; polling alone changes nothing.
+  Future<void> _retryReconstruction() async {
+    if (_retrying) return;
+    setState(() {
+      _retrying = true;
+      _errorMessage = null;
+      _currentStatus = 'queued';
+      _progress = 0;
+    });
+    try {
+      final status =
+          await _api.startKiriProcessing(scanSessionId: widget.scanSessionId);
+      if (!mounted) return;
+      setState(() {
+        _currentStatus = status.status;
+        _progress = status.progress;
+        _errorMessage = status.errorMessage;
+      });
+      if (!status.isFailed) _startPolling();
+    } catch (error) {
+      if (mounted) {
+        setState(() => _errorMessage = ApiException.from(error).message);
+      }
+    } finally {
+      if (mounted) setState(() => _retrying = false);
+    }
   }
 
   Future<void> _poll() async {
@@ -434,7 +464,9 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                                       fontWeight: FontWeight.w700,
                                     ),
                                   ),
-                                  if (_errorMessage != null) ...[
+                                  if (_errorMessage != null &&
+                                      _errorMessage!.trim().isNotEmpty &&
+                                      _errorMessage!.trim().toLowerCase() != 'success') ...[
                                     const SizedBox(height: 6),
                                     Padding(
                                       padding: const EdgeInsets.symmetric(
@@ -451,9 +483,12 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                                   ],
                                   const SizedBox(height: 12),
                                   OutlinedButton.icon(
-                                    onPressed: _startPolling,
+                                    onPressed:
+                                        _retrying ? null : _retryReconstruction,
                                     icon: const Icon(Icons.refresh, size: 16),
-                                    label: const Text('Thử lại'),
+                                    label: Text(
+                                      _retrying ? 'Đang thử lại...' : 'Thử lại',
+                                    ),
                                   ),
                                 ],
                               )

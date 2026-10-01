@@ -12,6 +12,20 @@ class KiriError(RuntimeError):
     pass
 
 
+# Business `code` values meaning success: the docs show 0, the live API answers 200.
+_SUCCESS_CODES = {0, 200}
+
+# getStatus `data.status` per https://docs.kiriengine.app/model/retrieve-3d-model-status
+_NUMERIC_STATUSES = {
+    -1: "uploading",
+    0: "processing",
+    1: "failed",
+    2: "successful",
+    3: "queuing",
+    4: "expired",
+}
+
+
 class KiriApiClient:
     def __init__(self, client: httpx.Client | None = None, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
@@ -42,9 +56,13 @@ class KiriApiClient:
         response = self._request("GET", "/v1/open/model/getStatus", params={"serialize": serialize})
         payload = self._payload(response)
         provider_status = (payload.get("data") or {}).get("status")
-        if not provider_status:
+        if provider_status is None or provider_status == "":
             raise KiriError("Kiri status response did not include a status.")
-        return str(provider_status).strip().lower()
+        text = str(provider_status).strip().lower()
+        try:
+            return _NUMERIC_STATUSES.get(int(text), text)
+        except ValueError:
+            return text
 
     def get_model_zip_url(self, serialize: str) -> str:
         response = self._request(
@@ -116,10 +134,15 @@ class KiriApiClient:
             raise KiriError("Kiri API returned invalid JSON.") from exc
         if not isinstance(payload, dict):
             raise KiriError("Kiri API returned an invalid response.")
-        if payload.get("code") not in (None, 0, "0"):
-            message = payload.get("msg") or payload.get("message") or "Kiri API request failed."
-            raise KiriError(str(message))
-        return payload
+        code = payload.get("code")
+        ok = payload.get("ok")
+        msg = payload.get("msg") or payload.get("message") or ""
+        if ok is True or str(msg).strip().lower() == "success":
+            return payload
+        if code is not None and _as_int(code) in _SUCCESS_CODES:
+            return payload
+        message = msg or "Kiri API request failed."
+        raise KiriError(str(message))
 
     def _validate_download_url(self, raw_url: str) -> None:
         parsed = urlparse(raw_url)
@@ -129,3 +152,10 @@ class KiriApiClient:
         allowed = [value.strip().lower().lstrip(".") for value in self.settings.kiri_download_allowed_hosts]
         if not any(host == value or host.endswith(f".{value}") for value in allowed if value):
             raise KiriError("Kiri model URL host is not allowlisted.")
+
+
+def _as_int(value: object) -> int | None:
+    try:
+        return int(str(value).strip())
+    except ValueError:
+        return None

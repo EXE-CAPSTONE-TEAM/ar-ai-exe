@@ -59,6 +59,45 @@ def test_kiri_client_uploads_glb_request_with_backend_token(tmp_path) -> None:
     assert service.upload_video(video) == "serial-1"
 
 
+def _client_returning(body: dict) -> KiriApiClient:
+    client = httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json=body)))
+    return KiriApiClient(client=client, settings=kiri_settings())
+
+
+def test_kiri_client_accepts_live_success_code_200(tmp_path) -> None:
+    # The live API answers success with code 200 (its docs still show 0); treating that as an
+    # error lost the serialize id of an already-charged upload and failed every scan with "success".
+    video = tmp_path / "scan.mp4"
+    video.write_bytes(b"video")
+    service = _client_returning(
+        {"code": 200, "msg": "success", "data": {"serialize": "serial-200"}, "ok": True}
+    )
+
+    assert service.upload_video(video) == "serial-200"
+
+
+def test_kiri_client_still_rejects_business_error_codes() -> None:
+    service = _client_returning(
+        {"code": 2006, "msg": "Model does not exist", "data": None, "ok": False}
+    )
+
+    with pytest.raises(KiriError, match="Model does not exist"):
+        service.get_status("missing")
+
+
+@pytest.mark.parametrize(
+    ("raw_status", "expected"),
+    [(-1, "uploading"), (0, "processing"), (1, "failed"), (2, "successful"), (3, "queuing"),
+     (4, "expired"), ("Successful", "successful")],
+)
+def test_kiri_client_maps_documented_numeric_statuses(raw_status, expected) -> None:
+    service = _client_returning(
+        {"code": 200, "msg": "success", "data": {"serialize": "s", "status": raw_status}}
+    )
+
+    assert service.get_status("s") == expected
+
+
 def test_kiri_client_rejects_non_allowlisted_download_host() -> None:
     service = KiriApiClient(settings=kiri_settings())
 
