@@ -16,6 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
+use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_updater::UpdaterExt;
 
 /// Comma-separated https storage origins the sidecar may download from / upload to (the R2
@@ -911,6 +912,7 @@ fn main() {
         .manage(UpdateState::default())
         .setup(|app| {
             let handle = app.handle().clone();
+            let _ = handle.deep_link().register_all();
             let renderer_missing = desktop_paths(&handle)
                 .map(|paths| !paths.blender_bin.is_file())
                 .unwrap_or(false);
