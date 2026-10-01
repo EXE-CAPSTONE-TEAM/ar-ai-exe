@@ -1,7 +1,7 @@
 name: shoe_visual_customizer_mobile
 description: Flutter scanner MVP for Shoe Visual Customizer.
 publish_to: "none"
-version: 0.1.0+1
+version: 0.1.2+102
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
