@@ -84,6 +84,7 @@ backend/storage/models/*/
 backend/storage/designs/*/
 backend/storage/design_previews/*/
 backend/storage/exports/*/
+backend/storage/projects/*/
 !backend/storage/raw-scans/.gitkeep
 !backend/storage/frames/.gitkeep
 !backend/storage/models/.gitkeep

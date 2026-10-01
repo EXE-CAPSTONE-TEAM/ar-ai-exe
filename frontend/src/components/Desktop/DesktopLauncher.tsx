@@ -71,6 +71,7 @@ type DesktopLauncherProps = {
   projectsError: string | null;
   onRefreshProjects: () => void;
   onOpenProject: (projectId: string) => void;
+  onOpenDemoProject: () => void;
   linkValue: string;
   linkError: string | null;
   onLinkChange: (value: string) => void;
@@ -139,10 +140,20 @@ export function DesktopLauncher(props: DesktopLauncherProps) {
               file — ngay trên máy bạn.
             </p>
             <div className="kd-hero-actions">
+              <button
+                type="button"
+                className="kd-button kd-button-primary kd-button-demo"
+                disabled={!canUseEngine}
+                onClick={props.onOpenDemoProject}
+              >
+                <Box size={18} aria-hidden="true" />
+                Mẫu giày Demo (3D)
+                <span className="kd-chip-dark">Có sẵn</span>
+              </button>
               {mode === "local" ? (
                 <button
                   type="button"
-                  className="kd-button kd-button-primary"
+                  className="kd-button kd-button-secondary"
                   disabled={!canUseEngine}
                   aria-expanded={props.isImportOpen}
                   onClick={props.onToggleImport}
@@ -154,7 +165,7 @@ export function DesktopLauncher(props: DesktopLauncherProps) {
               ) : null}
               <button
                 type="button"
-                className={`kd-button ${mode === "local" ? "kd-button-secondary" : "kd-button-primary"}`}
+                className="kd-button kd-button-secondary"
                 aria-expanded={isLinkOpen}
                 onClick={() => setIsLinkOpen((current) => !current)}
               >
@@ -310,17 +321,19 @@ function ModeSwitch({ mode, onChange }: { mode: DesktopApiMode; onChange: (mode:
   );
 }
 
-function ProjectsSection({
-  mode,
-  onModeChange,
-  engineState,
-  projects,
-  isProjectsLoading,
-  projectsError,
-  onRefreshProjects,
-  onOpenProject,
-  canOpen,
-}: DesktopLauncherProps & { canOpen: boolean }) {
+function ProjectsSection(props: DesktopLauncherProps & { canOpen: boolean }) {
+  const {
+    mode,
+    onModeChange,
+    engineState,
+    projects,
+    isProjectsLoading,
+    projectsError,
+    onRefreshProjects,
+    onOpenProject,
+    onOpenDemoProject,
+    canOpen,
+  } = props;
   return (
     <section className="kd-projects" aria-labelledby="kd-projects-title">
       <div className="kd-projects-header">
@@ -345,6 +358,46 @@ function ProjectsSection({
       {projectsError ? <p className="kd-form-error">{projectsError}</p> : null}
 
       <div className="kd-project-grid">
+        <article className="kd-project-card kd-demo-card">
+          <div className="kd-project-thumb ready" style={{ position: "relative" }}>
+            <img src={shoeUrl} alt="Mẫu giày 3D Demo" />
+            <span
+              style={{
+                position: "absolute",
+                top: 8,
+                left: 8,
+                background: "rgba(15, 23, 42, 0.85)",
+                color: "#fb923c",
+                border: "1px solid rgba(251, 146, 60, 0.4)",
+                padding: "2px 8px",
+                borderRadius: "4px",
+                fontSize: "11px",
+                fontWeight: 700,
+                letterSpacing: "0.05em",
+                textTransform: "uppercase",
+              }}
+            >
+              Demo sẵn có
+            </span>
+          </div>
+          <div className="kd-project-body">
+            <h3 title="Mẫu giày 3D Demo (data/3DModel.glb)">Mẫu giày 3D Demo</h3>
+            <span className="kd-project-date">Tích hợp sẵn từ data/3DModel.glb</span>
+            <div className="kd-project-footer">
+              <span className="kd-status kd-status-ready">Sẵn sàng</span>
+              <button
+                type="button"
+                className="kd-button kd-button-primary kd-button-sm"
+                disabled={!canOpen}
+                aria-label="Tùy biến Mẫu giày 3D Demo"
+                onClick={onOpenDemoProject}
+              >
+                Dùng thử
+              </button>
+            </div>
+          </div>
+        </article>
+
         <div className="kd-scan-card">
           <span className="kd-scan-icon" aria-hidden="true">
             <Smartphone size={22} />

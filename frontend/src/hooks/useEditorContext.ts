@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { api } from "../api/client";
 import { EditorApiError, editorClient } from "../api/editorClient";
 import type { EditorContext, User } from "../types";
+
+// Matches DEMO_PROJECT_ID in backend/app/scripts/seed_desktop_demo_project.py.
+export const DESKTOP_DEMO_PROJECT_ID = "proj_desktop_demo";
 
 export type EditorContextState =
   | "idle"
@@ -34,20 +38,25 @@ export function useEditorContext(projectId: string | null) {
     async function load() {
       setState("AUTH_CHECKING");
       setErrorMessage(null);
+      let currentUser: User | null = null;
       try {
-        const currentUser = await editorClient.getMe();
-        if (cancelled) return;
-        setUser(currentUser);
+        currentUser = await editorClient.getMe();
       } catch (error) {
-        if (cancelled) return;
-        if (error instanceof EditorApiError && error.status === 401) {
+        // The desktop demo project lives in the local sidecar and belongs to its demo account.
+        if (activeProjectId === DESKTOP_DEMO_PROJECT_ID) {
+          currentUser = await api.demoLogin().catch(() => null);
+        }
+        if (!currentUser) {
+          if (cancelled) return;
           setState("UNAUTHENTICATED");
+          if (!(error instanceof EditorApiError && error.status === 401)) {
+            setErrorMessage(error instanceof Error ? error.message : "Authentication failed.");
+          }
           return;
         }
-        setState("UNAUTHENTICATED");
-        setErrorMessage(error instanceof Error ? error.message : "Authentication failed.");
-        return;
       }
+      if (cancelled) return;
+      setUser(currentUser);
 
       setState("PROJECT_LOADING");
       try {

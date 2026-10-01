@@ -53,7 +53,12 @@ export function ModelViewer({
   return (
     <div className="viewer-surface">
       {modelUrl ? (
-        <>
+        // R3F rethrows scene errors (e.g. a GLB that fails to load) to the DOM tree, so the boundary
+        // must live outside <Canvas>; a DOM fallback rendered inside the scene graph would crash again.
+        <ErrorBoundary
+          key={modelUrl}
+          fallbackMessage="Không thể hiển thị model 3D. Có thể thiết bị chưa hỗ trợ WebGL hoặc file model bị lỗi."
+        >
           <Canvas
             camera={{ position: [3.2, 2.1, 3.4], fov: 38, near: 0.1, far: 100 }}
             dpr={[1, 2]}
@@ -70,26 +75,24 @@ export function ModelViewer({
             <directionalLight position={[4.5, 5.2, 4]} intensity={1.15} color="#ffffff" />
             <directionalLight position={[-4, 3.2, -3.2]} intensity={0.86} color="#fff1eb" />
             <directionalLight position={[0, 4.8, -4]} intensity={0.54} color="#ffffff" />
-            <ErrorBoundary fallbackMessage="Failed to load 3D model. The file might be invalid or corrupted.">
-              <Suspense fallback={null}>
-                <ShoeModel
-                   url={modelUrl}
-                   config={config}
-                   activeLayerId={activeLayerId}
-                   hiddenLayerIds={hiddenLayerIds}
-                   isSaving={isSaving}
-                   surfaceApplyRequest={surfaceApplyRequest}
-                   gizmoMode={gizmoMode}
-                   isCropMode={isCropMode}
-                   cropBox={cropBox}
-                   onCropBoxChange={onCropBoxChange}
-                   onConfigChange={onConfigChange}
-                   onActiveLayerChange={onActiveLayerChange}
-                   onMeshBoundsUpdate={onMeshBoundsUpdate}
-                   onSurfaceApplyResult={onSurfaceApplyResult}
-                />
-              </Suspense>
-            </ErrorBoundary>
+            <Suspense fallback={null}>
+              <ShoeModel
+                url={modelUrl}
+                config={config}
+                activeLayerId={activeLayerId}
+                hiddenLayerIds={hiddenLayerIds}
+                isSaving={isSaving}
+                surfaceApplyRequest={surfaceApplyRequest}
+                gizmoMode={gizmoMode}
+                isCropMode={isCropMode}
+                cropBox={cropBox}
+                onCropBoxChange={onCropBoxChange}
+                onConfigChange={onConfigChange}
+                onActiveLayerChange={onActiveLayerChange}
+                onMeshBoundsUpdate={onMeshBoundsUpdate}
+                onSurfaceApplyResult={onSurfaceApplyResult}
+              />
+            </Suspense>
             <OrbitControls makeDefault enablePan enableZoom enableRotate />
           </Canvas>
           {isSaving ? (
@@ -104,7 +107,7 @@ export function ModelViewer({
               <span>{previewErrorMessage}</span>
             </div>
           ) : null}
-        </>
+        </ErrorBoundary>
       ) : (
         <div className="viewer-empty">
           <div className="viewer-empty-icon">
@@ -248,8 +251,8 @@ function ShoeModel({
             }
             if (m instanceof THREE.MeshStandardMaterial || m instanceof THREE.MeshPhysicalMaterial) {
               m.color = new THREE.Color(config?.baseColor ?? "#ffffff");
-              m.roughness = config?.material.roughness ?? 1;
-              m.metalness = config?.material.metallic ?? 0;
+              m.roughness = config?.material?.roughness ?? 1;
+              m.metalness = config?.material?.metallic ?? 0;
               configureMaterialTextures(m);
 
               if (activeLayerId !== null) {
@@ -296,7 +299,7 @@ function ShoeModel({
         node.receiveShadow = false;
       }
     });
-  }, [config?.baseColor, config?.material.metallic, config?.material.roughness, gltf.scene, activeLayerId, isCropMode]);
+  }, [config?.baseColor, config?.material?.metallic, config?.material?.roughness, gltf.scene, activeLayerId, isCropMode]);
 
   useEffect(() => {
     if (!surfaceApplyRequest || handledSurfaceApplyRequest.current === surfaceApplyRequest) {

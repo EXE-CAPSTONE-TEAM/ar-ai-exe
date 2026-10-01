@@ -812,10 +812,29 @@ fn diagnostic_summary(
 
 fn stop_backend(state: &mut RuntimeState) {
     if let Some(mut child) = state.backend_child.take() {
+        kill_process_tree(&child);
         let _ = child.kill();
         let _ = child.wait();
     }
 }
+
+/// The packaged sidecar is a PyInstaller --onefile exe: the spawned bootloader runs the real
+/// server as a child process, so killing only the bootloader orphans the server, which keeps the
+/// port and locks kusshoes-backend.exe (breaking updates/reinstalls). Kill the whole tree.
+#[cfg(windows)]
+fn kill_process_tree(child: &Child) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let _ = Command::new("taskkill")
+        .args(["/PID", &child.id().to_string(), "/T", "/F"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+}
+
+#[cfg(not(windows))]
+fn kill_process_tree(_child: &Child) {}
 
 struct DesktopPaths {
     app_data_dir: PathBuf,

@@ -53,7 +53,7 @@ import { MetadataPanel } from "./components/MetadataPanel/MetadataPanel";
 import { ModelImportPanel } from "./components/ModelImport/ModelImportPanel";
 import { SourceModelImportCard } from "./components/ModelImport/SourceModelImportCard";
 import { ModelViewer } from "./components/ModelViewer/ModelViewer";
-import { useEditorContext } from "./hooks/useEditorContext";
+import { DESKTOP_DEMO_PROJECT_ID, useEditorContext } from "./hooks/useEditorContext";
 import { DEFAULT_CROP_BOX } from "./types";
 import type {
   CropBox,
@@ -1218,6 +1218,14 @@ export function App() {
     window.history.pushState({}, "", `/?${params.toString()}`);
   }, []);
 
+  // The demo project is seeded into the local sidecar only; useEditorContext signs in the
+  // sidecar's local demo account once the local backend is ready.
+  function openDesktopDemoProject() {
+    setDesktopLaunchError(null);
+    changeDesktopApiMode("local");
+    handleOpenDesktopProject(DESKTOP_DEMO_PROJECT_ID);
+  }
+
   function openDesktopProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const projectId = projectIdFromEditorInput(desktopProjectInput);
@@ -1297,6 +1305,7 @@ export function App() {
           projectsError={desktopProjectsError}
           onRefreshProjects={loadDesktopProjects}
           onOpenProject={(projectId) => handleOpenDesktopProject(projectId)}
+          onOpenDemoProject={openDesktopDemoProject}
           linkValue={desktopProjectInput}
           linkError={desktopLaunchError}
           onLinkChange={(value) => {
