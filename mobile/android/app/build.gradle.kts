@@ -15,7 +15,7 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace = "vn.kusshoes.mobile"
+    namespace = "vn.kusshoes.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -26,7 +26,7 @@ android {
 
 
     defaultConfig {
-        applicationId = "vn.kusshoes.mobile"
+        applicationId = "vn.kusshoes.app"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

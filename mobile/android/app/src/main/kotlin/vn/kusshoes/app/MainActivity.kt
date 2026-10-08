@@ -1,4 +1,4 @@
-package vn.kusshoes.mobile
+package vn.kusshoes.app
 
 import io.flutter.embedding.android.FlutterActivity
 
