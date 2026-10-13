@@ -93,7 +93,7 @@ class Settings(BaseSettings):
     kiri_api_token: str = ""
     kiri_api_base_url: str = "https://api.kiriengine.app/api"
     kiri_webhook_secret: str = ""
-    kiri_download_allowed_hosts: list[str] = ["kiriengine.app"]
+    kiri_download_allowed_hosts: list[str] = ["kiriengine.app", "amazonaws.com"]
     kiri_request_timeout_seconds: int = 180
     kiri_preview_ticket_minutes: int = 5
     kiri_max_download_size_mb: int = 500

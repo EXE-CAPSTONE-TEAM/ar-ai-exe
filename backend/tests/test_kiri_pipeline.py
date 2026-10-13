@@ -37,7 +37,7 @@ def kiri_settings(**overrides) -> Settings:
     values = {
         "kiri_api_token": "secret-token",
         "kiri_api_base_url": "https://api.kiriengine.app/api",
-        "kiri_download_allowed_hosts": ["kiriengine.app"],
+        "kiri_download_allowed_hosts": ["kiriengine.app", "amazonaws.com"],
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)
@@ -96,6 +96,27 @@ def test_kiri_client_maps_documented_numeric_statuses(raw_status, expected) -> N
     )
 
     assert service.get_status("s") == expected
+
+
+def test_kiri_client_get_model_zip_url_uses_get_with_params() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/api/v1/open/model/getModelZip"
+        assert request.url.params["serialize"] == "serial-123"
+        return httpx.Response(
+            200,
+            json={
+                "code": 200,
+                "msg": "success",
+                "data": {"modelUrl": "https://kiri-enterprise.s3.us-east-2.amazonaws.com/model.zip"},
+                "ok": True,
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    service = KiriApiClient(client=client, settings=kiri_settings())
+    url = service.get_model_zip_url("serial-123")
+    assert url == "https://kiri-enterprise.s3.us-east-2.amazonaws.com/model.zip"
 
 
 def test_kiri_client_rejects_non_allowlisted_download_host() -> None:

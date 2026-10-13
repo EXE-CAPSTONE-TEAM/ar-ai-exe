@@ -66,9 +66,9 @@ class KiriApiClient:
 
     def get_model_zip_url(self, serialize: str) -> str:
         response = self._request(
-            "POST",
+            "GET",
             "/v1/open/model/getModelZip",
-            json={"serialize": serialize},
+            params={"serialize": serialize},
         )
         payload = self._payload(response)
         model_url = (payload.get("data") or {}).get("modelUrl")
