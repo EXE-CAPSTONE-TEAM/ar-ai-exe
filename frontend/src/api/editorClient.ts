@@ -1,6 +1,6 @@
 import type { CropBox, Design, DesignConfig, EditorContext, ExportPackage, Job, User } from "../types";
-import { storedAccessToken } from "./authStorage";
-import { getDesktopRuntime } from "./desktopRuntime";
+import { accessTokenForPath } from "./authStorage";
+import { getDesktopRuntime, hasDesktopRuntimeBridge } from "./desktopRuntime";
 import { getActiveEditorSession } from "./editorLaunch";
 import { apiUrl, isCentralApi } from "./runtimeConfig";
 
@@ -33,6 +33,27 @@ export class EditorApiError extends Error {
 
 export function isTerminalJobStatus(status: string): boolean {
   return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+/** The local compute sidecar this shell spawned, or why it is not usable. Outside the Tauri shell
+ * there is no bridge, so only then is "install KusStudio Desktop" the right answer. */
+async function requireSidecar(): Promise<DesktopRuntimeLike & { sidecarToken: string }> {
+  const runtime = await getDesktopRuntime();
+  if (runtime.sidecarToken) {
+    return { ...runtime, sidecarToken: runtime.sidecarToken };
+  }
+  if (!hasDesktopRuntimeBridge()) {
+    throw new EditorApiError(
+      "KusStudio Desktop (Windows) is required for this action.",
+      400,
+      "DESKTOP_REQUIRED",
+    );
+  }
+  throw new EditorApiError(
+    runtime.lastError ?? "Bộ xử lý trên máy chưa sẵn sàng.",
+    503,
+    "DESKTOP_RUNTIME_UNAVAILABLE",
+  );
 }
 
 function editorRoute(localPath: string, centralPath: string): string {
@@ -69,14 +90,7 @@ export const editorClient = {
       });
     }
 
-    const runtime = await getDesktopRuntime();
-    if (!runtime.sidecarToken) {
-      throw new EditorApiError(
-        "KusStudio Desktop (Windows) is required for this action.",
-        400,
-        "DESKTOP_REQUIRED",
-      );
-    }
+    const runtime = await requireSidecar();
 
     // 1. Create bake job on KusShoes BE
     const job = await request<Job>(`/api/v1/editor/designs/${designId}/bake`, {
@@ -92,14 +106,7 @@ export const editorClient = {
     confirmResetDesign = false,
     onProgress?: (step: "downloading" | "cropping" | "cleaning" | "uploading" | "done") => void,
   ): Promise<Job> {
-    const runtime = await getDesktopRuntime();
-    if (!runtime.sidecarToken) {
-      throw new EditorApiError(
-        "KusStudio Desktop (Windows) is required for this action.",
-        400,
-        "DESKTOP_REQUIRED",
-      );
-    }
+    const runtime = await requireSidecar();
 
     // 1. Create prepare job on KusShoes BE
     onProgress?.("downloading");
@@ -135,14 +142,7 @@ export const editorClient = {
       });
     }
 
-    const runtime = await getDesktopRuntime();
-    if (!runtime.sidecarToken) {
-      throw new EditorApiError(
-        "KusStudio Desktop (Windows) is required for this action.",
-        400,
-        "DESKTOP_REQUIRED",
-      );
-    }
+    await requireSidecar();
 
     return request<ExportPackage>(`/api/v1/editor/designs/${designId}/export`, {
       method: "POST",
@@ -156,20 +156,13 @@ export const editorClient = {
     const isKusShoes = Boolean(session) || exportPath.includes("/editor/exports/");
 
     if (isKusShoes) {
-      const runtime = await getDesktopRuntime();
-      if (!runtime.sidecarToken) {
-        throw new EditorApiError(
-          "KusStudio Desktop (Windows) is required for this action.",
-          400,
-          "DESKTOP_REQUIRED",
-        );
-      }
+      const runtime = await requireSidecar();
 
       // Desktop: call KusShoes /content
       const response = await fetch(apiUrl(exportPath), {
         credentials: "include",
         headers: {
-          ...authHeader(),
+          ...authHeader(exportPath),
           ...csrfHeader("GET"),
         },
       });
@@ -357,7 +350,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...authHeader(),
+      ...authHeader(path),
       ...csrfHeader(options.method),
       ...options.headers,
     },
@@ -421,8 +414,8 @@ function readConflictPayload(payload: Record<string, unknown>): DesignConflictPa
   };
 }
 
-function authHeader(): Record<string, string> {
-  const token = storedAccessToken();
+function authHeader(path: string): Record<string, string> {
+  const token = accessTokenForPath(path);
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 

@@ -184,6 +184,8 @@ export const PRD_ERROR_MESSAGES: Record<string, string> = {
   EDITOR_DESIGN_RESET_REQUIRED: "Cắt lại sẽ xoá thiết kế hiện tại. Bạn có chắc?",
   JOB_OUTPUT_INVALID: "Kết quả tải lên không hợp lệ. Đang thử lại…",
   DESKTOP_REQUIRED: "Tính năng này cần KusStudio Desktop (Windows).",
+  DESKTOP_RUNTIME_UNAVAILABLE:
+    "Bộ xử lý trên máy chưa sẵn sàng. Mở Chi tiết kỹ thuật để xem Logs hoặc thử khởi động lại.",
 };
 
 export function messageFromError(error: unknown): string {

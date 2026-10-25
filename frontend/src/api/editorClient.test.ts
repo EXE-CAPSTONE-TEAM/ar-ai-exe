@@ -124,6 +124,41 @@ describe("editorClient (Ticket-06 & Ticket-09)", () => {
     });
   });
 
+  describe("Desktop shell without a usable sidecar", () => {
+    it("prepareModel reports the runtime error, not DESKTOP_REQUIRED, when the bridge exists", async () => {
+      vi.stubGlobal("window", {
+        __TAURI__: {
+          core: {
+            invoke: vi.fn().mockResolvedValue({
+              apiBaseUrl: "http://127.0.0.1:9",
+              backendStatus: "failed",
+              blenderStatus: "missing",
+              demoProjectStatus: "failed",
+              diagnosticSummary: "",
+              backendPort: 9,
+              storagePath: "",
+              blenderPath: "",
+              logsPath: "",
+              appVersion: "1.0.0",
+              lastError: "Backend sidecar did not become ready in time.",
+              sidecarToken: null,
+            }),
+          },
+        },
+      });
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(editorClient.prepareModel("project-456", DEFAULT_CROP_BOX)).rejects.toSatisfy(
+        (err: unknown) =>
+          err instanceof EditorApiError &&
+          err.code === "DESKTOP_RUNTIME_UNAVAILABLE" &&
+          err.message.includes("did not become ready"),
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
   describe("Desktop mode bakeDesign lifecycle", () => {
     function setupDesktopTauri() {
       vi.stubGlobal("window", {
