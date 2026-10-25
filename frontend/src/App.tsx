@@ -1380,6 +1380,7 @@ export function App() {
           onOpenDemoProject={openDesktopDemoProject}
           linkValue={desktopProjectInput}
           linkError={desktopLaunchError}
+          onDismissLinkError={() => setDesktopLaunchError(null)}
           onLinkChange={(value) => {
             setDesktopProjectInput(value);
             setDesktopLaunchError(null);
@@ -1443,31 +1444,25 @@ export function App() {
             state={editorContext.state}
             message={
               isDesktopShell
-                ? (editorContext.errorMessage
-                  ? friendlyInlineMessage(editorContext.errorMessage)
-                  : "Cần đăng nhập tài khoản KusShoes để tải dự án này.")
+                ? desktopEditorRouteMessage(editorContext.state, editorContext.errorMessage)
                 : friendlyInlineMessage(editorContext.errorMessage ?? "Redirecting to login.")
             }
             action={
-              isDesktopShell ? (
-                <>
-                  <button type="button" className="primary-button" onClick={handleGoogleSignIn}>
-                    Đăng nhập Google
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      clearEditorLaunchSession();
-                      if (!api.hasToken()) {
-                        setUser(null);
-                      }
-                      setEditorProjectId(null);
-                      window.history.pushState({}, "", "/?desktop=1");
-                    }}
-                  >
-                    Quay lại Launcher
-                  </button>
-                </>
+              isDesktopShell && editorContext.state !== "AUTH_CHECKING" && editorContext.state !== "PROJECT_LOADING" ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => {
+                    clearEditorLaunchSession();
+                    if (!api.hasToken()) {
+                      setUser(null);
+                    }
+                    setEditorProjectId(null);
+                    window.history.pushState({}, "", "/?desktop=1");
+                  }}
+                >
+                  Về màn hình chính
+                </button>
               ) : undefined
             }
           />
@@ -1867,6 +1862,18 @@ export function App() {
       </main>
     </AppShell>
   );
+}
+
+/** Desktop copy for the editor route before a user is known: loading states never ask the user
+ * to sign in, and an expired or rejected launch points back to the web button or the launcher. */
+function desktopEditorRouteMessage(state: string, errorMessage: string | null): string {
+  if (state === "AUTH_CHECKING" || state === "PROJECT_LOADING" || state === "idle") {
+    return "Đang mở project từ KusShoes…";
+  }
+  if (state === "UNAUTHENTICATED") {
+    return "Phiên mở project đã hết hạn hoặc không hợp lệ. Bấm lại “Mở bằng KusStudio Desktop” trên website, hoặc về màn hình chính để đăng nhập rồi mở project.";
+  }
+  return errorMessage ? friendlyInlineMessage(errorMessage) : "Không mở được project này.";
 }
 
 function EditorRouteState({
