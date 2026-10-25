@@ -1989,7 +1989,7 @@ dependencies = [
 
 [[package]]
 name = "kusshoes-editor-desktop"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "keyring",
  "runtime-installer",
