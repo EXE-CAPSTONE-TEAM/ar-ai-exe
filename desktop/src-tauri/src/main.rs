@@ -373,6 +373,44 @@ fn open_diagnostics_folder(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// The signed-in KusShoes cloud session (user id + rotating refresh token, as a small JSON
+/// string) lives in the OS credential store, never in webview storage. Only the cloud sign-in
+/// path writes it; the local sidecar account is never persisted.
+const CLOUD_SESSION_SERVICE: &str = "com.kusshoes.editor";
+const CLOUD_SESSION_ACCOUNT: &str = "kusshoes-cloud-session";
+const MAX_CLOUD_SESSION_BYTES: usize = 8192;
+
+fn cloud_session_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new(CLOUD_SESSION_SERVICE, CLOUD_SESSION_ACCOUNT).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn load_cloud_session() -> Result<Option<String>, String> {
+    match cloud_session_entry()?.get_password() {
+        Ok(value) => Ok(Some(value)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[tauri::command]
+fn save_cloud_session(value: String) -> Result<(), String> {
+    if value.is_empty() || value.len() > MAX_CLOUD_SESSION_BYTES {
+        return Err("Cloud session payload has an invalid size.".to_string());
+    }
+    cloud_session_entry()?
+        .set_password(&value)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn clear_cloud_session() -> Result<(), String> {
+    match cloud_session_entry()?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 #[tauri::command]
 fn open_in_browser(url: String) -> Result<(), String> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
@@ -956,6 +994,9 @@ fn main() {
             restart_backend,
             open_diagnostics_folder,
             open_in_browser,
+            load_cloud_session,
+            save_cloud_session,
+            clear_cloud_session,
         ])
         .on_window_event(|window, event| {
             if matches!(event, WindowEvent::CloseRequested { .. }) {

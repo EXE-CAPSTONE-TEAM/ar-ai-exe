@@ -90,6 +90,28 @@ export async function openDiagnosticsFolder(): Promise<void> {
   await window.__TAURI__!.core!.invoke!("open_diagnostics_folder");
 }
 
+/** The saved cloud session (OS credential store); always null outside the desktop shell. */
+export async function loadPersistedCloudSession(): Promise<string | null> {
+  if (!hasDesktopRuntimeBridge()) {
+    return null;
+  }
+  return window.__TAURI__!.core!.invoke!<string | null>("load_cloud_session");
+}
+
+export async function savePersistedCloudSession(value: string): Promise<void> {
+  if (!hasDesktopRuntimeBridge()) {
+    return;
+  }
+  await window.__TAURI__!.core!.invoke!("save_cloud_session", { value });
+}
+
+export async function clearPersistedCloudSession(): Promise<void> {
+  if (!hasDesktopRuntimeBridge()) {
+    return;
+  }
+  await window.__TAURI__!.core!.invoke!("clear_cloud_session");
+}
+
 export async function openInBrowser(url: string): Promise<void> {
   if (hasDesktopRuntimeBridge()) {
     try {

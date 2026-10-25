@@ -1,11 +1,9 @@
+import { adoptCloudSession, DESKTOP_CLIENT_HEADERS } from "./cloudSession";
 import { openInBrowser } from "./desktopRuntime";
 import { getKusShoesApiBaseUrl } from "./editorLaunch";
-import { storeAccessToken } from "./authStorage";
 
 const PKCE_VERIFIER_KEY = "kusshoes_desktop_pkce_verifier";
 const PKCE_EXPIRY_MS = 5 * 60 * 1000;
-const MARKETING_LOGIN_URL =
-  import.meta.env.VITE_MARKETING_LOGIN_URL ?? "https://kusshoes.vercel.app/login";
 
 function createCodeVerifier(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
@@ -35,15 +33,11 @@ export async function startDesktopGoogleLogin(): Promise<void> {
     // If sessionStorage is disabled or restricted, continue best-effort
   }
 
-  // Open web login with from=desktop flag so Google login hand-off works seamlessly across both:
-  // 1. Direct Web-to-Desktop protocol bridge (kusshoes-editor://auth/callback?access_token=...)
-  // 2. Or direct PKCE flow when backend is redeployed with client=desktop
-  const separator = MARKETING_LOGIN_URL.includes("?") ? "&" : "?";
-  const loginUrl = `${MARKETING_LOGIN_URL}${separator}from=desktop&code_challenge=${encodeURIComponent(
-    challenge
-  )}`;
-
-  await openInBrowser(loginUrl);
+  // KusShoes' desktop PKCE flow: Google sign-in in the system browser, then KusShoes redirects to
+  // kusshoes-editor://auth/google/callback?code=<one-time code> and the app exchanges it with the
+  // verifier only it holds. No token ever travels in a URL.
+  const params = new URLSearchParams({ client: "desktop", code_challenge: challenge });
+  await openInBrowser(`${getKusShoesApiBaseUrl()}/api/v1/auth/google?${params.toString()}`);
 }
 
 export function isDesktopAuthDeepLink(urlValue: string): boolean {
@@ -51,12 +45,8 @@ export function isDesktopAuthDeepLink(urlValue: string): boolean {
     const url = new URL(urlValue);
     return (
       url.protocol === "kusshoes-editor:" &&
-      (url.hostname === "auth" ||
-        url.pathname.includes("/auth") ||
-        url.searchParams.has("code") ||
-        url.searchParams.has("access_token") ||
-        url.searchParams.has("token") ||
-        url.searchParams.has("error"))
+      url.hostname === "auth" &&
+      (url.searchParams.has("code") || url.searchParams.has("error"))
     );
   } catch {
     return false;
@@ -68,19 +58,17 @@ export async function completeDesktopGoogleAuth(
 ): Promise<{ accessToken: string; tokenType: string }> {
   const url = new URL(urlValue);
   const error = url.searchParams.get("error");
+  if (error === "AUTH_CONSENT_REQUIRED") {
+    throw new Error(
+      "Tài khoản Google này chưa có trên KusShoes. Hãy đăng ký trên website (đồng ý điều khoản) rồi đăng nhập lại trong app."
+    );
+  }
   if (error) {
     throw new Error(`Đăng nhập Google không thành công: ${error}`);
   }
 
-  // 1. Dual-mode support: Direct Access Token from Web Bridge
-  const directToken = url.searchParams.get("access_token") || url.searchParams.get("token");
-  if (directToken) {
-    const tokenType = url.searchParams.get("token_type") || "bearer";
-    storeAccessToken(directToken);
-    return { accessToken: directToken, tokenType };
-  }
-
-  // 2. PKCE code exchange with backend
+  // Tokens in a deep link are never accepted: any website could otherwise push a session into
+  // the app. Only the PKCE code this app started can be exchanged.
   const code = url.searchParams.get("code");
   if (!code) {
     throw new Error("Không tìm thấy thông tin xác thực Google trong liên kết phản hồi.");
@@ -115,7 +103,8 @@ export async function completeDesktopGoogleAuth(
   const baseUrl = getKusShoesApiBaseUrl();
   const response = await fetch(`${baseUrl}/api/v1/auth/google/desktop/exchange`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    credentials: "omit",
+    headers: { "Content-Type": "application/json", ...DESKTOP_CLIENT_HEADERS },
     body: JSON.stringify({
       code,
       code_verifier: verifier,
@@ -134,7 +123,7 @@ export async function completeDesktopGoogleAuth(
     throw new Error(errorMsg);
   }
 
-  const data = (await response.json()) as { access_token: string; token_type: string };
-  storeAccessToken(data.access_token);
+  const data = (await response.json()) as { access_token: string; token_type: string; refresh_token?: string };
+  await adoptCloudSession({ accessToken: data.access_token, refreshToken: data.refresh_token });
   return { accessToken: data.access_token, tokenType: data.token_type };
 }

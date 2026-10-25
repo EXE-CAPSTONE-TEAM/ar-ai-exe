@@ -1,7 +1,7 @@
 import type { CropBox, Design, DesignConfig, EditorContext, ExportPackage, Job, User } from "../types";
-import { accessTokenForPath } from "./authStorage";
+import { accessTokenForPath, isEditorApiPath } from "./authStorage";
 import { getDesktopRuntime, hasDesktopRuntimeBridge } from "./desktopRuntime";
-import { getActiveEditorSession } from "./editorLaunch";
+import { getActiveEditorSession, renewEditorSession } from "./editorLaunch";
 import { apiUrl, isCentralApi } from "./runtimeConfig";
 
 const CSRF_COOKIE_NAME = "kusshoes_csrf_token";
@@ -345,16 +345,22 @@ async function failJob(
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(apiUrl(path), {
-    ...options,
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeader(path),
-      ...csrfHeader(options.method),
-      ...options.headers,
-    },
-  });
+  const send = () =>
+    fetch(apiUrl(path), {
+      ...options,
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeader(path),
+        ...csrfHeader(options.method),
+        ...options.headers,
+      },
+    });
+  let response = await send();
+  // The editor-session token lives 15 minutes; a signed-in desktop renews it and retries once.
+  if (response.status === 401 && isEditorApiPath(path) && getActiveEditorSession() && (await renewEditorSession())) {
+    response = await send();
+  }
 
   if (!response.ok) {
     const error = await readError(response);

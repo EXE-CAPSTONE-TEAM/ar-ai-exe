@@ -52,9 +52,20 @@ export type DesktopAuthForm = {
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  /** Pending second factor after the password was accepted. */
+  twoFactor: {
+    method: "totp" | "email";
+    code: string;
+    onCodeChange: (value: string) => void;
+    onCancel: () => void;
+  } | null;
+  /** KusShoes sign-up needs OTP and Terms consent, which live on the website. */
+  onRegisterOnWeb: () => void;
 };
 
 type DesktopLauncherProps = {
+  /** A session saved by an earlier run is being restored; hold the sign-in card meanwhile. */
+  isRestoringSession?: boolean;
   mode: DesktopApiMode;
   onModeChange: (mode: DesktopApiMode) => void;
   user: User | null;
@@ -88,7 +99,8 @@ type DesktopLauncherProps = {
 export function DesktopLauncher(props: DesktopLauncherProps) {
   const { mode, user, engineState } = props;
   const [isLinkOpen, setIsLinkOpen] = useState(false);
-  const needsSignIn = mode === "cloud" && engineState === "ready" && !user;
+  const isRestoringSession = mode === "cloud" && !user && Boolean(props.isRestoringSession);
+  const needsSignIn = mode === "cloud" && engineState === "ready" && !user && !isRestoringSession;
   const canUseEngine = engineState === "ready";
 
   return (
@@ -233,7 +245,12 @@ export function DesktopLauncher(props: DesktopLauncherProps) {
           </section>
         ) : null}
 
-        {needsSignIn ? (
+        {isRestoringSession ? (
+          <section className="kd-card kd-restoring" role="status">
+            <Loader2 size={20} className="spin" aria-hidden="true" />
+            Đang khôi phục phiên đăng nhập…
+          </section>
+        ) : needsSignIn ? (
           <SignInCard
             auth={props.auth}
             onUseLocal={() => props.onModeChange("local")}
@@ -573,17 +590,43 @@ function SignInCard({
           </button>
         </div>
         {auth.mode === "register" ? (
-          <label>
-            Tên của bạn
-            <input
-              value={auth.name}
-              onChange={(event) => auth.onNameChange(event.target.value)}
-              placeholder="Nguyễn Văn A"
-              required
-              minLength={1}
-            />
-          </label>
+          <div className="kd-register-web">
+            <p>
+              Tạo tài khoản KusShoes trên website (xác minh email và đồng ý điều khoản), rồi quay lại
+              đây để đăng nhập.
+            </p>
+            <button type="button" className="kd-button kd-button-primary kd-button-block" onClick={auth.onRegisterOnWeb}>
+              <UserPlus size={18} aria-hidden="true" />
+              Tạo tài khoản trên website
+            </button>
+          </div>
+        ) : auth.twoFactor ? (
+          <>
+            <label>
+              {auth.twoFactor.method === "email" ? "Mã xác thực đã gửi tới email" : "Mã từ ứng dụng xác thực"}
+              <input
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="123456"
+                value={auth.twoFactor.code}
+                onChange={(event) => auth.twoFactor?.onCodeChange(event.target.value)}
+                required
+                minLength={6}
+                maxLength={12}
+                autoFocus
+              />
+            </label>
+            <button type="submit" className="kd-button kd-button-primary kd-button-block" disabled={auth.isBusy}>
+              {auth.isBusy ? <Loader2 size={18} className="spin" aria-hidden="true" /> : <LogIn size={18} aria-hidden="true" />}
+              Xác nhận
+            </button>
+            <button type="button" className="kd-text-button" onClick={auth.twoFactor.onCancel}>
+              Quay lại
+            </button>
+          </>
         ) : null}
+        {auth.mode === "login" && !auth.twoFactor ? (
+        <>
         <label>
           Email
           <input
@@ -600,12 +643,11 @@ function SignInCard({
           <div className="kd-password-field">
             <input
               type={showPassword ? "text" : "password"}
-              autoComplete={auth.mode === "login" ? "current-password" : "new-password"}
+              autoComplete="current-password"
               placeholder="••••••••"
               value={auth.password}
               onChange={(event) => auth.onPasswordChange(event.target.value)}
               required
-              minLength={auth.mode === "register" ? 8 : 1}
             />
             <button
               type="button"
@@ -620,8 +662,10 @@ function SignInCard({
         </label>
         <button type="submit" className="kd-button kd-button-primary kd-button-block" disabled={auth.isBusy}>
           {auth.isBusy ? <Loader2 size={18} className="spin" aria-hidden="true" /> : <LogIn size={18} aria-hidden="true" />}
-          {auth.mode === "login" ? "Vào studio" : "Tạo tài khoản"}
+          Vào studio
         </button>
+        </>
+        ) : null}
 
         {onGoogleSignIn ? (
           <>
