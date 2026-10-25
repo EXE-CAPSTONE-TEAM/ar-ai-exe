@@ -105,6 +105,28 @@ describe("cloud session", () => {
     expect(hasCloudSession()).toBe(false);
   });
 
+  it("sign-out with an expired access token renews first so the refresh token is really revoked", async () => {
+    await adoptCloudSession({ accessToken: ACCESS, refreshToken: REFRESH_1 });
+    const calls: Array<{ url: string; body: Record<string, string>; auth?: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as Record<string, string>;
+        const auth = (init.headers as Record<string, string>).Authorization;
+        calls.push({ url, body, auth });
+        if (url.endsWith("/logout") && auth === `Bearer ${ACCESS}`) return json(401, {});
+        if (url.endsWith("/refresh")) return json(200, { access_token: "fresh-access-0123456789", refresh_token: REFRESH_2 });
+        return json(200, { message: "ok" });
+      }),
+    );
+
+    await signOutCloudSession();
+    expect(calls.map((call) => call.url.split("/api/v1/auth/")[1])).toEqual(["logout", "refresh", "logout"]);
+    expect(calls[2].body).toEqual({ refresh_token: REFRESH_2 });
+    expect(calls[2].auth).toBe("Bearer fresh-access-0123456789");
+    expect(keyring).toBeNull();
+  });
+
   it("returns 'none' when nothing was saved", async () => {
     await expect(restoreCloudSession()).resolves.toBe("none");
   });

@@ -21,7 +21,7 @@ import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { listen } from "@tauri-apps/api/event";
 
 import { api, designStorageKey, TwoFactorRequiredError } from "./api/client";
-import { restoreCloudSession } from "./api/cloudSession";
+import { hasCloudSession, restoreCloudSession } from "./api/cloudSession";
 import {
   getDesktopRuntime,
   hasDesktopRuntimeBridge,
@@ -151,6 +151,9 @@ export function App() {
   const [twoFactor, setTwoFactor] = useState<{ challengeToken: string; method: "totp" | "email" } | null>(null);
   const [twoFactorCode, setTwoFactorCode] = useState("");
   const [isRestoringCloudSession, setIsRestoringCloudSession] = useState(false);
+  // The saved session could not be checked (offline / KusShoes unreachable): keep it and offer a retry.
+  const [isCloudSessionOffline, setIsCloudSessionOffline] = useState(false);
+  const [restoreAttempt, setRestoreAttempt] = useState(0);
   const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
   const [meshBounds, setMeshBounds] = useState<{ center: [number, number, number]; size: [number, number, number] } | null>(null);
   const [gizmoMode, setGizmoMode] = useState<"translate" | "rotate" | "scale">("translate");
@@ -319,15 +322,21 @@ export function App() {
     }
     let cancelled = false;
     setIsRestoringCloudSession(true);
+    setIsCloudSessionOffline(false);
     void (async () => {
       try {
         const restored = api.hasToken() ? "ok" : await restoreCloudSession();
-        if (restored === "ok" && !cancelled) {
+        if (cancelled) return;
+        if (restored === "offline") {
+          setIsCloudSessionOffline(true);
+        } else if (restored === "ok") {
           const signedInUser = await api.me();
           if (!cancelled) setUser(signedInUser);
         }
       } catch {
-        // Stay on the sign-in card; nothing saved is deleted here.
+        // Unreachable while loading the profile: the session is kept. A rejected session was already
+        // forgotten by the refresh, and then the sign-in card is the right screen.
+        if (!cancelled && hasCloudSession()) setIsCloudSessionOffline(true);
       } finally {
         if (!cancelled) setIsRestoringCloudSession(false);
       }
@@ -336,7 +345,7 @@ export function App() {
       cancelled = true;
       setIsRestoringCloudSession(false);
     };
-  }, [desktopApiMode, desktopCloudReady, isDesktopShell, isProjectEditor, user]);
+  }, [desktopApiMode, desktopCloudReady, isDesktopShell, isProjectEditor, user, restoreAttempt]);
 
   // Cloud lists the signed-in account's projects; local lists the sidecar's offline workspace.
   const canListDesktopProjects =
@@ -1440,6 +1449,8 @@ export function App() {
             )
           }
           isRestoringSession={isRestoringCloudSession}
+          isSessionOffline={isCloudSessionOffline}
+          onRetrySession={() => setRestoreAttempt((current) => current + 1)}
           auth={{
             mode: authMode,
             name: authName,

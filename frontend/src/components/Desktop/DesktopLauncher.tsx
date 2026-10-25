@@ -66,6 +66,9 @@ export type DesktopAuthForm = {
 type DesktopLauncherProps = {
   /** A session saved by an earlier run is being restored; hold the sign-in card meanwhile. */
   isRestoringSession?: boolean;
+  /** The saved session could not be checked (offline); it is kept, so offer a retry, not a form. */
+  isSessionOffline?: boolean;
+  onRetrySession?: () => void;
   mode: DesktopApiMode;
   onModeChange: (mode: DesktopApiMode) => void;
   user: User | null;
@@ -100,7 +103,9 @@ export function DesktopLauncher(props: DesktopLauncherProps) {
   const { mode, user, engineState } = props;
   const [isLinkOpen, setIsLinkOpen] = useState(false);
   const isRestoringSession = mode === "cloud" && !user && Boolean(props.isRestoringSession);
-  const needsSignIn = mode === "cloud" && engineState === "ready" && !user && !isRestoringSession;
+  const isSessionOffline = mode === "cloud" && !user && !isRestoringSession && Boolean(props.isSessionOffline);
+  const needsSignIn =
+    mode === "cloud" && engineState === "ready" && !user && !isRestoringSession && !isSessionOffline;
   const canUseEngine = engineState === "ready";
 
   return (
@@ -249,6 +254,26 @@ export function DesktopLauncher(props: DesktopLauncherProps) {
           <section className="kd-card kd-restoring" role="status">
             <Loader2 size={20} className="spin" aria-hidden="true" />
             Đang khôi phục phiên đăng nhập…
+          </section>
+        ) : isSessionOffline ? (
+          <section className="kd-card kd-problem" role="alert">
+            <span className="kd-problem-icon" aria-hidden="true">
+              <AlertTriangle size={20} />
+            </span>
+            <div className="kd-problem-body">
+              <strong>Không kết nối được KusShoes</strong>
+              <p>Phiên đăng nhập của bạn vẫn được giữ. Kiểm tra mạng rồi thử lại, hoặc làm việc offline trên máy.</p>
+            </div>
+            <div className="kd-problem-actions">
+              <button type="button" className="kd-button kd-button-primary kd-button-sm" onClick={props.onRetrySession}>
+                <RefreshCw size={16} aria-hidden="true" />
+                Thử lại
+              </button>
+              <button type="button" className="kd-button kd-button-secondary kd-button-sm" onClick={() => props.onModeChange("local")}>
+                <HardDrive size={16} aria-hidden="true" />
+                Làm việc trên máy
+              </button>
+            </div>
           </section>
         ) : needsSignIn ? (
           <SignInCard

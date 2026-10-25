@@ -1,4 +1,4 @@
-import { clearAccessToken, storeAccessToken, storedAccessToken } from "./authStorage";
+import { clearAccessToken, clearUserAccessToken, storeAccessToken, storedAccessToken } from "./authStorage";
 import { clearPersistedCloudSession, loadPersistedCloudSession, savePersistedCloudSession } from "./desktopRuntime";
 import { getKusShoesApiBaseUrl } from "./editorLaunch";
 
@@ -34,6 +34,30 @@ export function cloudSessionUserId(): string | null {
   return sessionUserId;
 }
 
+/**
+ * Loads a session saved by an earlier run into memory without contacting KusShoes. Lets a cold
+ * start from a web launch know it is already signed in (and as whom) before claiming the ticket.
+ */
+export async function loadSavedCloudSession(): Promise<boolean> {
+  if (!refreshToken) {
+    const saved = await readPersisted();
+    if (!refreshToken && saved) {
+      refreshToken = saved.refreshToken;
+      sessionUserId = saved.userId;
+    }
+  }
+  return hasCloudSession();
+}
+
+/** Records which KusShoes user the saved session belongs to (resolved after sign-in/restore). */
+export async function rememberCloudSessionUser(userId: string): Promise<void> {
+  if (!refreshToken || sessionUserId === userId) {
+    return;
+  }
+  sessionUserId = userId;
+  await persist();
+}
+
 /** Signs the app in with tokens from a desktop-gated KusShoes response. */
 export async function adoptCloudSession(tokens: {
   accessToken: string;
@@ -58,16 +82,8 @@ export async function adoptCloudSession(tokens: {
  * only a definitive rejection from KusShoes ever deletes it.
  */
 export async function restoreCloudSession(): Promise<CloudRefreshResult | "none"> {
-  if (!refreshToken) {
-    const saved = await readPersisted();
-    // A web launch may have signed the app in while the credential store was being read.
-    if (!refreshToken) {
-      if (!saved) {
-        return "none";
-      }
-      refreshToken = saved.refreshToken;
-      sessionUserId = saved.userId;
-    }
+  if (!(await loadSavedCloudSession())) {
+    return "none";
   }
   if (storedAccessToken()) {
     return "ok";
@@ -85,21 +101,34 @@ export function refreshCloudSession(): Promise<CloudRefreshResult> {
   return refreshInFlight;
 }
 
-/** Full sign-out: revoke the refresh token on KusShoes (best effort) and forget it locally. */
+/**
+ * Full sign-out: revoke the refresh token on KusShoes (best effort), then forget it locally.
+ * /logout needs a live access token; after 5 idle minutes it has expired, so renew first —
+ * otherwise the refresh token would stay valid on the server for its full 30 days.
+ */
 export async function signOutCloudSession(): Promise<void> {
-  const token = refreshToken;
-  const accessToken = storedAccessToken();
-  refreshToken = null;
-  sessionUserId = null;
-  if (token && accessToken) {
+  if (refreshToken) {
     try {
-      await postJson("/api/v1/auth/logout", { refresh_token: token }, { Authorization: `Bearer ${accessToken}` });
+      let response = storedAccessToken() ? await postLogout() : null;
+      if ((!response || response.status === 401) && (await refreshCloudSession()) === "ok") {
+        response = await postLogout();
+      }
     } catch {
-      // Offline or already revoked: forgetting it locally is what matters.
+      // Offline: forgetting it locally is still what the user asked for.
     }
   }
+  refreshToken = null;
+  sessionUserId = null;
   clearAccessToken();
   await clearPersistedCloudSession().catch(() => undefined);
+}
+
+function postLogout(): Promise<Response> {
+  return postJson(
+    "/api/v1/auth/logout",
+    { refresh_token: refreshToken ?? "" },
+    { Authorization: `Bearer ${storedAccessToken() ?? ""}` },
+  );
 }
 
 async function runRefresh(): Promise<CloudRefreshResult> {
@@ -117,7 +146,8 @@ async function runRefresh(): Promise<CloudRefreshResult> {
     // Expired, revoked or already used: the saved session can never work again.
     refreshToken = null;
     sessionUserId = null;
-    clearAccessToken();
+    // Only the user token: an open editor session is project-scoped and keeps working.
+    clearUserAccessToken();
     await clearPersistedCloudSession().catch(() => undefined);
     return "rejected";
   }

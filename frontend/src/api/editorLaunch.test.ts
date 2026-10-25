@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { clearAccessToken, storedAccessToken } from "./authStorage";
-import { hasCloudSession, resetCloudSessionForTesting } from "./cloudSession";
+import { adoptCloudSession, hasCloudSession, rememberCloudSessionUser, resetCloudSessionForTesting } from "./cloudSession";
 import { completeEditorLaunch, parseLaunchTicket } from "./editorLaunch";
 
 // A syntactically valid ticket: the pattern accepts 32–256 url-safe characters.
@@ -93,6 +93,26 @@ describe("completeEditorLaunch user session", () => {
 
     await completeEditorLaunch(`kusshoes-editor://launch?ticket=${TICKET}`);
     expect(bodies[1].include_user_session).toBe(false);
+  });
+
+  it("drops an email/Google session when the website launches as a different user", async () => {
+    // Email/Google sign-in has no user id in its token response; api.me() records it afterwards.
+    await adoptCloudSession({ accessToken: "user-token-0123456789", refreshToken: "refresh-0123456789-abc" });
+    await rememberCloudSessionUser(USER_A);
+
+    const bodies = stubLaunch({}, USER_B);
+    await completeEditorLaunch(`kusshoes-editor://launch?ticket=${TICKET}`);
+    expect(bodies[0].include_user_session).toBe(false);
+    expect(hasCloudSession()).toBe(false);
+    expect(keyring).toBeNull();
+  });
+
+  it("a cold start reads the saved session before claiming, so it mints no new user session", async () => {
+    keyring = JSON.stringify({ userId: USER_A, refreshToken: "refresh-0123456789-abc" });
+    const bodies = stubLaunch({});
+    await completeEditorLaunch(`kusshoes-editor://launch?ticket=${TICKET}`);
+    expect(bodies[0].include_user_session).toBe(false);
+    expect(hasCloudSession()).toBe(true);
   });
 
   it("drops the saved session when the website launches as a different user", async () => {

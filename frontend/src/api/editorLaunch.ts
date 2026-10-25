@@ -4,6 +4,7 @@ import {
   cloudSessionUserId,
   DESKTOP_CLIENT_HEADERS,
   hasCloudSession,
+  loadSavedCloudSession,
   refreshCloudSession,
   signOutCloudSession,
 } from "./cloudSession";
@@ -62,8 +63,11 @@ let renewInFlight: Promise<boolean> | null = null;
  */
 export async function completeEditorLaunch(
   deepLinkUrl: string,
-  { includeUserSession = !hasCloudSession() }: { includeUserSession?: boolean } = {},
+  options: { includeUserSession?: boolean } = {},
 ): Promise<EditorLaunchSession> {
+  // A cold start from the website reads the saved session first, so it neither mints another
+  // 30-day token for the same user nor misses a different-user launch.
+  const includeUserSession = options.includeUserSession ?? !(await loadSavedCloudSession());
   const launchTicket = parseLaunchTicket(deepLinkUrl);
   const codeVerifier = createCodeVerifier();
   const codeChallenge = await createCodeChallenge(codeVerifier);

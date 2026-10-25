@@ -16,7 +16,14 @@ import type {
   User,
 } from "../types";
 import { accessTokenForPath, clearAccessToken, isEditorApiPath, storeAccessToken, storedAccessToken } from "./authStorage";
-import { adoptCloudSession, DESKTOP_CLIENT_HEADERS, hasCloudSession, refreshCloudSession, signOutCloudSession } from "./cloudSession";
+import {
+  adoptCloudSession,
+  DESKTOP_CLIENT_HEADERS,
+  hasCloudSession,
+  refreshCloudSession,
+  rememberCloudSessionUser,
+  signOutCloudSession,
+} from "./cloudSession";
 import { editorClient } from "./editorClient";
 import { getActiveEditorSession } from "./editorLaunch";
 import { apiUrl, getApiBaseUrl, isCentralApi } from "./runtimeConfig";
@@ -373,6 +380,10 @@ export const api = {
     }
     if (isCentralApi()) {
       const res = await request<Record<string, unknown>>("/api/v1/users/me");
+      if (hasCloudSession() && res.id) {
+        // One place that covers email, 2FA, Google and restore: tie the saved session to its user.
+        await rememberCloudSessionUser(String(res.id));
+      }
       const name =
         (typeof res.name === "string" && res.name) ||
         [res.first_name, res.last_name].filter(Boolean).join(" ") ||
