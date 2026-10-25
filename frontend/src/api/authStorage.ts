@@ -74,6 +74,16 @@ export function clearEditorAccessToken(): void {
   memoryEditorToken = null;
 }
 
+/** Drops only the signed-in user's token; an open editor session keeps working. */
+export function clearUserAccessToken(): void {
+  memoryAccessToken = null;
+  try {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+  } catch {
+    // Ignore in environments without localStorage
+  }
+}
+
 /** Full sign-out: drops the user token and any editor-session token. */
 export function clearAccessToken(): void {
   memoryAccessToken = null;

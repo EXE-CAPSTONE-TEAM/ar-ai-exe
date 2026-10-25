@@ -20,3 +20,5 @@ tauri-plugin-single-instance = { version = "2.0.0", features = ["deep-link"] }
 sidecar-auth = { path = "../sidecar-auth" }
 runtime-installer = { path = "../runtime-installer" }
 tauri-plugin-updater = "2"
+# Cloud sign-in survives restarts in the OS credential store (Windows Credential Manager).
+keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native"] }

@@ -1,4 +1,13 @@
 import { clearEditorAccessToken, storedAccessToken, storeEphemeralAccessToken } from "./authStorage";
+import {
+  adoptCloudSession,
+  cloudSessionUserId,
+  DESKTOP_CLIENT_HEADERS,
+  hasCloudSession,
+  loadSavedCloudSession,
+  refreshCloudSession,
+  signOutCloudSession,
+} from "./cloudSession";
 
 const EDITOR_SCHEME = "kusshoes-editor:";
 const LAUNCH_HOST = "launch";
@@ -18,7 +27,19 @@ type ExchangeResponse = {
   user_id: string;
   project_id: string;
   scopes: string[];
+  /** Present only when the desktop asked for `include_user_session` (KusShoes gates it). */
+  user_access_token?: string;
+  refresh_token?: string;
 };
+
+class LaunchHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
 
 export type EditorLaunchSession = {
   accessToken: string;
@@ -31,8 +52,22 @@ export type EditorLaunchSession = {
 export type ActiveEditorSession = Omit<EditorLaunchSession, "accessToken">;
 
 let activeEditorSession: ActiveEditorSession | null = null;
+let renewInFlight: Promise<boolean> | null = null;
 
-export async function completeEditorLaunch(deepLinkUrl: string): Promise<EditorLaunchSession> {
+/**
+ * Claims a launch ticket and starts the project's editor session.
+ *
+ * A launch from the website also signs the app in (`includeUserSession`) when it has no cloud
+ * session yet, so the user never has to sign in again after clicking "Mở bằng KusStudio". It is
+ * not requested when a session exists, so repeated clicks do not pile up 30-day refresh tokens.
+ */
+export async function completeEditorLaunch(
+  deepLinkUrl: string,
+  options: { includeUserSession?: boolean } = {},
+): Promise<EditorLaunchSession> {
+  // A cold start from the website reads the saved session first, so it neither mints another
+  // 30-day token for the same user nor misses a different-user launch.
+  const includeUserSession = options.includeUserSession ?? !(await loadSavedCloudSession());
   const launchTicket = parseLaunchTicket(deepLinkUrl);
   const codeVerifier = createCodeVerifier();
   const codeChallenge = await createCodeChallenge(codeVerifier);
@@ -49,8 +84,19 @@ export async function completeEditorLaunch(deepLinkUrl: string): Promise<EditorL
   const exchange = await postJson<ExchangeResponse>("/api/v1/auth/editor/launch/exchange", {
     authorization_code: claim.authorization_code,
     code_verifier: codeVerifier,
+    include_user_session: includeUserSession,
   });
   const session = validateExchange(exchange);
+  if (includeUserSession && exchange.user_access_token) {
+    await adoptCloudSession({
+      accessToken: exchange.user_access_token,
+      refreshToken: exchange.refresh_token,
+      userId: session.userId,
+    });
+  } else if (cloudSessionUserId() && cloudSessionUserId() !== session.userId) {
+    // The website is signed in as someone else: never keep two identities in one app.
+    await signOutCloudSession();
+  }
   storeEphemeralAccessToken(session.accessToken);
   activeEditorSession = {
     expiresIn: session.expiresIn,
@@ -65,16 +111,48 @@ export async function completeEditorLaunch(deepLinkUrl: string): Promise<EditorL
  * then the same PKCE claim/exchange as a web deep link runs in-process. Editor endpoints only
  * accept editor-session tokens, never the user token itself. */
 export async function completeEditorLaunchForProject(projectId: string): Promise<EditorLaunchSession> {
-  const userToken = storedAccessToken();
-  if (!userToken) {
-    throw new Error("Bạn cần đăng nhập tài khoản KusShoes để mở project này.");
+  const mintTicket = async () => {
+    const userToken = storedAccessToken();
+    if (!userToken) {
+      throw new LaunchHttpError("Bạn cần đăng nhập tài khoản KusShoes để mở project này.", 401);
+    }
+    return postJson<{ desktop_url: string }>(
+      "/api/v1/auth/editor/launch",
+      { project_id: projectId },
+      { Authorization: `Bearer ${userToken}` },
+    );
+  };
+  let launch: { desktop_url: string };
+  try {
+    launch = await mintTicket();
+  } catch (error) {
+    // The 5-minute user token expired: renew the cloud session once and try again.
+    if (!(error instanceof LaunchHttpError && error.status === 401) || (await refreshCloudSession()) !== "ok") {
+      throw error;
+    }
+    launch = await mintTicket();
   }
-  const launch = await postJson<{ desktop_url: string }>(
-    "/api/v1/auth/editor/launch",
-    { project_id: projectId },
-    { Authorization: `Bearer ${userToken}` },
-  );
-  return completeEditorLaunch(launch.desktop_url);
+  return completeEditorLaunch(launch.desktop_url, { includeUserSession: false });
+}
+
+/**
+ * The 15-minute editor token expired mid-session: mint a fresh one for the same project from the
+ * user session. Single-flight, so a burst of editor 401s triggers one renewal.
+ */
+export function renewEditorSession(): Promise<boolean> {
+  const projectId = activeEditorSession?.projectId;
+  if (!projectId || !hasCloudSession()) {
+    return Promise.resolve(false);
+  }
+  if (!renewInFlight) {
+    renewInFlight = completeEditorLaunchForProject(projectId)
+      .then(() => true)
+      .catch(() => false)
+      .finally(() => {
+        renewInFlight = null;
+      });
+  }
+  return renewInFlight;
 }
 
 export function getActiveEditorSession(): ActiveEditorSession | null {
@@ -154,7 +232,7 @@ function base64Url(bytes: Uint8Array): string {
 
 async function postJson<T>(
   path: string,
-  body: Record<string, string>,
+  body: Record<string, string | boolean>,
   extraHeaders: Record<string, string> = {},
 ): Promise<T> {
   const controller = new AbortController();
@@ -163,11 +241,11 @@ async function postJson<T>(
     const response = await fetch(`${getKusShoesApiBaseUrl()}${path}`, {
       method: "POST",
       credentials: "omit",
-      headers: { "Content-Type": "application/json", ...extraHeaders },
+      headers: { "Content-Type": "application/json", ...DESKTOP_CLIENT_HEADERS, ...extraHeaders },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error(await responseErrorMessage(response));
+    if (!response.ok) throw new LaunchHttpError(await responseErrorMessage(response), response.status);
     return (await response.json()) as T;
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {

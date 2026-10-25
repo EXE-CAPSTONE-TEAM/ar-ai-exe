@@ -1114,3 +1114,26 @@
     transform: none;
   }
 }
+
+/* Saved cloud session being restored at start-up (replaces the sign-in card meanwhile). */
+.kd-launcher .kd-restoring {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px;
+  font-size: 15px;
+  color: var(--kd-text-secondary);
+}
+
+.kd-launcher .kd-register-web {
+  display: grid;
+  gap: 12px;
+}
+
+.kd-launcher .kd-register-web p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--kd-text-secondary);
+}

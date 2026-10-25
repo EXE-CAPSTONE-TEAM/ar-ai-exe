@@ -20,7 +20,8 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { listen } from "@tauri-apps/api/event";
 
-import { api, designStorageKey } from "./api/client";
+import { api, designStorageKey, TwoFactorRequiredError } from "./api/client";
+import { hasCloudSession, restoreCloudSession } from "./api/cloudSession";
 import {
   getDesktopRuntime,
   hasDesktopRuntimeBridge,
@@ -147,6 +148,12 @@ export function App() {
   const [authPassword, setAuthPassword] = useState("");
   const [isAuthBusy, setIsAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [twoFactor, setTwoFactor] = useState<{ challengeToken: string; method: "totp" | "email" } | null>(null);
+  const [twoFactorCode, setTwoFactorCode] = useState("");
+  const [isRestoringCloudSession, setIsRestoringCloudSession] = useState(false);
+  // The saved session could not be checked (offline / KusShoes unreachable): keep it and offer a retry.
+  const [isCloudSessionOffline, setIsCloudSessionOffline] = useState(false);
+  const [restoreAttempt, setRestoreAttempt] = useState(0);
   const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
   const [meshBounds, setMeshBounds] = useState<{ center: [number, number, number]; size: [number, number, number] } | null>(null);
   const [gizmoMode, setGizmoMode] = useState<"translate" | "rotate" | "scale">("translate");
@@ -307,12 +314,38 @@ export function App() {
     void refreshDesktopRuntime();
   }, [desktopApiMode, isDesktopShell, isProjectEditor]);
 
+  // Cloud launcher without a user: restore the session saved by an earlier run (credential store)
+  // before the sign-in card shows. A network failure keeps the saved session for the next try.
   useEffect(() => {
-    if (!isDesktopShell || desktopApiMode !== "cloud" || !desktopCloudReady || isProjectEditor || user || !api.hasToken()) {
+    if (!isDesktopShell || desktopApiMode !== "cloud" || !desktopCloudReady || isProjectEditor || user) {
       return;
     }
-    api.me().then(setUser).catch(() => api.logout());
-  }, [desktopApiMode, desktopCloudReady, isDesktopShell, isProjectEditor, user]);
+    let cancelled = false;
+    setIsRestoringCloudSession(true);
+    setIsCloudSessionOffline(false);
+    void (async () => {
+      try {
+        const restored = api.hasToken() ? "ok" : await restoreCloudSession();
+        if (cancelled) return;
+        if (restored === "offline") {
+          setIsCloudSessionOffline(true);
+        } else if (restored === "ok") {
+          const signedInUser = await api.me();
+          if (!cancelled) setUser(signedInUser);
+        }
+      } catch {
+        // Unreachable while loading the profile: the session is kept. A rejected session was already
+        // forgotten by the refresh, and then the sign-in card is the right screen.
+        if (!cancelled && hasCloudSession()) setIsCloudSessionOffline(true);
+      } finally {
+        if (!cancelled) setIsRestoringCloudSession(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      setIsRestoringCloudSession(false);
+    };
+  }, [desktopApiMode, desktopCloudReady, isDesktopShell, isProjectEditor, user, restoreAttempt]);
 
   // Cloud lists the signed-in account's projects; local lists the sidecar's offline workspace.
   const canListDesktopProjects =
@@ -440,13 +473,22 @@ export function App() {
     setAuthError(null);
     setStatusMessage(authMode === "login" ? "Signing in" : "Creating account");
     try {
-      const signedInUser =
-        authMode === "login"
+      const signedInUser = twoFactor
+        ? await api.verifyTwoFactor(twoFactor.challengeToken, twoFactorCode.trim())
+        : authMode === "login"
           ? await api.login(authEmail, authPassword)
           : await api.register(authName, authEmail, authPassword);
+      setTwoFactor(null);
+      setTwoFactorCode("");
+      setAuthPassword("");
       setUser(signedInUser);
       setStatusMessage("Signed in");
     } catch (error) {
+      if (error instanceof TwoFactorRequiredError) {
+        setTwoFactor({ challengeToken: error.challengeToken, method: error.method });
+        setTwoFactorCode("");
+        return;
+      }
       const message = messageFromError(error);
       setAuthError(friendlyInlineMessage(message));
       setStatusMessage(message);
@@ -657,7 +699,8 @@ export function App() {
   }
 
   function logout() {
-    api.logout();
+    // A real sign-out also revokes and forgets the saved cloud session.
+    void api.signOut();
     setUser(null);
     clearEditorLaunchSession();
     setEditorProjectId(null);
@@ -1405,6 +1448,9 @@ export function App() {
               </div>
             )
           }
+          isRestoringSession={isRestoringCloudSession}
+          isSessionOffline={isCloudSessionOffline}
+          onRetrySession={() => setRestoreAttempt((current) => current + 1)}
           auth={{
             mode: authMode,
             name: authName,
@@ -1412,6 +1458,22 @@ export function App() {
             password: authPassword,
             isBusy: isAuthBusy,
             statusMessage: authError,
+            twoFactor: twoFactor
+              ? {
+                  method: twoFactor.method,
+                  code: twoFactorCode,
+                  onCodeChange: setTwoFactorCode,
+                  onCancel: () => {
+                    setTwoFactor(null);
+                    setTwoFactorCode("");
+                  },
+                }
+              : null,
+            onRegisterOnWeb: () => {
+              const url = new URL(MARKETING_LOGIN_URL);
+              url.searchParams.set("register", "1");
+              void openInBrowser(url.toString());
+            },
             onModeChange: (mode) => {
               setAuthMode(mode);
               setAuthError(null);

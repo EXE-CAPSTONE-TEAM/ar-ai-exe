@@ -15,7 +15,15 @@ import type {
   ScanSession,
   User,
 } from "../types";
-import { accessTokenForPath, clearAccessToken, storeAccessToken, storedAccessToken } from "./authStorage";
+import { accessTokenForPath, clearAccessToken, isEditorApiPath, storeAccessToken, storedAccessToken } from "./authStorage";
+import {
+  adoptCloudSession,
+  DESKTOP_CLIENT_HEADERS,
+  hasCloudSession,
+  refreshCloudSession,
+  rememberCloudSessionUser,
+  signOutCloudSession,
+} from "./cloudSession";
 import { editorClient } from "./editorClient";
 import { getActiveEditorSession } from "./editorLaunch";
 import { apiUrl, getApiBaseUrl, isCentralApi } from "./runtimeConfig";
@@ -33,16 +41,22 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(apiUrl(path), {
-    ...options,
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeader(path),
-      ...csrfHeader(options.method),
-      ...options.headers,
-    },
-  });
+  const send = () =>
+    fetch(apiUrl(path), {
+      ...options,
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeader(path),
+        ...csrfHeader(options.method),
+        ...options.headers,
+      },
+    });
+  let response = await send();
+  // KusShoes access tokens live 5 minutes: renew the desktop's cloud session once and retry.
+  if (response.status === 401 && canRenewCloudSession(path) && (await refreshCloudSession()) === "ok") {
+    response = await send();
+  }
 
   if (!response.ok) {
     throw new ApiError(await errorMessage(response), response.status);
@@ -63,6 +77,20 @@ async function errorMessage(response: Response): Promise<string> {
     return typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
   } catch {
     return response.statusText;
+  }
+}
+
+function canRenewCloudSession(path: string): boolean {
+  return isCentralApi() && hasCloudSession() && !isEditorApiPath(path) && !path.startsWith("/api/v1/auth/");
+}
+
+/** Raised when KusShoes wants a second factor before it issues a session. */
+export class TwoFactorRequiredError extends Error {
+  constructor(
+    readonly challengeToken: string,
+    readonly method: "totp" | "email",
+  ) {
+    super("TWO_FACTOR_REQUIRED");
   }
 }
 
@@ -267,10 +295,12 @@ export const api = {
     return Boolean(storedAccessToken());
   },
 
+  /** Drops the in-memory tokens only (e.g. switching between local and cloud); a saved cloud
+   * session stays in the credential store. Use `signOut` for a real sign-out. */
   logout(): void {
     const wasEditorSession = Boolean(getActiveEditorSession());
     clearAccessToken();
-    if (wasEditorSession) return;
+    if (wasEditorSession || isCentralApi()) return;
     void fetch(apiUrl("/api/auth/logout"), {
       method: "POST",
       credentials: "include",
@@ -287,13 +317,53 @@ export const api = {
     return payload.user;
   },
 
+  /** Full sign-out: revokes and forgets the cloud session, then clears local tokens. */
+  async signOut(): Promise<void> {
+    if (hasCloudSession()) {
+      await signOutCloudSession();
+    }
+    api.logout();
+  },
+
   async login(email: string, password: string): Promise<User> {
+    if (isCentralApi()) {
+      const result = await request<{
+        access_token?: string | null;
+        refresh_token?: string | null;
+        mfa_required?: boolean;
+        challenge_token?: string | null;
+        method?: string | null;
+      }>("/api/v1/auth/login", {
+        method: "POST",
+        headers: DESKTOP_CLIENT_HEADERS,
+        body: JSON.stringify({ email, password }),
+      });
+      if (result.mfa_required && result.challenge_token) {
+        throw new TwoFactorRequiredError(result.challenge_token, result.method === "email" ? "email" : "totp");
+      }
+      if (!result.access_token) {
+        throw new ApiError("KusShoes did not return a session.", 502);
+      }
+      await adoptCloudSession({ accessToken: result.access_token, refreshToken: result.refresh_token });
+      return api.me();
+    }
     const payload = await request<{ accessToken: string; user: User }>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
     storeAccessToken(payload.accessToken);
     return payload.user;
+  },
+
+  /** Second step of a KusShoes sign-in that returned TwoFactorRequiredError. */
+  async verifyTwoFactor(challengeToken: string, code: string): Promise<User> {
+    const result = await request<{ access_token: string; refresh_token?: string | null }>("/api/v1/auth/2fa/verify", {
+      method: "POST",
+      headers: DESKTOP_CLIENT_HEADERS,
+      body: JSON.stringify({ challenge_token: challengeToken, code }),
+    });
+    await adoptCloudSession({ accessToken: result.access_token, refreshToken: result.refresh_token });
+    return api.me();
   },
 
   async demoLogin(): Promise<User> {
@@ -310,6 +380,10 @@ export const api = {
     }
     if (isCentralApi()) {
       const res = await request<Record<string, unknown>>("/api/v1/users/me");
+      if (hasCloudSession() && res.id) {
+        // One place that covers email, 2FA, Google and restore: tie the saved session to its user.
+        await rememberCloudSessionUser(String(res.id));
+      }
       const name =
         (typeof res.name === "string" && res.name) ||
         [res.first_name, res.last_name].filter(Boolean).join(" ") ||
