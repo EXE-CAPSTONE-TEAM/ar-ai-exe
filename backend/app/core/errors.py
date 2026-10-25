@@ -85,8 +85,14 @@ def _safe_input(input_value: Any) -> Any:
 
 
 async def validation_exception_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+    # `ctx` carries the raised exception object (e.g. a model_validator's ValueError), which is not
+    # JSON-serialisable and used to turn every rejected request into a 500 instead of a 422.
     safe_errors = [
-        {**err, "input": _safe_input(err.get("input"))}
+        {
+            **err,
+            "input": _safe_input(err.get("input")),
+            **({"ctx": {key: str(value) for key, value in err["ctx"].items()}} if err.get("ctx") else {}),
+        }
         for err in exc.errors()
     ]
     return JSONResponse(
