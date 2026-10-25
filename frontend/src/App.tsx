@@ -23,6 +23,7 @@ import { listen } from "@tauri-apps/api/event";
 import { api, designStorageKey } from "./api/client";
 import {
   getDesktopRuntime,
+  hasDesktopRuntimeBridge,
   installDesktopDependency,
   openDiagnosticsFolder,
   openInBrowser,
@@ -34,6 +35,8 @@ import type { DesignConflictPayload } from "./api/editorClient";
 import {
   clearEditorLaunchSession,
   completeEditorLaunch,
+  completeEditorLaunchForProject,
+  getActiveEditorSession,
   getKusShoesApiBaseUrl,
 } from "./api/editorLaunch";
 import {
@@ -99,6 +102,10 @@ export function App() {
     const stored = localStorage.getItem("kusshoes-desktop-api-mode");
     return stored === "cloud" ? "cloud" : "local";
   });
+  // Async desktop work (sidecar start-up can take many seconds) must not re-point the API base
+  // after the user/deep link has already switched to the cloud API.
+  const desktopApiModeRef = useRef<DesktopApiMode>(desktopApiMode);
+  desktopApiModeRef.current = desktopApiMode;
   const [desktopCloudReady, setDesktopCloudReady] = useState(false);
   const [desktopProjects, setDesktopProjects] = useState<CloudProject[]>([]);
   const [isDesktopProjectsLoading, setIsDesktopProjectsLoading] = useState(false);
@@ -164,18 +171,24 @@ export function App() {
     if (!isDesktopShell) return;
 
     let disposed = false;
-    let launchInProgress = false;
-    let launchCompleted = false;
+    // The same URL arrives from getCurrent(), onOpenUrl and the single-instance event; a ticket is
+    // single-use, so each URL is processed once. Different URLs (a later web launch) still run.
+    const handledUrls = new Set<string>();
+    let launchQueue: Promise<void> = Promise.resolve();
 
     const reportListenerError = (error: unknown) => {
-      if (disposed || launchCompleted) return;
+      if (disposed || handledUrls.size > 0) return;
       const message = friendlyInlineMessage(messageFromError(error));
       setDesktopLaunchError(`Desktop launch listener failed: ${message}`);
     };
 
-    const handleDeepLinkUrl = async (urlValue: string) => {
-      if (launchInProgress || launchCompleted) return;
-      launchInProgress = true;
+    const handleDeepLinkUrl = (urlValue: string) => {
+      if (handledUrls.has(urlValue)) return;
+      handledUrls.add(urlValue);
+      launchQueue = launchQueue.then(() => processDeepLinkUrl(urlValue));
+    };
+
+    const processDeepLinkUrl = async (urlValue: string) => {
       setDesktopLaunchError(null);
 
       if (isDesktopAuthDeepLink(urlValue)) {
@@ -186,6 +199,7 @@ export function App() {
           localStorage.setItem("kusshoes-desktop-api-mode", "cloud");
           const cloudApiBaseUrl = DESKTOP_CLOUD_API_BASE_URL || getKusShoesApiBaseUrl();
           setApiBaseUrl(cloudApiBaseUrl);
+          desktopApiModeRef.current = "cloud";
           setDesktopApiMode("cloud");
           const signedInUser = await api.me();
           if (disposed) return;
@@ -198,8 +212,6 @@ export function App() {
             setDesktopLaunchError(message);
             setStatusMessage(message);
           }
-        } finally {
-          launchInProgress = false;
         }
         return;
       }
@@ -214,27 +226,25 @@ export function App() {
         }
         localStorage.setItem("kusshoes-desktop-api-mode", "cloud");
         setApiBaseUrl(getKusShoesApiBaseUrl());
+        desktopApiModeRef.current = "cloud";
         setDesktopApiMode("cloud");
         setEditorProjectId(session.projectId);
         const params = new URLSearchParams({ desktop: "1", projectId: session.projectId });
         window.history.replaceState({}, "", `/?${params.toString()}`);
         setStatusMessage("PROJECT_LOADING");
-        launchCompleted = true;
       } catch (error) {
         if (!disposed) {
           const message = friendlyInlineMessage(messageFromError(error));
           setDesktopLaunchError(message);
           setStatusMessage(message);
         }
-      } finally {
-        launchInProgress = false;
       }
     };
 
     let unsubscribeSingleInstance: (() => void) | undefined;
     void listen<string[]>("single-instance-deep-link", (event) => {
       const deepLinkArg = event.payload.find((arg) => arg.startsWith("kusshoes-editor://"));
-      if (deepLinkArg) void handleDeepLinkUrl(deepLinkArg);
+      if (deepLinkArg) handleDeepLinkUrl(deepLinkArg);
     })
       .then((unsubscribe) => {
         if (disposed) unsubscribe();
@@ -245,7 +255,7 @@ export function App() {
     let unsubscribeDeepLink: (() => void) | undefined;
     void onOpenUrl((urls) => {
       const deepLinkUrl = urls.find((value) => value.startsWith("kusshoes-editor://"));
-      if (deepLinkUrl) void handleDeepLinkUrl(deepLinkUrl);
+      if (deepLinkUrl) handleDeepLinkUrl(deepLinkUrl);
     })
       .then((unsubscribe) => {
         if (disposed) unsubscribe();
@@ -257,7 +267,7 @@ export function App() {
       .then((urls) => {
         if (disposed || !urls) return;
         const initialUrl = urls.find((value) => value.startsWith("kusshoes-editor://"));
-        if (initialUrl) void handleDeepLinkUrl(initialUrl);
+        if (initialUrl) handleDeepLinkUrl(initialUrl);
       })
       .catch(reportListenerError);
 
@@ -273,7 +283,6 @@ export function App() {
       return;
     }
     if (desktopApiMode === "cloud") {
-      setDesktopRuntime(null);
       setEditorReadiness(null);
       try {
         const cloudApiBaseUrl = isProjectEditor
@@ -290,6 +299,8 @@ export function App() {
         setDesktopRuntimeError(friendlyInlineMessage(messageFromError(error)));
       }
       setIsDesktopRuntimeLoading(false);
+      // Project jobs (crop/clean, bake, export) still run on the local sidecar in cloud mode.
+      void loadShellRuntime();
       return;
     }
     setDesktopCloudReady(false);
@@ -460,6 +471,9 @@ export function App() {
 
 
   async function loadEditorReadiness() {
+    if (desktopApiModeRef.current !== "local") {
+      return;
+    }
     try {
       setEditorReadiness(await api.getEditorReadiness());
     } catch {
@@ -472,11 +486,13 @@ export function App() {
       return;
     }
     api.logout();
+    clearEditorLaunchSession();
     setUser(null);
     setDesktopProjects([]);
     setDesktopProjectsError(null);
     setDesktopLaunchError(null);
     localStorage.setItem("kusshoes-desktop-api-mode", mode);
+    desktopApiModeRef.current = mode;
     setDesktopApiMode(mode);
   }
 
@@ -501,11 +517,28 @@ export function App() {
     }
   }
 
+  // Cloud mode: keep the sidecar's status (renderer, token) without touching the API base.
+  async function loadShellRuntime() {
+    try {
+      setDesktopRuntime(await getDesktopRuntime());
+    } catch (error) {
+      setDesktopRuntimeError(messageFromError(error));
+    }
+  }
+
   async function refreshDesktopRuntime() {
+    if (desktopApiModeRef.current === "cloud") {
+      await loadShellRuntime();
+      return;
+    }
     setIsDesktopRuntimeLoading(true);
     setDesktopRuntimeError(null);
     try {
       const runtime = await getDesktopRuntime();
+      if (desktopApiModeRef.current !== "local") {
+        setDesktopRuntime(runtime);
+        return;
+      }
       setApiBaseUrl(runtime.apiBaseUrl);
       setDesktopRuntime(runtime);
       setStatusMessage(
@@ -530,7 +563,9 @@ export function App() {
     setDesktopRuntimeError(null);
     try {
       const runtime = await restartDesktopBackend();
-      setApiBaseUrl(runtime.apiBaseUrl);
+      if (desktopApiModeRef.current === "local") {
+        setApiBaseUrl(runtime.apiBaseUrl);
+      }
       setDesktopRuntime(runtime);
       setStatusMessage(runtime.backendStatus === "ready" ? "EDITOR_READY" : "Ứng dụng chưa khởi động được backend local.");
       if (runtime.backendStatus === "ready") {
@@ -754,14 +789,42 @@ export function App() {
     }
   }
 
+  /** Fresh check of the local compute sidecar right before a job (React state may be stale after
+   * the renderer install respawned it). Outside the shell only: "install KusStudio Desktop". */
+  async function ensureDesktopSidecar(): Promise<{ ready: true } | { ready: false; message?: string }> {
+    if (!isDesktopShell || !hasDesktopRuntimeBridge()) {
+      setShowDesktopRequired(true);
+      return { ready: false };
+    }
+    try {
+      const runtime = await getDesktopRuntime();
+      setDesktopRuntime(runtime);
+      if (runtime.sidecarToken) {
+        return { ready: true };
+      }
+      const message = friendlyInlineMessage(
+        runtime.lastError ?? "Bộ xử lý trên máy chưa sẵn sàng. Mở Chi tiết kỹ thuật để xem Logs hoặc thử khởi động lại.",
+      );
+      setStatusMessage(message);
+      return { ready: false, message };
+    } catch (error) {
+      const message = friendlyInlineMessage(messageFromError(error));
+      setStatusMessage(message);
+      return { ready: false, message };
+    }
+  }
+
   async function handlePrepareModel(confirmReset = false) {
     const projectId = editorProjectId ?? editorContext.context?.project?.id;
     if (!projectId) {
       return;
     }
 
-    if (!isDesktopShell || !desktopRuntime?.sidecarToken) {
-      setShowDesktopRequired(true);
+    const sidecar = await ensureDesktopSidecar();
+    if (!sidecar.ready) {
+      if (sidecar.message) {
+        setPrepareError(sidecar.message);
+      }
       return;
     }
 
@@ -1025,10 +1088,6 @@ export function App() {
   }
 
   async function bakePreview() {
-    if (!isDesktopShell || !desktopRuntime?.sidecarToken) {
-      setShowDesktopRequired(true);
-      return null;
-    }
     if (isSaving || isBakingPreview || !modelAsset || !config) {
       return null;
     }
@@ -1040,6 +1099,9 @@ export function App() {
       const message = "Preview renderer cần cài đặt trước khi bake preview. Draft của bạn vẫn có thể lưu riêng.";
       setPreviewErrorMessage(message);
       setStatusMessage(message);
+      return null;
+    }
+    if (!(await ensureDesktopSidecar()).ready) {
       return null;
     }
 
@@ -1127,10 +1189,6 @@ export function App() {
   }
 
   async function exportDesign() {
-    if (!isDesktopShell || !desktopRuntime?.sidecarToken) {
-      setShowDesktopRequired(true);
-      return;
-    }
     if (isSaving || isBakingPreview || isExporting) {
       return;
     }
@@ -1143,6 +1201,9 @@ export function App() {
       const message = "Preview renderer cần cài đặt trước khi export.";
       setExportMessage(message);
       setStatusMessage(message);
+      return;
+    }
+    if (!(await ensureDesktopSidecar()).ready) {
       return;
     }
 
@@ -1208,10 +1269,25 @@ export function App() {
     }
   }
 
-  const handleOpenDesktopProject = useCallback((projectId: string) => {
+  const handleOpenDesktopProject = useCallback(async (projectId: string) => {
     const safeProjectId = sanitizeProjectId(projectId);
     if (!safeProjectId) {
       return;
+    }
+    // Cloud editor endpoints take editor-session tokens only. A launcher user signed in with
+    // Google/password trades their user token for one scoped to this project (one-time ticket).
+    if (desktopApiModeRef.current === "cloud" && getActiveEditorSession()?.projectId !== safeProjectId) {
+      setDesktopLaunchError(null);
+      setStatusMessage("AUTH_CHECKING");
+      try {
+        await completeEditorLaunchForProject(safeProjectId);
+        setStatusMessage("PROJECT_LOADING");
+      } catch (error) {
+        const message = friendlyInlineMessage(messageFromError(error));
+        setDesktopLaunchError(message);
+        setStatusMessage(message);
+        return;
+      }
     }
     setEditorProjectId(safeProjectId);
     const params = new URLSearchParams({ desktop: "1", projectId: safeProjectId });
@@ -1293,11 +1369,7 @@ export function App() {
           onGoogleSignIn={handleGoogleSignIn}
           setupBanner={
             <DesktopSetupBanner
-              onRendererInstalled={() => {
-                if (desktopApiMode === "local") {
-                  void refreshDesktopRuntime();
-                }
-              }}
+              onRendererInstalled={() => void refreshDesktopRuntime()}
             />
           }
           projects={desktopProjects}
@@ -1308,6 +1380,7 @@ export function App() {
           onOpenDemoProject={openDesktopDemoProject}
           linkValue={desktopProjectInput}
           linkError={desktopLaunchError}
+          onDismissLinkError={() => setDesktopLaunchError(null)}
           onLinkChange={(value) => {
             setDesktopProjectInput(value);
             setDesktopLaunchError(null);
@@ -1363,11 +1436,7 @@ export function App() {
       <main className="workspace" id="main-workspace">
         {isDesktopShell ? (
           <DesktopSetupBanner
-            onRendererInstalled={() => {
-              if (desktopApiMode === "local") {
-                void refreshDesktopRuntime();
-              }
-            }}
+            onRendererInstalled={() => void refreshDesktopRuntime()}
           />
         ) : null}
         {isProjectEditor && !user ? (
@@ -1375,27 +1444,25 @@ export function App() {
             state={editorContext.state}
             message={
               isDesktopShell
-                ? (editorContext.errorMessage
-                  ? friendlyInlineMessage(editorContext.errorMessage)
-                  : "Cần đăng nhập tài khoản KusShoes để tải dự án này.")
+                ? desktopEditorRouteMessage(editorContext.state, editorContext.errorMessage)
                 : friendlyInlineMessage(editorContext.errorMessage ?? "Redirecting to login.")
             }
             action={
-              isDesktopShell ? (
-                <>
-                  <button type="button" className="primary-button" onClick={handleGoogleSignIn}>
-                    Đăng nhập Google
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditorProjectId(null);
-                      window.history.pushState({}, "", "/?desktop=1");
-                    }}
-                  >
-                    Quay lại Launcher
-                  </button>
-                </>
+              isDesktopShell && editorContext.state !== "AUTH_CHECKING" && editorContext.state !== "PROJECT_LOADING" ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => {
+                    clearEditorLaunchSession();
+                    if (!api.hasToken()) {
+                      setUser(null);
+                    }
+                    setEditorProjectId(null);
+                    window.history.pushState({}, "", "/?desktop=1");
+                  }}
+                >
+                  Về màn hình chính
+                </button>
               ) : undefined
             }
           />
@@ -1795,6 +1862,18 @@ export function App() {
       </main>
     </AppShell>
   );
+}
+
+/** Desktop copy for the editor route before a user is known: loading states never ask the user
+ * to sign in, and an expired or rejected launch points back to the web button or the launcher. */
+function desktopEditorRouteMessage(state: string, errorMessage: string | null): string {
+  if (state === "AUTH_CHECKING" || state === "PROJECT_LOADING" || state === "idle") {
+    return "Đang mở project từ KusShoes…";
+  }
+  if (state === "UNAUTHENTICATED") {
+    return "Phiên mở project đã hết hạn hoặc không hợp lệ. Bấm lại “Mở bằng KusStudio Desktop” trên website, hoặc về màn hình chính để đăng nhập rồi mở project.";
+  }
+  return errorMessage ? friendlyInlineMessage(errorMessage) : "Không mở được project này.";
 }
 
 function EditorRouteState({

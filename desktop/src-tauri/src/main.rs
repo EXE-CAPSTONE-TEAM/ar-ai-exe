@@ -922,6 +922,12 @@ fn blender_bin_under(base: &Path) -> PathBuf {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // A launch from the web while the app is already open: bring the window forward.
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
             let _ = app.emit("single-instance-deep-link", args);
         }))
         .plugin(tauri_plugin_deep_link::init())

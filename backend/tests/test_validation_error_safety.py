@@ -62,3 +62,26 @@ def test_validation_error_response_is_json_serializable():
     parsed = json.loads(raw)
     assert "UploadFile" not in raw
     assert parsed["error"]["code"] == "INVALID_REQUEST"
+
+
+def test_model_validator_errors_return_422_not_500():
+    """A model_validator ValueError lands in `ctx`; it must serialise (regression: POST /bake 500)."""
+    from pydantic import BaseModel, model_validator
+
+    class Contract(BaseModel):
+        path: str
+
+        @model_validator(mode="after")
+        def check(self):
+            raise ValueError("output capability does not match the canonical job path")
+
+    app = FastAPI()
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+
+    @app.post("/bake")
+    async def bake(body: Contract):
+        return {"ok": True}
+
+    response = TestClient(app).post("/bake", json={"path": "x"})
+    assert response.status_code == 422
+    assert "canonical job path" in json.dumps(response.json())

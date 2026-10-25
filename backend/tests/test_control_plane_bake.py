@@ -79,6 +79,40 @@ def test_worker_schema_rejects_output_path_injection():
         BakeWorkerRequest.model_validate(payload)
 
 
+def _staging_paths(payload: dict, claim_segment: str) -> None:
+    project_id, job_id = payload["project_id"], payload["job_id"]
+    payload["outputs"][0]["file_path"] = f"staging/{project_id}/{job_id}/{claim_segment}/final_shoe.glb"
+    payload["outputs"][1]["file_path"] = f"staging/{project_id}/{job_id}/{claim_segment}/final_shoe.obj.zip"
+
+
+def test_worker_schema_accepts_kusshoes_per_claim_staging_paths():
+    payload = request_payload()
+    _staging_paths(payload, str(uuid.uuid4()))
+
+    BakeWorkerRequest.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "claim_segment",
+    ["not-a-uuid", "../other", f"{uuid.uuid4()}/nested", str(uuid.uuid4()).upper(), ""],
+)
+def test_worker_schema_rejects_malformed_staging_claim_segment(claim_segment):
+    payload = request_payload()
+    _staging_paths(payload, claim_segment)
+
+    with pytest.raises(ValidationError, match="canonical job path"):
+        BakeWorkerRequest.model_validate(payload)
+
+
+def test_worker_schema_rejects_staging_path_for_another_job():
+    payload = request_payload()
+    claim = uuid.uuid4()
+    payload["outputs"][0]["file_path"] = f"staging/{payload['project_id']}/{uuid.uuid4()}/{claim}/final_shoe.glb"
+
+    with pytest.raises(ValidationError, match="canonical job path"):
+        BakeWorkerRequest.model_validate(payload)
+
+
 def test_worker_schema_requires_exact_text_render_capabilities():
     payload = request_payload()
     payload["design_config"]["texts"] = [

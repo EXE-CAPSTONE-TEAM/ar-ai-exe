@@ -15,7 +15,7 @@ import type {
   ScanSession,
   User,
 } from "../types";
-import { clearAccessToken, storeAccessToken, storedAccessToken } from "./authStorage";
+import { accessTokenForPath, clearAccessToken, storeAccessToken, storedAccessToken } from "./authStorage";
 import { editorClient } from "./editorClient";
 import { getActiveEditorSession } from "./editorLaunch";
 import { apiUrl, getApiBaseUrl, isCentralApi } from "./runtimeConfig";
@@ -38,7 +38,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...authHeader(),
+      ...authHeader(path),
       ...csrfHeader(options.method),
       ...options.headers,
     },
@@ -66,8 +66,8 @@ async function errorMessage(response: Response): Promise<string> {
   }
 }
 
-function authHeader(): Record<string, string> {
-  const token = storedAccessToken();
+function authHeader(path: string): Record<string, string> {
+  const token = accessTokenForPath(path);
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
@@ -115,7 +115,7 @@ function presignedUrl(value: unknown): string {
 export async function fetchStoredFile(path: string, cache?: RequestCache): Promise<StoredFile> {
   const response = await fetch(apiUrl(path), {
     credentials: "include",
-    headers: authHeader(),
+    headers: authHeader(path),
     cache,
   });
   if (!response.ok) {
@@ -380,7 +380,7 @@ export const api = {
     const response = await fetch(apiUrl("/api/models/import"), {
       method: "POST",
       credentials: "include",
-      headers: { ...authHeader(), ...csrfHeader("POST") },
+      headers: { ...authHeader("/api/models/import"), ...csrfHeader("POST") },
       body: form,
     });
     if (!response.ok) {
@@ -408,7 +408,7 @@ export const api = {
     const response = await fetch(apiUrl("/api/design-assets"), {
       method: "POST",
       credentials: "include",
-      headers: { ...authHeader(), ...csrfHeader("POST") },
+      headers: { ...authHeader("/api/design-assets"), ...csrfHeader("POST") },
       body: form,
     });
     if (!response.ok) {

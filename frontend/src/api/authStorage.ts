@@ -2,6 +2,27 @@ const TOKEN_STORAGE_KEY = "shoe-customizer-token";
 const ACCESS_TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]+$/;
 const MAX_ACCESS_TOKEN_LENGTH = 4096;
 let memoryAccessToken: string | null = null;
+// Editor-session tokens (15 min, one project, no refresh) live in their own slot so starting an
+// editor session never discards the signed-in user's token that the launcher still needs.
+let memoryEditorToken: string | null = null;
+const EDITOR_API_PATH = /^\/api\/v1\/editor(?:\/|$)/;
+
+/** True for editor endpoints, given as an API path or as an absolute URL on the API origin. */
+export function isEditorApiPath(pathOrUrl: string): boolean {
+  if (/^https?:\/\//i.test(pathOrUrl)) {
+    try {
+      return EDITOR_API_PATH.test(new URL(pathOrUrl).pathname);
+    } catch {
+      return false;
+    }
+  }
+  return EDITOR_API_PATH.test(pathOrUrl);
+}
+
+/** Bearer token for `path`: the editor-session token on `/api/v1/editor/*`, the user token elsewhere. */
+export function accessTokenForPath(path: string): string | null {
+  return isEditorApiPath(path) ? storedEditorAccessToken() : storedAccessToken();
+}
 
 export function storedAccessToken(): string | null {
   if (!memoryAccessToken) {
@@ -24,8 +45,20 @@ export function storeAccessToken(accessToken: string): void {
   }
 }
 
+export function storedEditorAccessToken(): string | null {
+  if (!memoryEditorToken) {
+    return null;
+  }
+  try {
+    return sanitizeAccessToken(memoryEditorToken);
+  } catch {
+    memoryEditorToken = null;
+    return null;
+  }
+}
+
 export function storeEphemeralAccessToken(accessToken: string): void {
-  memoryAccessToken = sanitizeAccessToken(accessToken);
+  memoryEditorToken = sanitizeAccessToken(accessToken);
   try {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
   } catch {
@@ -34,11 +67,17 @@ export function storeEphemeralAccessToken(accessToken: string): void {
 }
 
 export function hasEphemeralAccessToken(): boolean {
-  return memoryAccessToken !== null;
+  return memoryEditorToken !== null;
 }
 
+export function clearEditorAccessToken(): void {
+  memoryEditorToken = null;
+}
+
+/** Full sign-out: drops the user token and any editor-session token. */
 export function clearAccessToken(): void {
   memoryAccessToken = null;
+  memoryEditorToken = null;
   try {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
   } catch {

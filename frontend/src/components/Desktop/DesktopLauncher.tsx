@@ -73,7 +73,9 @@ type DesktopLauncherProps = {
   onOpenProject: (projectId: string) => void;
   onOpenDemoProject: () => void;
   linkValue: string;
+  /** Error from the paste-link form or from a launch started on the website. */
   linkError: string | null;
+  onDismissLinkError: () => void;
   onLinkChange: (value: string) => void;
   onLinkSubmit: (event: FormEvent<HTMLFormElement>) => void;
   isImportOpen: boolean;
@@ -117,6 +119,22 @@ export function DesktopLauncher(props: DesktopLauncherProps) {
 
       <main className="kd-main" id="main-workspace">
         {props.setupBanner}
+
+        {props.linkError && !isLinkOpen ? (
+          <section className="kd-card kd-problem" role="alert">
+            <span className="kd-problem-icon" aria-hidden="true">
+              <AlertTriangle size={20} />
+            </span>
+            <div className="kd-problem-body">
+              <strong>Không mở được project</strong>
+              <p>{props.linkError}</p>
+              <p>Bấm lại “Mở bằng KusStudio Desktop” trên website — mỗi lần bấm tạo một vé mở mới.</p>
+            </div>
+            <button type="button" className="kd-icon-button" aria-label="Đóng thông báo" onClick={props.onDismissLinkError}>
+              <X size={18} aria-hidden="true" />
+            </button>
+          </section>
+        ) : null}
 
         {engineState === "failed" ? (
           <EngineProblem

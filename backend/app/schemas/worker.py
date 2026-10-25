@@ -69,18 +69,14 @@ class BakeWorkerRequest(WorkerModel):
             raise ValueError("outputs must exactly match requested formats")
 
         expected_outputs = {
-            "glb": (
-                f"exports/{self.project_id}/{self.job_id}/final_shoe.glb",
-                "model/gltf-binary",
-            ),
-            "obj": (
-                f"exports/{self.project_id}/{self.job_id}/final_shoe.obj.zip",
-                "application/zip",
-            ),
+            "glb": ("final_shoe.glb", "model/gltf-binary"),
+            "obj": ("final_shoe.obj.zip", "application/zip"),
         }
         for output in self.outputs:
-            expected_path, expected_content_type = expected_outputs[output.format]
-            if output.file_path != expected_path or output.content_type != expected_content_type:
+            filename, expected_content_type = expected_outputs[output.format]
+            if output.content_type != expected_content_type or not _is_job_output_path(
+                output.file_path, self.project_id, self.job_id, filename
+            ):
                 raise ValueError("output capability does not match the canonical job path")
 
         encoded_config = json.dumps(
@@ -155,6 +151,22 @@ class PrepareWorkerResponse(WorkerModel):
     outputs: list[PrepareWorkerOutput]
     cleanup_report: dict[str, Any] = Field(alias="cleanupReport")
 
+
+
+def _is_job_output_path(path: str, project_id: uuid.UUID, job_id: uuid.UUID, filename: str) -> bool:
+    """The only upload keys a bake may target: the legacy final key, or KusShoes' per-claim
+    staging key ``staging/{project}/{job}/{claim_uuid}/{filename}`` (KusShoes ADR-009)."""
+    if path == f"exports/{project_id}/{job_id}/{filename}":
+        return True
+    prefix = f"staging/{project_id}/{job_id}/"
+    suffix = f"/{filename}"
+    if not (path.startswith(prefix) and path.endswith(suffix)):
+        return False
+    claim_segment = path[len(prefix) : -len(suffix)]
+    try:
+        return str(uuid.UUID(claim_segment)) == claim_segment
+    except ValueError:
+        return False
 
 
 def _referenced_asset_ids(design_config: dict[str, Any]) -> set[uuid.UUID]:

@@ -1,4 +1,4 @@
-import { storeEphemeralAccessToken } from "./authStorage";
+import { clearEditorAccessToken, storedAccessToken, storeEphemeralAccessToken } from "./authStorage";
 
 const EDITOR_SCHEME = "kusshoes-editor:";
 const LAUNCH_HOST = "launch";
@@ -61,12 +61,29 @@ export async function completeEditorLaunch(deepLinkUrl: string): Promise<EditorL
   return session;
 }
 
+/** Opens `projectId` from a signed-in launcher: the user token mints a one-time launch ticket,
+ * then the same PKCE claim/exchange as a web deep link runs in-process. Editor endpoints only
+ * accept editor-session tokens, never the user token itself. */
+export async function completeEditorLaunchForProject(projectId: string): Promise<EditorLaunchSession> {
+  const userToken = storedAccessToken();
+  if (!userToken) {
+    throw new Error("Bạn cần đăng nhập tài khoản KusShoes để mở project này.");
+  }
+  const launch = await postJson<{ desktop_url: string }>(
+    "/api/v1/auth/editor/launch",
+    { project_id: projectId },
+    { Authorization: `Bearer ${userToken}` },
+  );
+  return completeEditorLaunch(launch.desktop_url);
+}
+
 export function getActiveEditorSession(): ActiveEditorSession | null {
   return activeEditorSession ? { ...activeEditorSession, scopes: [...activeEditorSession.scopes] } : null;
 }
 
 export function clearEditorLaunchSession(): void {
   activeEditorSession = null;
+  clearEditorAccessToken();
 }
 
 export function setActiveEditorSessionForTesting(session: ActiveEditorSession | null): void {
@@ -135,14 +152,18 @@ function base64Url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/u, "");
 }
 
-async function postJson<T>(path: string, body: Record<string, string>): Promise<T> {
+async function postJson<T>(
+  path: string,
+  body: Record<string, string>,
+  extraHeaders: Record<string, string> = {},
+): Promise<T> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(`${getKusShoesApiBaseUrl()}${path}`, {
       method: "POST",
       credentials: "omit",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...extraHeaders },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
